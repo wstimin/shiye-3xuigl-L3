@@ -130,7 +130,7 @@ async function readDb() {
   let db;
   try {
     const text = await fs.readFile(DATA_FILE, 'utf8');
-    db = JSON.parse(text);
+    db = JSON.parse(text.replace(/^\uFEFF/, ''));
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     db = {};
@@ -138,10 +138,12 @@ async function readDb() {
   db.customers ||= [];
   db.xuiServers ||= [];
   db.socksNodes ||= [];
+  db.cards ||= [];
   db.syncLogs ||= [];
   db.settings ||= { currency: 'CNY', expiryWarningDays: 3 };
   db.settings.currency ||= 'CNY';
   db.settings.expiryWarningDays = Number(db.settings.expiryWarningDays ?? 3);
+  db.settings.purchaseCardUrl ||= '';
   return db;
 }
 
@@ -151,16 +153,22 @@ async function writeDb(db) {
   await fs.rename(tmp, DATA_FILE);
 }
 
+function publicCustomer(customer) {
+  const { loginPasswordHash, ...safeCustomer } = customer;
+  return { ...safeCustomer, computedStatus: customerStatus(customer) };
+}
+
 function publicDb(db) {
   return {
     settings: {
       currency: db.settings?.currency || 'CNY',
       expiryWarningDays: Number(db.settings?.expiryWarningDays ?? 3),
+      purchaseCardUrl: db.settings?.purchaseCardUrl || '',
       adminUsername: adminUsername(db),
       passwordManaged: Boolean(db.settings?.admin?.passwordHash),
       defaultPasswordWarning: usingDefaultAdmin(db)
     },
-    customers: db.customers.map((customer) => ({ ...customer, computedStatus: customerStatus(customer) })),
+    customers: db.customers.map(publicCustomer),
     xuiServers: db.xuiServers.map(({ passwordEnc, apiTokenEnc, ...server }) => ({
       ...server,
       username: server.username || '',
@@ -171,7 +179,33 @@ function publicDb(db) {
       ...node,
       password: maskSecret(passwordEnc)
     })),
+    cards: db.cards.map((card) => ({ ...card })),
     syncLogs: db.syncLogs.slice(-250).reverse()
+  };
+}
+
+function publicUserDb(db, customer) {
+  const safeCustomer = publicCustomer(customer);
+  return {
+    settings: {
+      currency: db.settings?.currency || 'CNY',
+      purchaseCardUrl: db.settings?.purchaseCardUrl || ''
+    },
+    customer: safeCustomer,
+    node: customer.xuiServerId ? {
+      xuiServerName: db.xuiServers.find((server) => server.id === customer.xuiServerId)?.name || '',
+      inboundId: customer.inboundId || '',
+      inboundRemark: customer.inboundRemark || '',
+      clientEmail: customer.clientEmail || '',
+      clientUuid: customer.clientUuid || '',
+      protocol: customer.protocol || 'vless',
+      renewPrice: Number(customer.amount || 0),
+      trafficLimitGb: Number(customer.trafficLimitGb || 0),
+      expireAt: customer.expireAt || '',
+      useSocks: Boolean(customer.useSocks),
+      socksName: db.socksNodes.find((node) => node.id === customer.socksNodeId)?.name || '',
+      status: customerStatus(customer)
+    } : null
   };
 }
 
@@ -232,6 +266,18 @@ function requireAuth(req, res) {
   }
   session.expiresAt = Date.now() + 12 * 60 * 60 * 1000;
   return session;
+}
+
+function requireAdmin(session, res) {
+  if (session.role === 'admin') return true;
+  sendError(res, 403, '需要管理员权限');
+  return false;
+}
+
+function requireUser(session, res) {
+  if (session.role === 'user' && session.customerId) return true;
+  sendError(res, 403, '需要用户账号登录');
+  return false;
 }
 
 function clientIp(req) {
@@ -377,17 +423,49 @@ function normalizeSocks(input, existing = {}) {
   };
 }
 
+function normalizeCardCode(value) {
+  return String(value || '').trim().replace(/\s+/g, '').toUpperCase();
+}
+
+function generateCardCode(prefix = '') {
+  const head = String(prefix || '').trim().replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 10);
+  const body = crypto.randomBytes(9).toString('hex').toUpperCase().match(/.{1,6}/g).join('-');
+  return head ? `${head}-${body}` : body;
+}
+
+function cardGroupType(card, currency = 'CNY') {
+  const fallback = `${Number(card.amount || 0).toFixed(2)} ${currency || 'CNY'}`;
+  return String(card.type || card.remark || fallback).trim() || fallback;
+}
+
+function verifyCustomerLogin(db, username, password) {
+  const loginName = String(username || '').trim();
+  if (!loginName) return null;
+  return db.customers.find((customer) => (
+    customer.loginUsername === loginName
+    && customer.loginPasswordHash
+    && customer.status !== 'disabled'
+    && verifyPassword(password, customer.loginPasswordHash)
+  )) || null;
+}
+
 function normalizeCustomer(input, existing = {}) {
   const name = textValue(input, existing, 'name');
   const email = String(hasField(input, 'clientEmail') ? input.clientEmail : existing.clientEmail || '').trim()
     || `cust_${crypto.randomBytes(4).toString('hex')}`;
   const clientUuid = String(hasField(input, 'clientUuid') ? input.clientUuid : existing.clientUuid || '').trim()
     || crypto.randomUUID();
+  const loginPassword = hasField(input, 'loginPassword') ? String(input.loginPassword || '') : '';
+  const loginUsername = textValue(input, existing, 'loginUsername');
   return {
     ...existing,
     id: existing.id || id('cus'),
     name,
     contact: textValue(input, existing, 'contact'),
+    loginUsername,
+    loginPasswordHash: loginPassword ? hashPassword(loginPassword) : existing.loginPasswordHash || '',
+    balance: Math.max(0, numberValue(input, existing, 'balance', 0)),
+    selectedPackageId: textValue(input, existing, 'selectedPackageId'),
     packageName: textValue(input, existing, 'packageName', '月付套餐') || '月付套餐',
     amount: numberValue(input, existing, 'amount', 0),
     expireAt: textValue(input, existing, 'expireAt') || addMonths(null, 1),
@@ -438,6 +516,13 @@ function ensureCustomerIdentity(customer) {
   if (!customer.clientUuid) customer.clientUuid = crypto.randomUUID();
   if (!customer.clientId) customer.clientId = customer.clientEmail;
   return customer;
+}
+
+function validateCustomerLogin(db, customer, originalId = '') {
+  if (!customer.loginUsername) return;
+  if (customer.loginUsername === adminUsername(db)) throw new Error('用户登录账号不能和管理员账号相同');
+  const duplicate = db.customers.find((item) => item.id !== originalId && item.loginUsername && item.loginUsername === customer.loginUsername);
+  if (duplicate) throw new Error('用户登录账号已存在，请换一个');
 }
 
 function inboundIdOf(item) {
@@ -1889,18 +1974,30 @@ async function routeApi(req, res, url) {
       return sendError(res, 429, '登录失败次数过多，请 10 分钟后再试');
     }
     const body = await parseJson(req);
-    if (!verifyAdmin(db, body.username, body.password)) {
+    let sessionPayload = null;
+    let responseUser = '';
+    if (verifyAdmin(db, body.username, body.password)) {
+      responseUser = adminUsername(db);
+      sessionPayload = { role: 'admin', username: responseUser };
+    } else {
+      const customer = verifyCustomerLogin(db, body.username, body.password);
+      if (customer) {
+        responseUser = customer.loginUsername || customer.name;
+        sessionPayload = { role: 'user', username: responseUser, customerId: customer.id };
+      }
+    }
+    if (!sessionPayload) {
       recordLoginAttempt(req, false);
       return sendError(res, 401, 'Invalid username or password');
     }
     recordLoginAttempt(req, true);
     const token = crypto.randomBytes(32).toString('hex');
-    sessions.set(token, { username: adminUsername(db), expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
+    sessions.set(token, { ...sessionPayload, expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
     res.writeHead(200, securityHeaders({
       'Content-Type': 'application/json; charset=utf-8',
       'Set-Cookie': sessionCookie(req, token)
     }));
-    return res.end(JSON.stringify({ ok: true, username: adminUsername(db) }));
+    return res.end(JSON.stringify({ ok: true, username: responseUser, role: sessionPayload.role }));
   }
 
   if (url.pathname === '/api/logout' && req.method === 'POST') {
@@ -1919,8 +2016,66 @@ async function routeApi(req, res, url) {
   const db = await readDb();
 
   if (url.pathname === '/api/bootstrap' && req.method === 'GET') {
-    return send(res, 200, { ok: true, data: publicDb(db), user: session.username });
+    if (session.role === 'user') {
+      const customer = db.customers.find((item) => item.id === session.customerId);
+      if (!customer || customer.status === 'disabled') return sendError(res, 401, '用户不存在或已停用');
+      return send(res, 200, { ok: true, data: publicUserDb(db, customer), user: session.username, role: 'user' });
+    }
+    return send(res, 200, { ok: true, data: publicDb(db), user: session.username, role: 'admin' });
   }
+
+  if (url.pathname === '/api/user/cards/redeem' && req.method === 'POST') {
+    if (!requireUser(session, res)) return;
+    const body = await parseJson(req);
+    const code = normalizeCardCode(body.code);
+    if (!code) return sendError(res, 400, '请填写卡密');
+    const customer = db.customers.find((item) => item.id === session.customerId);
+    if (!customer || customer.status === 'disabled') return sendError(res, 404, '用户不存在或已停用');
+    const card = db.cards.find((item) => normalizeCardCode(item.code) === code);
+    if (!card) return sendError(res, 404, '卡密不存在');
+    if (card.status === 'disabled') return sendError(res, 400, '卡密已禁用');
+    if (card.status === 'used') return sendError(res, 400, '卡密已被使用');
+    const amount = Math.max(0, Number(card.amount || 0));
+    customer.balance = Number(customer.balance || 0) + amount;
+    customer.updatedAt = nowIso();
+    card.status = 'used';
+    card.usedBy = customer.id;
+    card.usedByName = customer.name;
+    card.usedAt = nowIso();
+    addLog(db, customer.id, 'card', 'success', `用户兑换卡密，余额增加 ${amount}`, { cardId: card.id, amount });
+    await writeDb(db);
+    return send(res, 200, { ok: true, data: publicUserDb(db, customer), message: `充值成功，余额增加 ${amount}` });
+  }
+
+  if (url.pathname === '/api/user/renew' && req.method === 'POST') {
+    if (!requireUser(session, res)) return;
+    const body = await parseJson(req);
+    const customer = db.customers.find((item) => item.id === session.customerId);
+    if (!customer || customer.status === 'disabled') return sendError(res, 404, '用户不存在或已停用');
+    if (!customer.xuiServerId) return sendError(res, 400, '当前账号还没有绑定节点，请联系管理员');
+    const months = Math.max(1, Math.floor(Number(body.months || 1)));
+    const unitPrice = Math.max(0, Number(customer.amount || 0));
+    if (unitPrice <= 0) return sendError(res, 400, '管理员还没有设置当前节点续费价格');
+    const price = unitPrice * months;
+    if (Number(customer.balance || 0) < price) return sendError(res, 400, `余额不足，本次续费需要 ${price}`);
+    const oldExpireAt = customer.expireAt;
+    customer.balance = Number(customer.balance || 0) - price;
+    customer.expireAt = addMonths(customer.expireAt, months);
+    customer.status = 'active';
+    customer.updatedAt = nowIso();
+    const detail = { months, unitPrice, price, oldExpireAt, newExpireAt: customer.expireAt, warnings: [] };
+    try {
+      detail.clientResult = await syncClientToXui(db, customer, 'upsert');
+      detail.socksResult = await syncSocksToXui(db, customer);
+    } catch (error) {
+      detail.warnings.push(`续费已扣款，本地已生效，但同步 3-xui 失败：${error.message}`);
+    }
+    addLog(db, customer.id, 'renew', detail.warnings.length ? 'warning' : 'success', `用户自助续费 ${months} 个月`, detail);
+    await writeDb(db);
+    return send(res, 200, { ok: true, data: publicUserDb(db, customer), detail, warning: detail.warnings.join('；') });
+  }
+
+  if (!requireAdmin(session, res)) return;
 
   if (url.pathname === '/api/change-password' && req.method === 'POST') {
     const body = await parseJson(req);
@@ -1945,6 +2100,102 @@ async function routeApi(req, res, url) {
       'Set-Cookie': sessionCookie(req, '', { maxAge: 0 })
     }));
     return res.end(JSON.stringify({ ok: true, message: '密码已修改，请重新登录' }));
+  }
+
+  if (url.pathname === '/api/settings' && req.method === 'PUT') {
+    const body = await parseJson(req);
+    db.settings ||= { currency: 'CNY', expiryWarningDays: 3 };
+    if (hasField(body, 'purchaseCardUrl')) db.settings.purchaseCardUrl = String(body.purchaseCardUrl || '').trim();
+    if (hasField(body, 'currency')) db.settings.currency = String(body.currency || 'CNY').trim() || 'CNY';
+    if (hasField(body, 'expiryWarningDays')) db.settings.expiryWarningDays = Math.max(1, Math.floor(Number(body.expiryWarningDays || 3)));
+    await writeDb(db);
+    return send(res, 200, { ok: true, data: publicDb(db) });
+  }
+
+  if (url.pathname === '/api/cards/generate' && req.method === 'POST') {
+    const body = await parseJson(req);
+    const count = Math.min(500, Math.max(1, Math.floor(Number(body.count || 1))));
+    const amount = Math.max(0, Number(body.amount || 0));
+    const type = String(body.type || body.remark || `${amount} CNY`).trim() || `${amount} CNY`;
+    if (amount <= 0) return sendError(res, 400, '卡密金额必须大于 0');
+    const generated = [];
+    const existingCodes = new Set(db.cards.map((card) => normalizeCardCode(card.code)));
+    for (let index = 0; index < count; index += 1) {
+      let code = generateCardCode(body.prefix);
+      while (existingCodes.has(normalizeCardCode(code))) code = generateCardCode(body.prefix);
+      existingCodes.add(normalizeCardCode(code));
+      const card = {
+        id: id('card'),
+        code,
+        amount,
+        type,
+        status: 'unused',
+        remark: String(body.remark || '').trim(),
+        createdAt: nowIso()
+      };
+      db.cards.push(card);
+      generated.push(card);
+    }
+    await writeDb(db);
+    return send(res, 200, { ok: true, data: publicDb(db), generated });
+  }
+
+  if (url.pathname === '/api/cards/bulk-delete' && req.method === 'POST') {
+    const body = await parseJson(req);
+    const requestedIds = Array.isArray(body.ids) ? new Set(body.ids.map((item) => String(item || ''))) : null;
+    const type = String(body.type || '').trim();
+    if (!requestedIds?.size && !type) return sendError(res, 400, '请选择要删除的卡密分类');
+    const currency = db.settings?.currency || 'CNY';
+    const before = db.cards.length;
+    const matched = db.cards.filter((card) => requestedIds?.size ? requestedIds.has(card.id) : cardGroupType(card, currency) === type);
+    const deletable = matched.filter((card) => ['unused', 'disabled'].includes(card.status));
+    if (!deletable.length) return sendError(res, 400, '这个分类没有可删除的未使用或已禁用卡密');
+    const deletableIds = new Set(deletable.map((card) => card.id));
+    db.cards = db.cards.filter((card) => !deletableIds.has(card.id));
+    await writeDb(db);
+    return send(res, 200, {
+      ok: true,
+      data: publicDb(db),
+      deleted: before - db.cards.length,
+      keptUsed: matched.filter((card) => card.status === 'used').length
+    });
+  }
+
+  if (url.pathname === '/api/cards/bulk-update' && req.method === 'POST') {
+    const body = await parseJson(req);
+    const ids = Array.isArray(body.ids) ? new Set(body.ids.map((item) => String(item || ''))) : new Set();
+    const type = String(body.type || '').trim();
+    if (!ids.size) return sendError(res, 400, '请选择要修改的卡密');
+    if (!type) return sendError(res, 400, '分类名称不能为空');
+    let updated = 0;
+    for (const card of db.cards) {
+      if (!ids.has(card.id)) continue;
+      card.type = type;
+      card.updatedAt = nowIso();
+      updated += 1;
+    }
+    await writeDb(db);
+    return send(res, 200, { ok: true, data: publicDb(db), updated });
+  }
+
+  const cardMatch = url.pathname.match(/^\/api\/cards\/([^/]+)$/);
+  if (cardMatch && req.method === 'DELETE') {
+    const card = db.cards.find((item) => item.id === cardMatch[1]);
+    if (!card) return sendError(res, 404, '卡密不存在');
+    if (card.status === 'used') return sendError(res, 400, '已使用卡密不能删除，可保留作为审计记录');
+    db.cards = db.cards.filter((item) => item.id !== cardMatch[1]);
+    await writeDb(db);
+    return send(res, 200, { ok: true, data: publicDb(db) });
+  }
+  if (cardMatch && req.method === 'PUT') {
+    const body = await parseJson(req);
+    const card = db.cards.find((item) => item.id === cardMatch[1]);
+    if (!card) return sendError(res, 404, '卡密不存在');
+    if (['unused', 'disabled'].includes(body.status)) card.status = body.status;
+    card.remark = String(body.remark ?? card.remark ?? '').trim();
+    card.updatedAt = nowIso();
+    await writeDb(db);
+    return send(res, 200, { ok: true, data: publicDb(db) });
   }
 
   if (url.pathname === '/api/xui-servers' && req.method === 'POST') {
@@ -2012,6 +2263,11 @@ async function routeApi(req, res, url) {
     const body = await parseJson(req);
     const customer = normalizeCustomer(body);
     if (!customer.name) return sendError(res, 400, '请填写用户名称');
+    try {
+      validateCustomerLogin(db, customer);
+    } catch (error) {
+      return sendError(res, 400, error.message);
+    }
     db.customers.push(customer);
     addLog(db, customer.id, 'customer', 'success', '用户已创建');
     await writeDb(db);
@@ -2024,6 +2280,11 @@ async function routeApi(req, res, url) {
     const index = db.customers.findIndex((item) => item.id === customerMatch[1]);
     if (index < 0) return sendError(res, 404, '用户不存在');
     db.customers[index] = normalizeCustomer(body, db.customers[index]);
+    try {
+      validateCustomerLogin(db, db.customers[index], db.customers[index].id);
+    } catch (error) {
+      return sendError(res, 400, error.message);
+    }
     addLog(db, db.customers[index].id, 'customer', 'success', '用户已更新');
     await writeDb(db);
     return send(res, 200, { ok: true, data: publicDb(db) });

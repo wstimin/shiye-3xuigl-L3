@@ -5,7 +5,7 @@ if (location.protocol === 'file:') {
     <section class="login-wrap">
       <div class="login-card">
         <h1>需要通过服务访问</h1>
-        <p>请不要直接打开 index.html 文件。请先在服务器运行 npm start，然后访问 http://服务器IP:3388。</p>
+        <p>请先在服务器运行 npm start，然后访问 http://服务器IP:3388。</p>
       </div>
     </section>`;
   throw new Error('This panel must be opened through the Node.js server.');
@@ -13,7 +13,9 @@ if (location.protocol === 'file:') {
 
 const state = {
   user: null,
+  role: '',
   view: 'customers',
+  userView: 'user-home',
   db: null,
   drawer: null,
   search: '',
@@ -26,18 +28,31 @@ const statusText = {
   expired: '已过期',
   disabled: '已停用',
   success: '成功',
-  failed: '失败'
+  failed: '失败',
+  unused: '未使用',
+  used: '已使用',
+  enabled: '启用'
 };
 
-const navItems = [
+const adminNavItems = [
   ['customers', '用户管理', 'U'],
+  ['cards', '卡密管理', 'C'],
   ['servers', '3x-ui 节点', 'N'],
   ['socks', 'SOCKS 出站', 'S'],
   ['logs', '同步日志', 'L']
 ];
 
+const userNavItems = [
+  ['user-home', '充值续费', 'B'],
+  ['user-nodes', '节点管理', 'N']
+];
+
 function h(value) {
   return String(value ?? '').replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]));
+}
+
+function money(value) {
+  return Number(value || 0).toFixed(2);
 }
 
 function fmtDate(value) {
@@ -63,7 +78,7 @@ function toast(message) {
   toast.timer = setTimeout(() => {
     state.toast = '';
     render();
-  }, 3200);
+  }, 3600);
 }
 
 async function api(path, options = {}) {
@@ -77,19 +92,42 @@ async function api(path, options = {}) {
   return data;
 }
 
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
 async function bootstrap() {
   try {
     const result = await api('/api/bootstrap');
     state.user = result.user;
+    state.role = result.role || 'admin';
     state.db = result.data;
+    if (state.role === 'user') state.userView ||= 'user-home';
     render();
   } catch {
+    state.user = null;
+    state.role = '';
+    state.db = null;
     renderLogin();
   }
 }
 
 async function refresh() {
   const result = await api('/api/bootstrap');
+  state.user = result.user;
+  state.role = result.role || state.role;
   state.db = result.data;
   render();
 }
@@ -99,11 +137,12 @@ function renderLogin() {
     <section class="login-wrap">
       <form class="login-card" id="loginForm">
         <h1>十夜管理系统</h1>
-        <p>用于统一管理 3x-ui 用户、续费、到期、节点绑定和 SOCKS 中转。公网部署建议修改默认密码。</p>
-        <div class="field"><label>账号</label><input name="username" autocomplete="username"></div>
-        <div class="field"><label>密码</label><input name="password" type="password" autocomplete="current-password"></div>
+        <p>管理员使用后台账号登录，用户使用管理员创建的账号登录。用户端不开放注册。</p>
+        <div class="field"><label>账号</label><input name="username" autocomplete="username" required></div>
+        <div class="field"><label>密码</label><input name="password" type="password" autocomplete="current-password" required></div>
         <button class="btn primary login-submit" type="submit">登录</button>
       </form>
+      ${state.toast ? `<div class="toast">${h(state.toast)}</div>` : ''}
     </section>`;
 
   document.querySelector('#loginForm').addEventListener('submit', async (event) => {
@@ -118,8 +157,28 @@ function renderLogin() {
   });
 }
 
+function render() {
+  if (!state.db) return renderLogin();
+  if (state.role === 'user') return renderUserApp();
+  return renderAdminApp();
+}
+
+function navButton(view, label, icon, activeView) {
+  return `<button class="${activeView === view ? 'active' : ''}" data-view="${view}" data-icon="${icon}">${label}</button>`;
+}
+
+function pageTitle() {
+  return {
+    customers: '用户管理',
+    cards: '卡密管理',
+    servers: '3x-ui 节点',
+    socks: 'SOCKS 出站',
+    logs: '同步日志'
+  }[state.view] || '用户管理';
+}
+
 function stats() {
-  const customers = state.db.customers;
+  const customers = state.db.customers || [];
   return {
     total: customers.length,
     active: customers.filter((c) => c.computedStatus === 'active').length,
@@ -129,28 +188,26 @@ function stats() {
   };
 }
 
-function render() {
-  if (!state.db) return renderLogin();
+function renderAdminApp() {
   const s = stats();
   app.innerHTML = `
     <section class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="brand-mark">十夜</span><span>管理系统</span></div>
-        <nav class="nav">
-          ${navItems.map(([view, label, icon]) => navButton(view, label, icon)).join('')}
-        </nav>
-        <div class="sidebar-footer">登录用户：${h(state.user)}<br>版本：0.2.0<br>数据存储：data/db.json</div>
+        <nav class="nav">${adminNavItems.map(([view, label, icon]) => navButton(view, label, icon, state.view)).join('')}</nav>
+        <div class="sidebar-footer">登录用户：${h(state.user)}<br>版本：0.3.0<br>数据存储：data/db.json</div>
       </aside>
       <section class="content">
         <div class="topbar">
           <div>
             <div class="eyebrow">3X-UI CUSTOMER OPS</div>
             <h1>${pageTitle()}</h1>
-            <div class="sub">统一处理用户续费、到期停用、节点绑定、SOCKS 中转和同步日志。</div>
+            <div class="sub">管理员后台管理用户、卡密、3x-ui 节点和 SOCKS 中转。</div>
           </div>
           <div class="actions">
             <button class="btn" data-action="disable-expired">到期停用</button>
             <button class="btn" data-action="refresh">刷新</button>
+            <button class="btn" data-action="settings">系统设置</button>
             <button class="btn" data-action="security">账号安全</button>
             <button class="btn danger" data-action="logout">退出</button>
           </div>
@@ -162,8 +219,8 @@ function render() {
           <div class="stat"><span>已过期</span><strong>${s.expired}</strong><small>等待续费或停用</small></div>
           <div class="stat"><span>已停用</span><strong>${s.disabled}</strong><small>已关闭服务</small></div>
         </div>
-        ${state.db.settings?.defaultPasswordWarning ? `<div class="security-warning"><strong>当前仍在使用默认管理员密码。</strong><span>建议到账号安全里修改，公网部署时尤其重要。</span><button class="btn small" data-action="security">账号安全</button></div>` : ''}
-        ${renderView()}
+        ${state.db.settings?.defaultPasswordWarning ? `<div class="security-warning"><strong>当前仍在使用默认管理员密码。</strong><span>公网部署建议修改管理员密码。</span><button class="btn small" data-action="security">账号安全</button></div>` : ''}
+        ${renderAdminView()}
       </section>
     </section>
     ${state.drawer ? renderDrawer() : ''}
@@ -171,15 +228,8 @@ function render() {
   bindEvents();
 }
 
-function navButton(view, label, icon) {
-  return `<button class="${state.view === view ? 'active' : ''}" data-view="${view}" data-icon="${icon}">${label}</button>`;
-}
-
-function pageTitle() {
-  return { customers: '用户管理', servers: '3x-ui 节点', socks: 'SOCKS 出站', logs: '同步日志' }[state.view];
-}
-
-function renderView() {
+function renderAdminView() {
+  if (state.view === 'cards') return renderCards();
   if (state.view === 'servers') return renderServers();
   if (state.view === 'socks') return renderSocks();
   if (state.view === 'logs') return renderLogs();
@@ -188,41 +238,24 @@ function renderView() {
 
 function renderCustomers() {
   const term = state.search.toLowerCase();
-  const rows = state.db.customers.filter((customer) => [
+  const rows = (state.db.customers || []).filter((customer) => [
     customer.name,
     customer.contact,
+    customer.loginUsername,
     customer.clientEmail,
-    customer.packageName,
     customer.remark
   ].join(' ').toLowerCase().includes(term));
 
   return `
     <div class="toolbar">
-      <div class="toolbar-left">
-        <input class="search" placeholder="搜索用户、联系方式、套餐、client email" value="${h(state.search)}" data-search>
-      </div>
-      <div class="toolbar-right">
-        <button class="btn primary" data-action="new-customer">+ 新建用户</button>
-      </div>
+      <div class="toolbar-left"><input class="search" placeholder="搜索用户、登录账号、联系方式、client email" value="${h(state.search)}" data-search></div>
+      <div class="toolbar-right"><button class="btn primary" data-action="new-customer">+ 新建用户</button></div>
     </div>
     <section class="panel">
-      <div class="panel-head">
-        <div><h2>用户列表</h2><p>续费、停用、同步 3x-ui 都可以在这里完成。</p></div>
-      </div>
-      <table>
-        <thead><tr>
-          <th style="width:170px">用户</th>
-          <th style="width:126px">联系方式</th>
-          <th style="width:110px">套餐</th>
-          <th style="width:158px">到期时间</th>
-          <th style="width:88px">流量</th>
-          <th style="width:168px">3x-ui 节点</th>
-          <th style="width:142px">SOCKS</th>
-          <th style="width:88px">状态</th>
-          <th style="width:336px">操作</th>
-        </tr></thead>
-        <tbody>${rows.length ? rows.map(customerRow).join('') : `<tr><td colspan="9" class="empty">还没有用户，点击右上角新建用户开始管理。</td></tr>`}</tbody>
-      </table>
+      <div class="panel-head"><div><h2>用户列表</h2><p>管理员创建用户登录账号，用户端不能自行注册。</p></div></div>
+      <table><thead><tr>
+        <th style="width:170px">用户</th><th style="width:126px">登录账号</th><th style="width:110px">余额</th><th style="width:120px">节点价格</th><th style="width:158px">到期时间</th><th style="width:88px">流量</th><th style="width:160px">3x-ui</th><th style="width:132px">SOCKS</th><th style="width:88px">状态</th><th style="width:336px">操作</th>
+      </tr></thead><tbody>${rows.length ? rows.map(customerRow).join('') : `<tr><td colspan="10" class="empty">还没有用户，点击右上角新建用户。</td></tr>`}</tbody></table>
     </section>`;
 }
 
@@ -231,8 +264,9 @@ function customerRow(customer) {
   const socks = state.db.socksNodes.find((item) => item.id === customer.socksNodeId);
   return `<tr>
     <td class="main-cell"><strong>${h(customer.name)}</strong><div class="line mono">${h(customer.clientEmail || '-')}</div></td>
-    <td>${h(customer.contact || '-')}</td>
-    <td>${h(customer.packageName || '-')}<div class="muted">${h(customer.amount || 0)} CNY</div></td>
+    <td>${h(customer.loginUsername || '-')}<div class="muted">${h(customer.contact || '')}</div></td>
+    <td>${money(customer.balance)} ${h(state.db.settings.currency)}</td>
+    <td>${money(customer.amount)} ${h(state.db.settings.currency)}<div class="muted">每月续费</div></td>
     <td>${fmtDate(customer.expireAt)}</td>
     <td>${h(customer.trafficLimitGb)} GB</td>
     <td>${h(server?.name || '-')}<div class="mono muted">inbound: ${h(customer.inboundId || '-')}</div></td>
@@ -248,13 +282,81 @@ function customerRow(customer) {
   </tr>`;
 }
 
+function cardType(card) {
+  const fallback = `${money(card.amount)} ${state.db.settings.currency || 'CNY'}`;
+  return String(card.type || card.remark || fallback).trim() || fallback;
+}
+
+function cardGroups() {
+  const groups = new Map();
+  for (const card of state.db.cards || []) {
+    const type = cardType(card);
+    if (!groups.has(type)) groups.set(type, []);
+    groups.get(type).push(card);
+  }
+  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right, 'zh-CN'));
+}
+
+function renderCardGroups() {
+  const entries = cardGroups();
+  if (!entries.length) return '';
+  return `<section class="card-groups">${entries.map(([type, cards], index) => {
+    const unused = cards.filter((card) => card.status === 'unused');
+    const usedCount = cards.filter((card) => card.status === 'used').length;
+    const disabledCount = cards.filter((card) => card.status === 'disabled').length;
+    const codes = unused.map((card) => card.code).join('\n');
+    return `<div class="card-group">
+      <div class="card-group-head"><div><h2>${h(type)}</h2><p>未使用 ${unused.length} 张，已使用 ${usedCount} 张，已禁用 ${disabledCount} 张</p></div><div class="card-group-actions"><button class="btn small" data-action="copy-card-group" data-index="${index}">一键复制</button><button class="btn small" data-action="generate-card-group" data-index="${index}">继续生成</button><button class="btn small" data-action="rename-card-group" data-index="${index}">改名称</button><button class="btn small danger" data-action="delete-card-group" data-index="${index}">删除未使用</button></div></div>
+      <textarea class="copy-area mono" data-card-group="${index}" readonly>${h(codes)}</textarea>
+    </div>`;
+  }).join('')}</section>`;
+}
+
+function getCardGroup(index) {
+  const entry = cardGroups()[Number(index)];
+  if (!entry) return null;
+  const [type, cards] = entry;
+  return { type, cards };
+}
+
+function renderCards() {
+  const unused = state.db.cards.filter((card) => card.status === 'unused').length;
+  const used = state.db.cards.filter((card) => card.status === 'used').length;
+  return `
+    <div class="toolbar">
+      <div class="toolbar-left"><span class="muted">未使用 ${unused} 张，已使用 ${used} 张</span></div>
+      <div class="toolbar-right"><button class="btn" data-action="settings">购买链接设置</button><button class="btn primary" data-action="generate-cards">+ 生成卡密</button></div>
+    </div>
+    ${renderCardGroups()}
+    <section class="panel">
+      <div class="panel-head"><div><h2>卡密管理</h2><p>用户只能通过兑换卡密充值余额。购买卡密按钮会跳转到这里设置的外部发卡网站。</p></div></div>
+      <table><thead><tr><th style="width:230px">卡密</th><th style="width:100px">金额</th><th style="width:120px">分类</th><th style="width:90px">状态</th><th style="width:150px">使用用户</th><th style="width:170px">使用时间</th><th>备注</th><th style="width:180px">操作</th></tr></thead>
+      <tbody>${state.db.cards.length ? state.db.cards.map(cardRow).join('') : `<tr><td colspan="8" class="empty">还没有卡密，点击右上角生成。</td></tr>`}</tbody></table>
+    </section>`;
+}
+
+function cardRow(card) {
+  return `<tr>
+    <td class="mono">${h(card.code)}</td>
+    <td>${money(card.amount)} ${h(state.db.settings.currency)}</td>
+    <td>${h(cardType(card))}</td>
+    <td><span class="status ${card.status === 'used' ? 'success' : card.status === 'disabled' ? 'disabled' : 'active'}">${statusText[card.status] || card.status}</span></td>
+    <td>${h(card.usedByName || '-')}</td>
+    <td>${fmtDate(card.usedAt)}</td>
+    <td>${h(card.remark || '-')}</td>
+    <td><div class="row-actions">
+      ${card.status !== 'used' ? `<button class="btn small" data-action="toggle-card" data-id="${card.id}">${card.status === 'disabled' ? '启用' : '禁用'}</button><button class="btn small danger" data-action="delete-card" data-id="${card.id}">删除</button>` : '<span class="muted">已使用</span>'}
+    </div></td>
+  </tr>`;
+}
+
 function renderServers() {
   return `
     <div class="toolbar"><div class="toolbar-left"></div><div class="toolbar-right"><button class="btn primary" data-action="new-server">+ 添加 3x-ui 节点</button></div></div>
     <section class="panel">
-      <div class="panel-head"><div><h2>3x-ui 节点</h2><p>保存中心面板或远程节点的连接信息，用户同步时会使用这里的配置。</p></div></div>
+      <div class="panel-head"><div><h2>3x-ui 节点</h2><p>保存中心面板或远程节点连接信息，用于用户同步。</p></div></div>
       <table><thead><tr><th style="width:190px">名称</th><th>地址</th><th style="width:110px">基础路径</th><th style="width:160px">账号 / API</th><th style="width:90px">状态</th><th style="width:320px">操作</th></tr></thead>
-      <tbody>${state.db.xuiServers.length ? state.db.xuiServers.map(serverRow).join('') : `<tr><td colspan="6" class="empty">还没有 3x-ui 节点。先添加你的中心面板或远程节点。</td></tr>`}</tbody></table>
+      <tbody>${state.db.xuiServers.length ? state.db.xuiServers.map(serverRow).join('') : `<tr><td colspan="6" class="empty">还没有 3x-ui 节点。</td></tr>`}</tbody></table>
     </section>`;
 }
 
@@ -273,9 +375,9 @@ function renderSocks() {
   return `
     <div class="toolbar"><div class="toolbar-left"></div><div class="toolbar-right"><button class="btn primary" data-action="new-socks">+ 添加 SOCKS 出站</button></div></div>
     <section class="panel">
-      <div class="panel-head"><div><h2>SOCKS 出站</h2><p>统一维护可复用的 SOCKS 中转，用户创建时直接选择对应出站。</p></div></div>
+      <div class="panel-head"><div><h2>SOCKS 出站</h2><p>维护可复用的 SOCKS 中转，用户资料里可以绑定。</p></div></div>
       <table><thead><tr><th style="width:190px">名称</th><th>地址</th><th style="width:130px">认证</th><th style="width:150px">Tag</th><th style="width:100px">绑定用户</th><th style="width:90px">状态</th><th style="width:210px">操作</th></tr></thead>
-      <tbody>${state.db.socksNodes.length ? state.db.socksNodes.map(socksRow).join('') : `<tr><td colspan="7" class="empty">还没有 SOCKS 出站。添加后可在用户资料里启用中转。</td></tr>`}</tbody></table>
+      <tbody>${state.db.socksNodes.length ? state.db.socksNodes.map(socksRow).join('') : `<tr><td colspan="7" class="empty">还没有 SOCKS 出站。</td></tr>`}</tbody></table>
     </section>`;
 }
 
@@ -294,7 +396,7 @@ function socksRow(socks) {
 
 function renderLogs() {
   return `<section class="panel">
-    <div class="panel-head"><div><h2>同步日志</h2><p>记录用户创建、续费、停用和同步到 3x-ui 的结果。</p></div></div>
+    <div class="panel-head"><div><h2>同步日志</h2><p>记录用户创建、续费、购买、停用和同步到 3x-ui 的结果。</p></div></div>
     <table><thead><tr><th style="width:178px">时间</th><th style="width:140px">用户</th><th style="width:110px">类型</th><th style="width:90px">状态</th><th>消息</th></tr></thead>
     <tbody>${state.db.syncLogs.length ? state.db.syncLogs.map(logRow).join('') : `<tr><td colspan="5" class="empty">暂无日志。</td></tr>`}</tbody></table>
   </section>`;
@@ -311,6 +413,90 @@ function logRow(log) {
   </tr>`;
 }
 
+function renderUserApp() {
+  const customer = state.db.customer;
+  app.innerHTML = `
+    <section class="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">十夜</span><span>用户中心</span></div>
+        <nav class="nav">${userNavItems.map(([view, label, icon]) => navButton(view, label, icon, state.userView)).join('')}</nav>
+        <div class="sidebar-footer">登录用户：${h(state.user)}<br>节点价格：${money(customer.amount)} ${h(state.db.settings.currency)}/月<br>余额：${money(customer.balance)} ${h(state.db.settings.currency)}</div>
+      </aside>
+      <section class="content">
+        <div class="topbar">
+          <div><div class="eyebrow">USER PORTAL</div><h1>${userPageTitle()}</h1><div class="sub">购买卡密、兑换余额、续费当前节点和查看节点状态。</div></div>
+          <div class="actions"><button class="btn primary" data-action="buy-card-link">购买卡密</button><button class="btn" data-action="refresh">刷新</button><button class="btn danger" data-action="logout">退出</button></div>
+        </div>
+        ${renderUserSummary()}
+        ${renderUserView()}
+      </section>
+    </section>
+    ${state.toast ? `<div class="toast">${h(state.toast)}</div>` : ''}`;
+  bindEvents();
+}
+
+function userPageTitle() {
+  return { 'user-home': '充值续费', 'user-nodes': '节点管理' }[state.userView] || '用户中心';
+}
+
+function renderUserSummary() {
+  const customer = state.db.customer;
+  return `<div class="stats user-stats">
+    <div class="stat total"><span>账户余额</span><strong>${money(customer.balance)}</strong><small>${h(state.db.settings.currency)}</small></div>
+    <div class="stat"><span>节点价格</span><strong>${money(customer.amount)}</strong><small>${h(state.db.settings.currency)} / 月</small></div>
+    <div class="stat"><span>到期时间</span><strong class="small-strong">${fmtDate(customer.expireAt)}</strong><small>续费后自动顺延</small></div>
+    <div class="stat"><span>可用流量</span><strong>${h(customer.trafficLimitGb || 0)} GB</strong><small>节点流量</small></div>
+    <div class="stat"><span>状态</span><strong>${statusText[customer.computedStatus] || customer.computedStatus}</strong><small>账户状态</small></div>
+  </div>`;
+}
+
+function renderUserView() {
+  if (state.userView === 'user-nodes') return renderUserNodes();
+  return renderUserHome();
+}
+
+function renderUserHome() {
+  const customer = state.db.customer;
+  const canRenew = state.db.node && Number(customer.amount || 0) > 0;
+  return `<section class="panel compact-panel">
+    <div class="panel-head"><div><h2>余额充值</h2><p>点击购买卡密会跳转到管理员设置的发卡网站，兑换后余额自动增加。</p></div></div>
+    <div class="panel-body">
+      <div class="grid-2">
+        <button class="btn primary large-btn" data-action="buy-card-link">购买卡密</button>
+        <form id="redeemForm" class="redeem-form">
+          <div class="field"><label>兑换卡密</label><input name="code" placeholder="输入卡密" required></div>
+          <button class="btn primary" type="submit">兑换充值</button>
+        </form>
+      </div>
+    </div>
+  </section>
+  <section class="panel compact-panel renew-panel">
+    <div class="panel-head"><div><h2>续费当前节点</h2><p>续费会使用余额扣款，并自动顺延当前节点到期时间。</p></div></div>
+    <div class="panel-body">
+      <div class="renew-summary">
+        <div><span>节点价格</span><strong>${money(customer.amount)} ${h(state.db.settings.currency)} / 月</strong></div>
+        <div><span>账户余额</span><strong>${money(customer.balance)} ${h(state.db.settings.currency)}</strong></div>
+        <div><span>到期时间</span><strong>${fmtDate(customer.expireAt)}</strong></div>
+      </div>
+      <form id="userRenewForm" class="redeem-form">
+        <div class="field"><label>续费月数</label><input name="months" type="number" min="1" value="1" ${canRenew ? '' : 'disabled'}></div>
+        <button class="btn primary" type="submit" ${canRenew ? '' : 'disabled'}>余额续费</button>
+      </form>
+      ${canRenew ? '' : '<div class="form-note">当前账号还没有可续费节点，或管理员还没有设置节点价格。</div>'}
+    </div>
+  </section>`;
+}
+
+function renderUserNodes() {
+  const node = state.db.node;
+  if (!node) return `<section class="panel"><div class="panel-head"><div><h2>节点管理</h2><p>管理员尚未给当前账号绑定 3x-ui 节点。</p></div></div><div class="empty">请联系管理员配置节点。</div></section>`;
+  return `<section class="panel">
+    <div class="panel-head"><div><h2>节点管理</h2><p>这里只展示当前账号已绑定的节点信息，节点新增和路由配置由管理员维护。</p></div></div>
+    <table><thead><tr><th>3x-ui 节点</th><th>续费价格</th><th>到期时间</th><th>Inbound</th><th>Client Email</th><th>UUID</th><th>协议</th><th>SOCKS</th><th>状态</th></tr></thead>
+    <tbody><tr><td>${h(node.xuiServerName || '-')}</td><td>${money(node.renewPrice)} ${h(state.db.settings.currency)} / 月</td><td>${fmtDate(node.expireAt)}</td><td>${h(node.inboundId || '-')}<div class="muted">${h(node.inboundRemark || '')}</div></td><td class="mono">${h(node.clientEmail || '-')}</td><td class="mono">${h(node.clientUuid || '-')}</td><td>${h(node.protocol || '-')}</td><td>${node.useSocks ? h(node.socksName || '已启用') : '未启用'}</td><td><span class="status ${node.status}">${statusText[node.status] || node.status}</span></td></tr></tbody></table>
+  </section>`;
+}
+
 function renderDrawer() {
   const { type, item } = state.drawer;
   const currentItem = item || {};
@@ -318,6 +504,8 @@ function renderDrawer() {
     customer: item ? '编辑用户' : '新建用户',
     server: item ? '编辑 3x-ui 节点' : '添加 3x-ui 节点',
     socks: item ? '编辑 SOCKS 出站' : '添加 SOCKS 出站',
+    cards: '生成卡密',
+    settings: '系统设置',
     renew: '用户续费',
     security: '账号安全'
   }[type];
@@ -335,6 +523,21 @@ function renderSection(title, body) {
 }
 
 function drawerFields(type, item = {}) {
+  if (type === 'settings') {
+    return `${renderSection('用户端购买链接', `
+      <div class="field"><label>购买卡密链接</label><input name="purchaseCardUrl" value="${h(state.db.settings.purchaseCardUrl)}" placeholder="https://你的发卡网站.example.com"></div>
+      <div class="form-note">用户点击“购买卡密”按钮时，会直接跳转到这个链接。</div>
+    `)}${renderSection('基础设置', `
+      <div class="grid-2"><div class="field"><label>货币</label><input name="currency" value="${h(state.db.settings.currency || 'CNY')}"></div><div class="field"><label>到期提醒天数</label><input name="expiryWarningDays" type="number" min="1" value="${h(state.db.settings.expiryWarningDays || 3)}"></div></div>
+    `)}`;
+  }
+  if (type === 'cards') {
+    return `${renderSection('生成卡密', `
+      <div class="grid-3"><div class="field"><label>金额</label><input name="amount" type="number" min="0.01" step="0.01" value="${h(item.amount || 10)}" required></div><div class="field"><label>数量</label><input name="count" type="number" min="1" max="500" value="1" required></div><div class="field"><label>前缀</label><input name="prefix" placeholder="可选"></div></div>
+      <div class="field"><label>分类</label><input name="type" value="${h(item.type || '')}" placeholder="例如：50元卡密 / 月卡 / 活动卡"></div>
+      <div class="field"><label>备注</label><input name="remark" value="${h(item.remark || '')}" placeholder="例如：7 月活动"></div>
+    `)}`;
+  }
   if (type === 'server') {
     return `
       <div class="form-note">节点信息对应 3x-ui 的面板访问地址。密码或 Token 保持星号会保留旧值，清空后保存会删除旧值。</div>
@@ -348,44 +551,35 @@ function drawerFields(type, item = {}) {
         <div class="field"><label>API Token</label><input name="apiToken" type="password" value="${h(item.apiToken)}"></div>
       `)}`;
   }
-
   if (type === 'socks') {
-    return `
-      ${renderSection('出站信息', `
-        <div class="grid-2"><div class="field"><label>名称</label><input name="name" value="${h(item.name)}" required></div><div class="field"><label>Tag</label><input name="tag" value="${h(item.tag)}" placeholder="socks_hk_01"></div></div>
-        <div class="grid-2"><div class="field"><label>地址</label><input name="address" value="${h(item.address)}" required></div><div class="field"><label>端口</label><input name="port" type="number" value="${h(item.port || 1080)}"></div></div>
-      `)}
-      ${renderSection('认证和状态', `
-        <div class="grid-2"><div class="field"><label>用户名</label><input name="username" value="${h(item.username)}"></div><div class="field"><label>密码</label><input name="password" type="password" value="${h(item.password)}"></div></div>
-        <div class="grid-2"><div class="field"><label>状态</label><select name="status"><option value="enabled" ${item.status !== 'disabled' ? 'selected' : ''}>启用</option><option value="disabled" ${item.status === 'disabled' ? 'selected' : ''}>停用</option></select></div><div class="field"><label>备注</label><input name="remark" value="${h(item.remark)}"></div></div>
-      `)}`;
+    return `${renderSection('出站信息', `
+      <div class="grid-2"><div class="field"><label>名称</label><input name="name" value="${h(item.name)}" required></div><div class="field"><label>Tag</label><input name="tag" value="${h(item.tag)}" placeholder="socks_hk_01"></div></div>
+      <div class="grid-2"><div class="field"><label>地址</label><input name="address" value="${h(item.address)}" required></div><div class="field"><label>端口</label><input name="port" type="number" value="${h(item.port || 1080)}"></div></div>
+      <div class="grid-2"><div class="field"><label>用户名</label><input name="username" value="${h(item.username)}"></div><div class="field"><label>密码</label><input name="password" type="password" value="${h(item.password)}"></div></div>
+      <div class="grid-2"><div class="field"><label>状态</label><select name="status"><option value="enabled" ${item.status !== 'disabled' ? 'selected' : ''}>启用</option><option value="disabled" ${item.status === 'disabled' ? 'selected' : ''}>停用</option></select></div><div class="field"><label>备注</label><input name="remark" value="${h(item.remark)}"></div></div>
+    `)}`;
   }
-
   if (type === 'renew') {
-    return `
-      <div class="form-note">用户：${h(item.name)}，当前到期：${fmtDate(item.expireAt)}</div>
-      ${renderSection('续费信息', `
-        <div class="grid-2"><div class="field"><label>续费月数</label><input name="months" type="number" min="1" value="1"></div><div class="field"><label>收款金额</label><input name="amount" type="number" min="0" step="0.01" value="${h(item.amount || 0)}"></div></div>
-      `)}`;
+    return `<div class="form-note">用户：${h(item.name)}，当前到期：${fmtDate(item.expireAt)}</div>${renderSection('续费信息', `
+      <div class="grid-2"><div class="field"><label>续费月数</label><input name="months" type="number" min="1" value="1"></div><div class="field"><label>收款金额</label><input name="amount" type="number" min="0" step="0.01" value="${h(item.amount || 0)}"></div></div>
+    `)}`;
   }
-
   if (type === 'security') {
-    return `
-      <div class="form-note">修改管理员账号或密码后，当前会话会自动退出，需要使用新账号密码重新登录。</div>
-      ${renderSection('管理员账号', `
-        <div class="field"><label>管理员账号</label><input name="username" value="${h(state.db.settings?.adminUsername || state.user || 'admin')}" autocomplete="username" required></div>
-      `)}
-      ${renderSection('修改密码', `
-        <div class="field"><label>当前密码</label><input name="currentPassword" type="password" autocomplete="current-password" required></div>
-        <div class="field"><label>新密码</label><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required></div>
-        <div class="field"><label>确认新密码</label><input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required></div>
-      `)}`;
+    return `<div class="form-note">修改管理员账号或密码后，当前会话会自动退出。</div>${renderSection('管理员账号', `
+      <div class="field"><label>管理员账号</label><input name="username" value="${h(state.db.settings?.adminUsername || state.user || 'admin')}" autocomplete="username" required></div>
+    `)}${renderSection('修改密码', `
+      <div class="field"><label>当前密码</label><input name="currentPassword" type="password" autocomplete="current-password" required></div>
+      <div class="field"><label>新密码</label><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required></div>
+      <div class="field"><label>确认新密码</label><input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required></div>
+    `)}`;
   }
-
   return `
-    ${renderSection('用户资料', `
-      <div class="grid-2"><div class="field"><label>用户名称</label><input name="name" value="${h(item.name)}" required></div><div class="field"><label>联系方式</label><input name="contact" value="${h(item.contact)}"></div></div>
-      <div class="grid-3"><div class="field"><label>套餐</label><input name="packageName" value="${h(item.packageName || '月付套餐')}"></div><div class="field"><label>金额</label><input name="amount" type="number" step="0.01" value="${h(item.amount || 0)}"></div><div class="field"><label>流量 GB</label><input name="trafficLimitGb" type="number" value="${h(item.trafficLimitGb || 100)}"></div></div>
+    ${renderSection('用户登录', `
+      <div class="grid-3"><div class="field"><label>用户名称</label><input name="name" value="${h(item.name)}" required></div><div class="field"><label>登录账号</label><input name="loginUsername" value="${h(item.loginUsername)}" autocomplete="off" placeholder="留空则不能登录用户端"></div><div class="field"><label>登录密码</label><input name="loginPassword" type="password" autocomplete="new-password" placeholder="编辑时留空表示不修改"></div></div>
+      <div class="grid-2"><div class="field"><label>联系方式</label><input name="contact" value="${h(item.contact)}"></div><div class="field"><label>余额</label><input name="balance" type="number" min="0" step="0.01" value="${h(item.balance || 0)}"></div></div>
+    `)}
+    ${renderSection('节点计费', `
+      <div class="grid-3"><div class="field"><label>节点名称</label><input name="packageName" value="${h(item.packageName || '当前节点')}"></div><div class="field"><label>每月续费价格</label><input name="amount" type="number" min="0" step="0.01" value="${h(item.amount || 0)}"></div><div class="field"><label>流量 GB</label><input name="trafficLimitGb" type="number" value="${h(item.trafficLimitGb || 100)}"></div></div>
       <div class="grid-2"><div class="field"><label>到期时间</label><input name="expireAt" type="datetime-local" value="${h(dateInputValue(item.expireAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()))}"></div><div class="field"><label>状态</label><select name="status"><option value="active" ${item.status !== 'disabled' ? 'selected' : ''}>正常</option><option value="disabled" ${item.status === 'disabled' ? 'selected' : ''}>停用</option></select></div></div>
     `)}
     ${renderSection('3x-ui 绑定', `
@@ -404,7 +598,8 @@ function drawerFields(type, item = {}) {
 
 function bindEvents() {
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => {
-    state.view = button.dataset.view;
+    if (state.role === 'user') state.userView = button.dataset.view;
+    else state.view = button.dataset.view;
     state.drawer = null;
     render();
   }));
@@ -422,6 +617,8 @@ function bindEvents() {
   const drawerForm = document.querySelector('#drawerForm');
   drawerForm?.addEventListener('click', (event) => event.stopPropagation());
   drawerForm?.addEventListener('submit', handleDrawerSubmit);
+  document.querySelector('#redeemForm')?.addEventListener('submit', handleRedeemSubmit);
+  document.querySelector('#userRenewForm')?.addEventListener('submit', handleUserRenewSubmit);
 }
 
 async function handleAction(event) {
@@ -431,53 +628,76 @@ async function handleAction(event) {
     if (action === 'refresh') return refresh();
     if (action === 'logout') {
       await api('/api/logout', { method: 'POST' });
+      state.user = null;
+      state.role = '';
       state.db = null;
       return renderLogin();
+    }
+    if (action === 'buy-card-link') {
+      const url = state.db.settings?.purchaseCardUrl;
+      if (!url) return toast('管理员还没有设置购买卡密链接');
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (action === 'copy-card-group') {
+      const area = document.querySelector(`[data-card-group="${event.currentTarget.dataset.index}"]`);
+      const text = area?.value || '';
+      if (!text.trim()) return toast('这个分类没有可复制的未使用卡密');
+      await copyText(text);
+      return toast('已复制这一类未使用卡密');
+    }
+    if (action === 'generate-card-group') {
+      const group = getCardGroup(event.currentTarget.dataset.index);
+      if (!group) return toast('这个分类不存在，请刷新后再试');
+      const sample = group.cards.find((card) => card.status === 'unused') || group.cards[0] || {};
+      state.drawer = { type: 'cards', item: { type: group.type, amount: sample.amount || 10, remark: sample.remark || '' } };
+      return render();
+    }
+    if (action === 'rename-card-group') {
+      const group = getCardGroup(event.currentTarget.dataset.index);
+      if (!group) return toast('这个分类不存在，请刷新后再试');
+      const nextType = prompt('请输入新的卡密分类名称', group.type);
+      if (nextType === null) return;
+      if (!nextType.trim()) return toast('分类名称不能为空');
+      const result = await api('/api/cards/bulk-update', { method: 'POST', body: { ids: group.cards.map((card) => card.id), type: nextType.trim() } });
+      state.db = result.data;
+      toast(`已修改 ${result.updated || 0} 张卡密的分类名称`);
+      return render();
+    }
+    if (action === 'delete-card-group') {
+      const group = getCardGroup(event.currentTarget.dataset.index);
+      if (!group) return toast('这个分类不存在，请刷新后再试');
+      const ids = group.cards.filter((card) => ['unused', 'disabled'].includes(card.status)).map((card) => card.id);
+      if (!ids.length) return toast('这个分类没有可删除的未使用或已禁用卡密');
+      if (!confirm(`确定删除“${group.type}”分类下 ${ids.length} 张未使用/已禁用卡密？已使用卡密会保留。`)) return;
+      const result = await api('/api/cards/bulk-delete', { method: 'POST', body: { ids } });
+      state.db = result.data;
+      toast(`已删除 ${result.deleted || 0} 张卡密${result.keptUsed ? `，保留已使用 ${result.keptUsed} 张` : ''}`);
+      return render();
     }
     if (action === 'close-drawer') {
       state.drawer = null;
       return render();
     }
-    if (action === 'security') {
-      state.drawer = { type: 'security', item: null };
-      return render();
-    }
-    if (action === 'new-customer') {
-      state.drawer = { type: 'customer', item: null };
-      return render();
-    }
-    if (action === 'edit-customer') {
-      state.drawer = { type: 'customer', item: state.db.customers.find((customer) => customer.id === id) };
-      return render();
-    }
-    if (action === 'new-server') {
-      state.drawer = { type: 'server', item: null };
-      return render();
-    }
-    if (action === 'edit-server') {
-      state.drawer = { type: 'server', item: state.db.xuiServers.find((server) => server.id === id) };
-      return render();
-    }
-    if (action === 'new-socks') {
-      state.drawer = { type: 'socks', item: null };
-      return render();
-    }
-    if (action === 'edit-socks') {
-      state.drawer = { type: 'socks', item: state.db.socksNodes.find((socks) => socks.id === id) };
-      return render();
-    }
-    if (action === 'renew') {
-      state.drawer = { type: 'renew', item: state.db.customers.find((customer) => customer.id === id) };
-      return render();
-    }
+    if (action === 'security') state.drawer = { type: 'security', item: null };
+    if (action === 'settings') state.drawer = { type: 'settings', item: null };
+    if (action === 'new-customer') state.drawer = { type: 'customer', item: null };
+    if (action === 'edit-customer') state.drawer = { type: 'customer', item: state.db.customers.find((customer) => customer.id === id) };
+    if (action === 'generate-cards') state.drawer = { type: 'cards', item: null };
+    if (action === 'new-server') state.drawer = { type: 'server', item: null };
+    if (action === 'edit-server') state.drawer = { type: 'server', item: state.db.xuiServers.find((server) => server.id === id) };
+    if (action === 'new-socks') state.drawer = { type: 'socks', item: null };
+    if (action === 'edit-socks') state.drawer = { type: 'socks', item: state.db.socksNodes.find((socks) => socks.id === id) };
+    if (action === 'renew') state.drawer = { type: 'renew', item: state.db.customers.find((customer) => customer.id === id) };
+    if (state.drawer) return render();
+
     if (action === 'sync') {
       const result = await api(`/api/customers/${id}/sync`, { method: 'POST' });
       state.db = result.data;
-      const syncAction = result.detail?.clientResult?.action === 'update' ? '已更新' : '已新增';
       const createdInbound = result.detail?.clientResult?.createdInbound;
       const suffix = createdInbound ? `，新入站端口 ${createdInbound.port}` : '';
       const socksSuffix = result.detail?.socksResult?.applied ? `，SOCKS ${result.detail.socksResult.outboundTag}` : '';
-      toast(`同步完成：3x-ui 用户${syncAction}${suffix}${socksSuffix}`);
+      toast(`同步完成${suffix}${socksSuffix}`);
       return render();
     }
     if (action === 'toggle') {
@@ -488,12 +708,18 @@ async function handleAction(event) {
     if (action === 'delete-customer' && confirm('确定删除这个用户？会同步删除 3-xui 里的 client，并清理这个用户对应的 SOCKS 路由。')) {
       const result = await api(`/api/customers/${id}`, { method: 'DELETE' });
       state.db = result.data;
-      const removedRules = result.detail?.socksResult?.removedRules || 0;
-      const removedOutbounds = result.detail?.socksResult?.removedOutbounds || 0;
-      const clientText = result.detail?.clientResult?.fallback?.deleted ? '，已用兼容接口删除 3-xui 客户端' : result.detail?.clientResult?.deleted || result.detail?.clientResult?.detached ? '，3-xui 客户端已处理' : '';
-      const inboundText = result.detail?.inboundResult?.deleted ? '，空入站已删除' : '';
-      const warningText = result.warning ? `，远程警告：${result.warning}` : '';
-      toast(`用户已删除，SOCKS 清理：规则 ${removedRules}，出站 ${removedOutbounds}${clientText}${inboundText}${warningText}`);
+      toast(result.warning ? `用户已删除，远程警告：${result.warning}` : '用户已删除，并已同步清理远程资源');
+      return render();
+    }
+    if (action === 'toggle-card') {
+      const card = state.db.cards.find((item) => item.id === id);
+      const result = await api(`/api/cards/${id}`, { method: 'PUT', body: { status: card.status === 'disabled' ? 'unused' : 'disabled' } });
+      state.db = result.data;
+      return render();
+    }
+    if (action === 'delete-card' && confirm('确定删除这张未使用卡密？')) {
+      const result = await api(`/api/cards/${id}`, { method: 'DELETE' });
+      state.db = result.data;
       return render();
     }
     if (action === 'delete-server' && confirm('确定删除这个 3x-ui 节点？')) {
@@ -528,6 +754,35 @@ async function handleAction(event) {
   }
 }
 
+async function handleRedeemSubmit(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  try {
+    const result = await api('/api/user/cards/redeem', { method: 'POST', body: Object.fromEntries(form) });
+    state.db = result.data;
+    toast(result.message || '充值成功');
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function handleUserRenewSubmit(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const months = Math.max(1, Number(form.get('months') || 1));
+  const price = Number(state.db.customer?.amount || 0) * months;
+  if (!confirm(`确认续费 ${months} 个月？将扣除 ${money(price)} ${state.db.settings.currency}`)) return;
+  try {
+    const result = await api('/api/user/renew', { method: 'POST', body: { months } });
+    state.db = result.data;
+    toast(result.warning || '续费成功');
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 async function handleDrawerSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -537,12 +792,12 @@ async function handleDrawerSubmit(event) {
   if (body.expireAt) body.expireAt = toIsoLocal(body.expireAt);
   body.useSocks = Boolean(form.querySelector('[name="useSocks"]')?.checked);
   body.autoCreateInbound = Boolean(form.querySelector('[name="autoCreateInbound"]')?.checked);
-  if (type === 'security' && body.newPassword !== body.confirmPassword) {
-    return toast('两次输入的新密码不一致');
-  }
+  if (type === 'security' && body.newPassword !== body.confirmPassword) return toast('两次输入的新密码不一致');
   try {
     let result;
     if (type === 'customer') result = await api(id ? `/api/customers/${id}` : '/api/customers', { method: id ? 'PUT' : 'POST', body });
+    if (type === 'cards') result = await api('/api/cards/generate', { method: 'POST', body });
+    if (type === 'settings') result = await api('/api/settings', { method: 'PUT', body });
     if (type === 'server') result = await api(id ? `/api/xui-servers/${id}` : '/api/xui-servers', { method: id ? 'PUT' : 'POST', body });
     if (type === 'socks') result = await api(id ? `/api/socks-nodes/${id}` : '/api/socks-nodes', { method: id ? 'PUT' : 'POST', body });
     if (type === 'renew') result = await api(`/api/customers/${id}/renew`, { method: 'POST', body });
@@ -556,7 +811,7 @@ async function handleDrawerSubmit(event) {
     state.db = result.data;
     state.drawer = null;
     render();
-    toast('保存成功');
+    toast(type === 'cards' ? `已生成 ${result.generated?.length || 0} 张卡密` : '保存成功');
   } catch (error) {
     toast(error.message);
   }
