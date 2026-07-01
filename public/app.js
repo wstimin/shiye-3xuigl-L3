@@ -253,7 +253,7 @@ function renderServers() {
     <div class="toolbar"><div class="toolbar-left"></div><div class="toolbar-right"><button class="btn primary" data-action="new-server">+ 添加 3x-ui 节点</button></div></div>
     <section class="panel">
       <div class="panel-head"><div><h2>3x-ui 节点</h2><p>保存中心面板或远程节点的连接信息，用户同步时会使用这里的配置。</p></div></div>
-      <table><thead><tr><th style="width:190px">名称</th><th>地址</th><th style="width:110px">基础路径</th><th style="width:160px">账号 / API</th><th style="width:90px">状态</th><th style="width:250px">操作</th></tr></thead>
+      <table><thead><tr><th style="width:190px">名称</th><th>地址</th><th style="width:110px">基础路径</th><th style="width:160px">账号 / API</th><th style="width:90px">状态</th><th style="width:320px">操作</th></tr></thead>
       <tbody>${state.db.xuiServers.length ? state.db.xuiServers.map(serverRow).join('') : `<tr><td colspan="6" class="empty">还没有 3x-ui 节点。先添加你的中心面板或远程节点。</td></tr>`}</tbody></table>
     </section>`;
 }
@@ -265,7 +265,7 @@ function serverRow(server) {
     <td class="mono">${h(server.basePath)}</td>
     <td>${h(server.username || '-')}<div class="muted">${server.apiToken ? 'Token 已保存' : '无 Token'}</div></td>
     <td><span class="status ${server.status === 'enabled' ? 'active' : 'disabled'}">${server.status === 'enabled' ? '启用' : '停用'}</span></td>
-    <td><div class="row-actions"><button class="btn small" data-action="test-server" data-id="${server.id}">测试</button><button class="btn small" data-action="edit-server" data-id="${server.id}">编辑</button><button class="btn small danger" data-action="delete-server" data-id="${server.id}">删除</button></div></td>
+    <td><div class="row-actions"><button class="btn small" data-action="test-server" data-id="${server.id}">测试</button><button class="btn small primary" data-action="import-server-customers" data-id="${server.id}">同步用户</button><button class="btn small" data-action="edit-server" data-id="${server.id}">编辑</button><button class="btn small danger" data-action="delete-server" data-id="${server.id}">删除</button></div></td>
   </tr>`;
 }
 
@@ -485,9 +485,12 @@ async function handleAction(event) {
       state.db = result.data;
       return render();
     }
-    if (action === 'delete-customer' && confirm('确定删除这个用户？')) {
+    if (action === 'delete-customer' && confirm('确定删除这个用户？会同步删除 3-xui 里的 client，并清理这个用户对应的 SOCKS 路由。')) {
       const result = await api(`/api/customers/${id}`, { method: 'DELETE' });
       state.db = result.data;
+      const removedRules = result.detail?.socksResult?.removedRules || 0;
+      const removedOutbounds = result.detail?.socksResult?.removedOutbounds || 0;
+      toast(`用户已删除，远程 client 和 SOCKS 路由已清理：规则 ${removedRules}，出站 ${removedOutbounds}`);
       return render();
     }
     if (action === 'delete-server' && confirm('确定删除这个 3x-ui 节点？')) {
@@ -510,6 +513,12 @@ async function handleAction(event) {
       const server = state.db.xuiServers.find((item) => item.id === id);
       const result = await api('/api/test-xui', { method: 'POST', body: server });
       return toast(result.message || '3x-ui 节点连接成功');
+    }
+    if (action === 'import-server-customers' && confirm('确定从这个 3-xui 节点同步用户到本地用户列表？相同 Client Email 会更新，不会重复新增。')) {
+      const result = await api(`/api/xui-servers/${id}/import-customers`, { method: 'POST' });
+      state.db = result.data;
+      toast(`同步完成：新增 ${result.detail.created}，更新 ${result.detail.updated}，跳过 ${result.detail.skipped}`);
+      return render();
     }
   } catch (error) {
     toast(error.message);

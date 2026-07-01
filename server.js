@@ -825,6 +825,175 @@ async function xuiClientExists(server, email) {
   }
 }
 
+function clientEmailOf(client) {
+  return String(client?.email || client?.clientEmail || client?.name || '').trim();
+}
+
+function clientUuidOf(client) {
+  const values = [client?.uuid, client?.password, client?.id];
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (!text || /^\d+$/.test(text)) continue;
+    return text;
+  }
+  return '';
+}
+
+function inboundIdsOfClient(client, fallbackInboundId = '') {
+  const raw = client?.inboundIds || client?.inbound_ids || client?.inbounds || client?.inboundId || client?.inbound_id || fallbackInboundId;
+  const values = Array.isArray(raw) ? raw : String(raw || '').split(',');
+  return values.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+}
+
+function expiryIsoFromClient(client) {
+  const value = Number(client?.expiryTime || client?.expiry_time || client?.expire || 0);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const ms = value > 10_000_000_000 ? value : value * 1000;
+  return new Date(ms).toISOString();
+}
+
+function trafficGbFromClient(client) {
+  const bytes = Number(client?.totalGB || client?.total || client?.totalBytes || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return 0;
+  return Math.round((bytes / 1024 / 1024 / 1024) * 100) / 100;
+}
+
+function inboundSettingsOf(inbound) {
+  const parsed = parseMaybeJson(inbound?.settings);
+  return parsed && typeof parsed === 'object' ? parsed : inbound?.settings && typeof inbound.settings === 'object' ? inbound.settings : {};
+}
+
+function clientsFromInbound(inbound) {
+  const settings = inboundSettingsOf(inbound);
+  const clients = Array.isArray(settings.clients) ? settings.clients : Array.isArray(inbound?.clients) ? inbound.clients : [];
+  const inboundId = inboundIdOf(inbound);
+  return clients.map((client) => ({
+    client: { ...client, protocol: inbound?.protocol || client.protocol },
+    inboundIds: inboundId ? [inboundId] : [],
+    inbound
+  }));
+}
+
+async function listXuiInboundsFull(server) {
+  const endpoints = uniqueRoutes([
+    server.listInboundsEndpoint ? { endpoint: server.listInboundsEndpoint } : null,
+    { endpoint: withApiPrefix(server, '/panel/api/inbounds/list') },
+    { endpoint: withApiPrefix(server, '/panel/api/inbounds/list/slim') },
+    { endpoint: withApiPrefix(server, '/panel/api/inbounds/options') }
+  ].filter(Boolean));
+  const errors = [];
+  for (const route of endpoints) {
+    try {
+      const result = await xuiRequest(server, route.endpoint, { method: 'GET' });
+      const items = xuiArray(result.data);
+      return { endpoint: route.endpoint, items, raw: result.data };
+    } catch (error) {
+      errors.push(`${route.endpoint}: ${error.message}`);
+    }
+  }
+  throw new Error(`无法读取 3x-ui 入站列表，已尝试：${errors.join(' | ') || '无详细错误'}`);
+}
+
+async function listXuiClients(server) {
+  const endpoints = uniqueRoutes([
+    { endpoint: withApiPrefix(server, '/panel/api/clients/list') }
+  ]);
+  const errors = [];
+  for (const route of endpoints) {
+    try {
+      const result = await xuiRequest(server, route.endpoint, { method: 'GET' });
+      const rows = xuiArray(result.data);
+      if (rows.length) {
+        return {
+          endpoint: route.endpoint,
+          items: rows.map((row) => ({ client: row.client || row, inboundIds: inboundIdsOfClient(row), raw: row })),
+          raw: result.data
+        };
+      }
+    } catch (error) {
+      errors.push(`${route.endpoint}: ${error.message}`);
+    }
+  }
+  const inbounds = await listXuiInboundsFull(server);
+  return { endpoint: inbounds.endpoint, items: inbounds.items.flatMap(clientsFromInbound), raw: inbounds.raw, warnings: errors };
+}
+
+function customerFromXuiClient(server, item) {
+  const client = item.client || item;
+  const email = clientEmailOf(client);
+  const inboundIds = inboundIdsOfClient(item, item.inboundId || item.inbound_id);
+  return {
+    id: id('cus'),
+    name: email,
+    contact: '',
+    packageName: '3-xui 导入',
+    amount: 0,
+    expireAt: expiryIsoFromClient(client),
+    trafficLimitGb: trafficGbFromClient(client),
+    status: client.enable === false ? 'disabled' : 'active',
+    xuiServerId: server.id,
+    inboundId: inboundIds[0] ? String(inboundIds[0]) : '',
+    autoCreateInbound: false,
+    inboundPort: '',
+    inboundRemark: item.inbound?.remark || '',
+    inboundTemplate: 'vless-tcp',
+    inboundSni: '',
+    inboundHost: '',
+    inboundPath: '',
+    inboundGrpcServiceName: '',
+    inboundCertFile: '',
+    inboundKeyFile: '',
+    clientId: String(client.subId || client.sub_id || email).trim(),
+    clientEmail: email,
+    clientUuid: clientUuidOf(client) || crypto.randomUUID(),
+    protocol: String(client.protocol || item.inbound?.protocol || 'vless').trim() || 'vless',
+    useSocks: false,
+    socksNodeId: '',
+    remark: '从 3-xui 同步导入',
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
+}
+
+async function importCustomersFromXui(db, serverId) {
+  const server = db.xuiServers.find((item) => item.id === serverId);
+  if (!server) throw new Error('3x-ui 节点不存在');
+  const remote = await listXuiClients(server);
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const seen = new Set();
+  for (const item of remote.items) {
+    const incoming = customerFromXuiClient(server, item);
+    if (!incoming.clientEmail || seen.has(incoming.clientEmail)) {
+      skipped += 1;
+      continue;
+    }
+    seen.add(incoming.clientEmail);
+    const index = db.customers.findIndex((customer) => customer.xuiServerId === server.id && customer.clientEmail === incoming.clientEmail);
+    if (index >= 0) {
+      db.customers[index] = {
+        ...db.customers[index],
+        expireAt: incoming.expireAt || db.customers[index].expireAt,
+        trafficLimitGb: incoming.trafficLimitGb || db.customers[index].trafficLimitGb,
+        status: incoming.status,
+        inboundId: incoming.inboundId || db.customers[index].inboundId,
+        inboundRemark: incoming.inboundRemark || db.customers[index].inboundRemark,
+        clientId: incoming.clientId || db.customers[index].clientId,
+        clientUuid: incoming.clientUuid || db.customers[index].clientUuid,
+        protocol: incoming.protocol || db.customers[index].protocol,
+        updatedAt: nowIso()
+      };
+      updated += 1;
+    } else {
+      db.customers.push(incoming);
+      created += 1;
+    }
+  }
+  addLog(db, server.id, 'import', 'success', `已从 3-xui 同步用户：新增 ${created}，更新 ${updated}，跳过 ${skipped}`, { endpoint: remote.endpoint });
+  return { endpoint: remote.endpoint, total: remote.items.length, created, updated, skipped };
+}
+
 async function createXuiInbound(server, customer, currentInbounds) {
   const port = pickInboundPort(currentInbounds.items, customer.inboundPort);
   const realityKeys = customer.inboundTemplate === 'vless-reality' ? await getRealityKeyPair(server) : null;
@@ -942,7 +1111,9 @@ async function syncSocksToXui(db, customer) {
   const boundInbound = inbounds.items.find((item) => inboundIdOf(item) === Number(customer.inboundId));
   const inboundTag = inboundTagOf(boundInbound);
   const oldRuleCount = config.routing.rules.length;
-  config.routing.rules = config.routing.rules.filter((rule) => !isManagedSocksRule(rule, customer.clientEmail, inboundTag, managedTags));
+  config.routing.rules = config.routing.rules.filter((rule) => !isManagedSocksRule(rule, customer.clientEmail, inboundTag, managedTags, {
+    allowInboundTagFallback: Boolean(customer.useSocks || customer.socksNodeId)
+  }));
   const removedRules = oldRuleCount - config.routing.rules.length;
 
   if (!customer.useSocks || !customer.socksNodeId || customer.status === 'disabled') {
@@ -959,15 +1130,95 @@ async function syncSocksToXui(db, customer) {
   const rule = {
     type: 'field',
     enabled: true,
-    outboundTag: socks.tag
+    outboundTag: socks.tag,
+    user: [customer.clientEmail]
   };
   if (inboundTag) rule.inboundTag = [inboundTag];
-  else rule.user = [customer.clientEmail];
   config.routing.rules.unshift(rule);
 
   const saveResult = await saveXrayTemplate(server, config, template.outboundTestUrl);
   const restartResult = await restartXray(server);
   return { applied: true, outboundTag: socks.tag, inboundTag, rule, removedRules, saveResult, restartResult };
+}
+
+async function deleteXuiClient(server, email) {
+  if (!email) return { skipped: true, reason: '没有 Client Email' };
+  const encoded = encodeURIComponent(email);
+  const routes = uniqueRoutes([
+    { endpoint: withApiPrefix(server, `/panel/api/clients/del/${encoded}`), method: 'DELETE' },
+    { endpoint: withApiPrefix(server, `/panel/api/clients/del/${encoded}`), method: 'POST' }
+  ]);
+  const errors = [];
+  let missing = null;
+  for (const route of routes) {
+    try {
+      const result = await xuiRequest(server, route.endpoint, { method: route.method });
+      return { deleted: true, endpoint: route.endpoint, method: route.method, result: result.data };
+    } catch (error) {
+      if (/record not found|not found|404/i.test(error.message)) {
+        missing = { deleted: false, missing: true, endpoint: route.endpoint, method: route.method };
+        continue;
+      }
+      errors.push(`${route.method} ${route.endpoint}: ${error.message}`);
+    }
+  }
+  if (missing && !errors.length) return missing;
+  throw new Error(`删除 3-xui client 失败，已尝试：${errors.join(' | ') || '无详细错误'}`);
+}
+
+function outboundTagStillUsed(db, customer, config, socks) {
+  if (!socks?.tag) return true;
+  const usedByRules = Array.isArray(config.routing?.rules) && config.routing.rules.some((rule) => rule?.outboundTag === socks.tag);
+  if (usedByRules) return true;
+  return db.customers.some((item) => item.id !== customer.id && item.useSocks && item.socksNodeId === socks.id && item.status !== 'disabled');
+}
+
+async function cleanupCustomerSocksFromXui(db, customer, server) {
+  if (!customer.useSocks && !customer.socksNodeId) return { skipped: true, reason: '用户没有启用 SOCKS 中转' };
+  const socks = db.socksNodes.find((item) => item.id === customer.socksNodeId);
+  const managedTags = new Set(db.socksNodes.map((item) => item.tag).filter(Boolean));
+  if (!managedTags.size) return { skipped: true, reason: '没有可管理的 SOCKS 出站' };
+
+  const template = await readXrayTemplate(server);
+  const config = template.config;
+  config.outbounds = Array.isArray(config.outbounds) ? config.outbounds : [];
+  config.routing = config.routing && typeof config.routing === 'object' ? config.routing : {};
+  config.routing.rules = Array.isArray(config.routing.rules) ? config.routing.rules : [];
+
+  let inboundTag = '';
+  try {
+    const inbounds = await listXuiInbounds(server);
+    const boundInbound = inbounds.items.find((item) => inboundIdOf(item) === Number(customer.inboundId));
+    inboundTag = inboundTagOf(boundInbound);
+  } catch {
+    inboundTag = '';
+  }
+
+  const oldRuleCount = config.routing.rules.length;
+  config.routing.rules = config.routing.rules.filter((rule) => !isManagedSocksRule(rule, customer.clientEmail, inboundTag, managedTags, {
+    allowInboundTagFallback: Boolean(customer.useSocks || customer.socksNodeId)
+  }));
+  const removedRules = oldRuleCount - config.routing.rules.length;
+  let removedOutbounds = 0;
+  if (socks?.tag && !outboundTagStillUsed(db, customer, config, socks)) {
+    const oldOutboundCount = config.outbounds.length;
+    config.outbounds = config.outbounds.filter((outbound) => outbound?.tag !== socks.tag);
+    removedOutbounds = oldOutboundCount - config.outbounds.length;
+  }
+
+  if (!removedRules && !removedOutbounds) return { skipped: true, removedRules, removedOutbounds };
+  const saveResult = await saveXrayTemplate(server, config, template.outboundTestUrl);
+  const restartResult = await restartXray(server);
+  return { removedRules, removedOutbounds, inboundTag, outboundTag: socks?.tag || '', saveResult, restartResult };
+}
+
+async function cleanupCustomerRemoteResources(db, customer) {
+  if (!customer?.xuiServerId) return { skipped: true, reason: '用户没有绑定 3x-ui 节点' };
+  const server = db.xuiServers.find((item) => item.id === customer.xuiServerId);
+  if (!server) throw new Error('用户绑定的 3x-ui 节点不存在，无法同步删除远程资源');
+  const socksResult = await cleanupCustomerSocksFromXui(db, customer, server);
+  const clientResult = await deleteXuiClient(server, customer.clientEmail);
+  return { clientResult, socksResult };
 }
 
 function buildSocksOutbound(socks) {
@@ -986,11 +1237,11 @@ function buildSocksOutbound(socks) {
   };
 }
 
-function isManagedSocksRule(rule, email, inboundTag, managedTags) {
+function isManagedSocksRule(rule, email, inboundTag, managedTags, options = {}) {
   if (!rule || !managedTags.has(rule.outboundTag)) return false;
   const users = Array.isArray(rule.user) ? rule.user : [];
   const inboundTags = Array.isArray(rule.inboundTag) ? rule.inboundTag : [];
-  return users.includes(email) || Boolean(inboundTag && inboundTags.includes(inboundTag));
+  return users.includes(email) || Boolean(options.allowInboundTagFallback && inboundTag && inboundTags.includes(inboundTag));
 }
 
 function parseMaybeJson(value) {
@@ -1237,6 +1488,19 @@ async function routeApi(req, res, url) {
     return send(res, 200, { ok: true, data: publicDb(db) });
   }
 
+  const importServerMatch = url.pathname.match(/^\/api\/xui-servers\/([^/]+)\/import-customers$/);
+  if (importServerMatch && req.method === 'POST') {
+    try {
+      const detail = await importCustomersFromXui(db, importServerMatch[1]);
+      await writeDb(db);
+      return send(res, 200, { ok: true, data: publicDb(db), detail });
+    } catch (error) {
+      addLog(db, importServerMatch[1], 'import', 'failed', error.message);
+      await writeDb(db);
+      return sendError(res, error.statusCode || 500, '同步 3-xui 用户失败', error.message);
+    }
+  }
+
   if (url.pathname === '/api/socks-nodes' && req.method === 'POST') {
     const body = await parseJson(req);
     const node = normalizeSocks(body);
@@ -1282,10 +1546,19 @@ async function routeApi(req, res, url) {
     return send(res, 200, { ok: true, data: publicDb(db) });
   }
   if (customerMatch && req.method === 'DELETE') {
-    db.customers = db.customers.filter((item) => item.id !== customerMatch[1]);
-    addLog(db, customerMatch[1], 'customer', 'success', '用户已删除');
-    await writeDb(db);
-    return send(res, 200, { ok: true, data: publicDb(db) });
+    const customer = db.customers.find((item) => item.id === customerMatch[1]);
+    if (!customer) return sendError(res, 404, '用户不存在');
+    try {
+      const cleanup = await cleanupCustomerRemoteResources(db, customer);
+      db.customers = db.customers.filter((item) => item.id !== customerMatch[1]);
+      addLog(db, customer.id, 'delete', 'success', '用户已删除，并已同步清理 3-xui 资源', cleanup);
+      await writeDb(db);
+      return send(res, 200, { ok: true, data: publicDb(db), detail: cleanup });
+    } catch (error) {
+      addLog(db, customer.id, 'delete', 'failed', error.message);
+      await writeDb(db);
+      return sendError(res, error.statusCode || 500, '删除失败，已保留本地用户', error.message);
+    }
   }
 
   const renewMatch = url.pathname.match(/^\/api\/customers\/([^/]+)\/renew$/);
