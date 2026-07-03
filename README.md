@@ -28,34 +28,24 @@
 
 ## 一键安装
 
-测试或个人使用可以直接执行：
+新手推荐直接执行交互式安装向导：
 
 ```bash
-REPO_URL=https://github.com/wstimin/3-xuiguanli-shangye.git bash <(curl -fsSL https://raw.githubusercontent.com/wstimin/3-xuiguanli-shangye/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/wstimin/3-xuiguanli-shangye/main/install.sh -o install.sh
+REPO_URL=https://github.com/wstimin/3-xuiguanli-shangye.git bash install.sh
 ```
 
-公开给用户使用建议使用 MySQL。先创建数据库和账号：
+说明：交互式安装请使用上面这种“先下载、再执行”的方式，这样脚本才能正常接收你的选项。
 
-```sql
-CREATE DATABASE shiye_management CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'shiye'@'127.0.0.1' IDENTIFIED BY '请换成强密码';
-GRANT ALL PRIVILEGES ON shiye_management.* TO 'shiye'@'127.0.0.1';
-FLUSH PRIVILEGES;
-```
+脚本会按顺序询问并自动处理：
 
-然后执行一键安装：
+- 项目端口、管理员入口路径、安装目录
+- 数据库模式：自动安装本机 MySQL/MariaDB、连接已有 MySQL、或 JSON 测试模式
+- 是否安装 Nginx 反向代理
+- 是否自动申请 HTTPS 证书
+- 拉取项目、安装依赖、创建 systemd 服务并启动
 
-```bash
-DB_CLIENT=mysql \
-MYSQL_HOST=127.0.0.1 \
-MYSQL_PORT=3306 \
-MYSQL_USER=shiye \
-MYSQL_PASSWORD='请换成强密码' \
-MYSQL_DATABASE=shiye_management \
-ADMIN_PATH=/admin \
-REPO_URL=https://github.com/wstimin/3-xuiguanli-shangye.git \
-bash <(curl -fsSL https://raw.githubusercontent.com/wstimin/3-xuiguanli-shangye/main/install.sh)
-```
+公开给用户使用建议在数据库选项里选择 `自动安装本机 MySQL/MariaDB` 或 `连接已有 MySQL 数据库`。个人测试才建议选择 JSON 文件模式。
 
 如果你 Fork 了本项目，把命令里的仓库地址改成自己的；如果默认分支不是 `main`，也要把链接里的 `main` 改成实际分支名。
 
@@ -66,9 +56,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/wstimin/3-xuiguanli-shangye/
 管理员入口：http://服务器IP:3388/admin
 ```
 
-如果要更换管理员入口，把 `ADMIN_PATH=/admin` 改成自己的路径，例如 `ADMIN_PATH=/myadmin2026`。
+如果要更换管理员入口，在安装向导询问“管理员入口路径”时填写自己的路径，例如 `/myadmin2026`。
 
 重新部署时可以重新执行一键安装命令。脚本会覆盖程序文件、保留 `data/` 目录并重启服务。使用 MySQL 时，业务数据保存在 MySQL 中，服务密钥会写入 `/etc/default/shiye-management-system`。
+
+安装完成后，终端会直接显示用户入口、管理员入口、默认账号密码、项目目录、服务名称、MySQL 连接信息、Nginx 配置路径和常用命令，请直接复制保存，不需要自己去服务器目录里找。
 
 默认账号：
 
