@@ -2,6 +2,7 @@
 set -euo pipefail
 
 APP_NAME="${APP_NAME:-shiye-management-system}"
+INSTALLER_VERSION="2026-07-04-2"
 APP_DIR="${APP_DIR:-/opt/shiye-management-system}"
 PORT="${PORT:-3388}"
 ADMIN_PATH="${ADMIN_PATH:-/admin}"
@@ -147,7 +148,9 @@ install_node() {
     return
   fi
   if command -v node >/dev/null 2>&1; then
-    major="$(node -v | sed 's/^v//' | cut -d. -f1)"
+    node_version="$(node -v)"
+    node_version="${node_version#v}"
+    major="${node_version%%.*}"
     if [ "${major}" -ge 20 ]; then
       echo "==> 已检测到 Node.js $(node -v)"
       return
@@ -189,10 +192,6 @@ install_local_mysql() {
   start_database_service
 }
 
-sql_escape() {
-  printf '%s' "$1" | sed "s/'/''/g"
-}
-
 mysql_root_exec() {
   sql_file="$1"
   if mysql -uroot -e "SELECT 1" >/dev/null 2>&1; then
@@ -221,17 +220,20 @@ create_local_mysql_database() {
   if [ -z "${MYSQL_PASSWORD:-}" ]; then
     MYSQL_PASSWORD="$(random_password)"
   fi
+  case "${MYSQL_PASSWORD}" in
+    *"'"*|*"\\"*|*$'\n'*|*$'\r'*)
+      echo "数据库密码不能包含单引号、反斜杠或换行，请换一个密码，或留空让脚本自动生成。"
+      exit 1
+      ;;
+  esac
 
   tmp_sql="$(mktemp)"
-  db_name="$(sql_escape "${MYSQL_DATABASE}")"
-  db_user="$(sql_escape "${MYSQL_USER}")"
-  db_pass="$(sql_escape "${MYSQL_PASSWORD}")"
   cat > "${tmp_sql}" <<SQL
-CREATE DATABASE IF NOT EXISTS \`${db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${db_user}'@'127.0.0.1' IDENTIFIED BY '${db_pass}';
-CREATE USER IF NOT EXISTS '${db_user}'@'localhost' IDENTIFIED BY '${db_pass}';
-GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'127.0.0.1';
-GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'localhost';
+CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'127.0.0.1' IDENTIFIED BY '${MYSQL_PASSWORD}';
+CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${MYSQL_PASSWORD}';
+GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'127.0.0.1';
+GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'localhost';
 FLUSH PRIVILEGES;
 SQL
   mysql_root_exec "${tmp_sql}"
@@ -338,6 +340,7 @@ install_app_files() {
 
   if [ -n "${REPO_URL}" ]; then
     if [ -d "${APP_DIR}/.git" ]; then
+      git -C "${APP_DIR}" remote set-url origin "${REPO_URL}" >/dev/null 2>&1 || true
       git -C "${APP_DIR}" pull --ff-only
     else
       tmp_dir="$(mktemp -d)"
@@ -379,7 +382,13 @@ write_service() {
   elif [ -n "${SHIYE_SECRET:-}" ]; then
     existing_secret="${SHIYE_SECRET}"
   elif [ -f "${ENV_FILE}" ]; then
-    existing_secret="$(grep -E '^APP_SECRET=' "${ENV_FILE}" | tail -n 1 | sed 's/^APP_SECRET=//' | sed 's/^"//' | sed 's/"$//' || true)"
+    while IFS= read -r line; do
+      case "${line}" in
+        APP_SECRET=*) existing_secret="${line#APP_SECRET=}" ;;
+      esac
+    done < "${ENV_FILE}"
+    existing_secret="${existing_secret%\"}"
+    existing_secret="${existing_secret#\"}"
   elif [ -f "${APP_DIR}/data/.secret" ]; then
     existing_secret="$(tr -d '\r\n' < "${APP_DIR}/data/.secret")"
   fi
@@ -554,7 +563,7 @@ print_summary() {
 }
 
 main() {
-  echo "==> 十夜管理系统安装向导"
+  echo "==> 十夜管理系统安装向导 ${INSTALLER_VERSION}"
   if can_prompt; then
     PORT="$(ask_value '项目运行端口' "${PORT}")"
     ADMIN_PATH="$(normalize_route_path "$(ask_value '管理员入口路径' "${ADMIN_PATH}")")"
