@@ -166,6 +166,42 @@ install_node() {
 random_hex() { openssl rand -hex 32; }
 random_base64() { openssl rand -base64 32; }
 
+detect_server_ip() {
+  detected_ip=""
+  if command -v curl >/dev/null 2>&1; then
+    detected_ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+  fi
+  if [ -z "${detected_ip}" ]; then
+    detected_ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  fi
+  printf "%s" "${detected_ip:-SERVER_IP}"
+}
+
+resolve_public_url() {
+  if [ -n "${PUBLIC_WEB_URL:-}" ]; then
+    printf "%s" "${PUBLIC_WEB_URL}"
+  elif [ -n "${DOMAIN}" ]; then
+    if is_no "${ENABLE_HTTPS}"; then printf "http://%s" "${DOMAIN}"; else printf "https://%s" "${DOMAIN}"; fi
+  else
+    printf "http://%s:%s" "$(detect_server_ip)" "${PORT}"
+  fi
+}
+
+escape_sed_replacement() {
+  printf "%s" "$1" | sed 's/[\/&|]/\\&/g'
+}
+
+set_env_value() {
+  key="$1"
+  value="$2"
+  escaped_value="$(escape_sed_replacement "${value}")"
+  if grep -qE "^${key}=" .env; then
+    sed -i "s|^${key}=.*|${key}=${escaped_value}|" .env
+  else
+    printf "\n%s=%s\n" "${key}" "${value}" >> .env
+  fi
+}
+
 validate_mysql_name() {
   value="$1"
   label="$2"
@@ -245,18 +281,15 @@ install_app_files() {
 
 write_env_file() {
   cd "${APP_DIR}"
+  public_url="$(resolve_public_url)"
+
   if [ -f .env ]; then
     log "Keeping existing ${APP_DIR}/.env"
+    set_env_value NODE_ENV production
+    set_env_value PORT "${PORT}"
+    set_env_value PUBLIC_WEB_URL "${public_url}"
+    set_env_value ADMIN_PATH /admin
     return
-  fi
-
-  public_url="${PUBLIC_WEB_URL:-}"
-  if [ -z "${public_url}" ]; then
-    if [ -n "${DOMAIN}" ]; then
-      if is_no "${ENABLE_HTTPS}"; then public_url="http://${DOMAIN}"; else public_url="https://${DOMAIN}"; fi
-    else
-      public_url="http://127.0.0.1:${PORT}"
-    fi
   fi
 
   cat > .env <<ENV
@@ -529,10 +562,13 @@ main() {
 
   systemctl --no-pager --full status "${APP_NAME}" || true
 
-  base_url="http://SERVER_IP:${PORT}"
+  base_url="http://$(detect_server_ip):${PORT}"
   if [ "${INSTALL_NGINX_SELECTED:-0}" -eq 1 ]; then
     base_url="http://${DOMAIN}"
     if [ "${INSTALL_HTTPS_SELECTED:-0}" -eq 1 ]; then base_url="https://${DOMAIN}"; fi
+  else
+    echo
+    echo "Nginx/domain access was not enabled. Open port ${PORT} in the server firewall/security group, or rerun with DOMAIN and ENABLE_NGINX=yes."
   fi
 
   admin_password="$(grep -E '^DEFAULT_ADMIN_PASSWORD=' "${APP_DIR}/.env" | tail -n 1 | cut -d= -f2-)"
