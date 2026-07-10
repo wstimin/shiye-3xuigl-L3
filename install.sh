@@ -27,17 +27,17 @@ is_no() { case "$(to_lower "$1")" in n|no|0|false|off|disable|disabled|skip) ret
 ask_yes_no() {
   prompt="$1"
   default_answer="$2"
-  if [ ! -t 0 ]; then
+  if [ ! -r /dev/tty ]; then
     is_yes "${default_answer}"
     return
   fi
 
   while true; do
     if is_yes "${default_answer}"; then
-      read -r -p "${prompt} [Y/n]: " answer
+      read -r -p "${prompt} [Y/n]: " answer </dev/tty
       answer="${answer:-y}"
     else
-      read -r -p "${prompt} [y/N]: " answer
+      read -r -p "${prompt} [y/N]: " answer </dev/tty
       answer="${answer:-n}"
     fi
 
@@ -45,6 +45,19 @@ ask_yes_no() {
     if is_no "${answer}"; then return 1; fi
     echo "Please answer yes or no."
   done
+}
+
+can_prompt() { [ -r /dev/tty ]; }
+
+prompt_required() {
+  prompt="$1"
+  value=""
+  can_prompt || die "${prompt} is required"
+  while [ -z "${value}" ]; do
+    read -r -p "${prompt}: " value </dev/tty
+    value="$(printf "%s" "${value}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  done
+  printf "%s" "${value}"
 }
 
 require_root() {
@@ -290,6 +303,49 @@ validate_domain() {
   echo "${DOMAIN}" | grep -Eq '\.' || die "DOMAIN must be a valid domain name, for example panel.example.com"
 }
 
+select_access_mode() {
+  INSTALL_NGINX_SELECTED=0
+  INSTALL_HTTPS_SELECTED=0
+
+  if is_yes "${ENABLE_NGINX}"; then
+    INSTALL_NGINX_SELECTED=1
+  elif is_no "${ENABLE_NGINX}"; then
+    INSTALL_NGINX_SELECTED=0
+  elif ask_yes_no "Use domain access with Nginx? Choose no for IP + port access" "$([ -n "${DOMAIN}" ] && echo yes || echo no)"; then
+    INSTALL_NGINX_SELECTED=1
+  fi
+
+  if [ "${INSTALL_NGINX_SELECTED}" -ne 1 ]; then
+    ENABLE_NGINX="no"
+    ENABLE_HTTPS="no"
+    log "Access mode: IP + port, for example http://SERVER_IP:${PORT}/"
+    return
+  fi
+
+  if [ -z "${DOMAIN}" ]; then DOMAIN="$(prompt_required "Domain name, for example panel.example.com")"; fi
+  validate_domain
+  ENABLE_NGINX="yes"
+
+  if is_yes "${ENABLE_HTTPS}"; then
+    INSTALL_HTTPS_SELECTED=1
+  elif is_no "${ENABLE_HTTPS}"; then
+    INSTALL_HTTPS_SELECTED=0
+  elif ask_yes_no "Apply for a Let's Encrypt HTTPS certificate now" "yes"; then
+    INSTALL_HTTPS_SELECTED=1
+  fi
+
+  if [ "${INSTALL_HTTPS_SELECTED}" -eq 1 ]; then
+    ENABLE_HTTPS="yes"
+    if [ -z "${CERTBOT_EMAIL}" ] && can_prompt && ask_yes_no "Provide an email for Let's Encrypt notices" "no"; then
+      CERTBOT_EMAIL="$(prompt_required "Certbot email")"
+    fi
+    log "Access mode: domain + HTTPS, https://${DOMAIN}/"
+  else
+    ENABLE_HTTPS="no"
+    log "Access mode: domain + HTTP, http://${DOMAIN}/"
+  fi
+}
+
 install_nginx_package() {
   if ! command -v nginx >/dev/null 2>&1; then install_package nginx; fi
   systemctl enable --now nginx >/dev/null 2>&1 || true
@@ -374,28 +430,8 @@ request_certificate() {
 }
 
 configure_optional_nginx() {
-  INSTALL_NGINX_SELECTED=0
-  INSTALL_HTTPS_SELECTED=0
-
-  if is_yes "${ENABLE_NGINX}"; then
-    INSTALL_NGINX_SELECTED=1
-  elif is_no "${ENABLE_NGINX}"; then
-    INSTALL_NGINX_SELECTED=0
-  elif ask_yes_no "Install Nginx reverse proxy and serve web pages?" "$([ -n "${DOMAIN}" ] && echo yes || echo no)"; then
-    INSTALL_NGINX_SELECTED=1
-  fi
-
   if [ "${INSTALL_NGINX_SELECTED}" -ne 1 ]; then return; fi
-  if [ -z "${DOMAIN}" ] && [ -t 0 ]; then read -r -p "Domain name, for example panel.example.com: " DOMAIN; fi
   validate_domain
-
-  if is_yes "${ENABLE_HTTPS}"; then
-    INSTALL_HTTPS_SELECTED=1
-  elif is_no "${ENABLE_HTTPS}"; then
-    INSTALL_HTTPS_SELECTED=0
-  elif ask_yes_no "Apply for a Let's Encrypt HTTPS certificate now?" "yes"; then
-    INSTALL_HTTPS_SELECTED=1
-  fi
 
   write_nginx_config
   if [ "${INSTALL_HTTPS_SELECTED}" -eq 1 ]; then request_certificate; fi
@@ -404,6 +440,9 @@ configure_optional_nginx() {
 main() {
   require_root
   detect_pkg_manager
+
+  log "Selecting access mode"
+  select_access_mode
 
   log "Installing base packages"
   install_base_packages
