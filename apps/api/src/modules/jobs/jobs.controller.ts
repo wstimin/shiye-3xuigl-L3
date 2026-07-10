@@ -1,14 +1,17 @@
 import { Controller, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../shared/auth.guard.js';
 import { Roles } from '../../shared/roles.decorator.js';
+import { JobsService } from './jobs.service.js';
 
 @Controller('admin/jobs')
 @UseGuards(AuthGuard)
 @Roles('admin')
 export class JobsController {
+  constructor(private readonly jobs: JobsService) {}
+
   @Post('disable-expired')
   disableExpired() {
-    throw new ServiceUnavailableException('自动停用过期节点任务暂未启用');
+    return this.jobs.disableExpiredNodes('manual');
   }
 
   @Post('sync-traffic')

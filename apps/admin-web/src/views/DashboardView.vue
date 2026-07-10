@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api';
 
 type CustomerResult = { total: number; items: Array<{ id: string; status: string }> };
@@ -7,14 +8,17 @@ type ServiceNode = { id: string; enabled: boolean };
 type XuiServer = { id: string; enabled: boolean };
 type CardResult = { total: number; items: Array<{ id: string; status: string }> };
 type PaymentChannel = { id: string; enabled: boolean };
+type DisableExpiredResult = { checkedAt: string; total: number; success: number; failed: number };
 
 const loading = ref(false);
+const jobRunning = ref(false);
 const error = ref('');
 const customers = ref<CustomerResult>({ total: 0, items: [] });
 const serviceNodes = ref<ServiceNode[]>([]);
 const servers = ref<XuiServer[]>([]);
 const cards = ref<CardResult>({ total: 0, items: [] });
 const paymentChannels = ref<PaymentChannel[]>([]);
+const lastDisableExpired = ref<DisableExpiredResult | null>(null);
 
 const activeCustomers = computed(() => customers.value.items.filter((item) => item.status === 'active').length);
 const enabledNodes = computed(() => serviceNodes.value.filter((item) => item.enabled).length);
@@ -43,6 +47,22 @@ async function loadDashboard() {
   }
 }
 
+async function disableExpiredNodes() {
+  await ElMessageBox.confirm('系统会把已到期且仍处于启用状态的用户节点同步停用到远端 3x-ui，远端同步成功后才更新本地状态。确认执行？', '停用过期节点', { type: 'warning' });
+  jobRunning.value = true;
+  error.value = '';
+  try {
+    const result = await api<DisableExpiredResult>('/api/admin/jobs/disable-expired', { method: 'POST' });
+    lastDisableExpired.value = result;
+    ElMessage.success(`执行完成：成功 ${result.success}，失败 ${result.failed}，总数 ${result.total}`);
+    await loadDashboard();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '停用过期节点失败';
+  } finally {
+    jobRunning.value = false;
+  }
+}
+
 onMounted(loadDashboard);
 </script>
 
@@ -64,7 +84,11 @@ onMounted(loadDashboard);
     </div>
     <el-descriptions :column="1" border>
       <el-descriptions-item label="在线支付">{{ paymentChannels.filter((item) => item.enabled).length ? '已启用' : '未启用' }}</el-descriptions-item>
-      <el-descriptions-item label="自动停用过期节点">未启用</el-descriptions-item>
+      <el-descriptions-item label="自动停用过期节点">
+        已启用，每 10 分钟执行一次
+        <el-button size="small" type="primary" plain :loading="jobRunning" @click="disableExpiredNodes">立即执行</el-button>
+        <span v-if="lastDisableExpired" class="inline-note">上次：成功 {{ lastDisableExpired.success }}，失败 {{ lastDisableExpired.failed }}</span>
+      </el-descriptions-item>
       <el-descriptions-item label="远端流量同步任务">未启用</el-descriptions-item>
     </el-descriptions>
   </div>

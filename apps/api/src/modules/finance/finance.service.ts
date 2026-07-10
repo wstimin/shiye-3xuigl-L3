@@ -21,7 +21,6 @@ export class FinanceService {
       include: { serviceNode: true, customer: true }
     });
     if (!customerNode) throw new NotFoundException('用户节点不存在');
-    if (customerNode.status !== 'active') throw new BadRequestException('节点已停用，不能续费');
 
     const priceMonthly = new Prisma.Decimal(customerNode.serviceNode.priceMonthly);
     const amount = priceMonthly.mul(months);

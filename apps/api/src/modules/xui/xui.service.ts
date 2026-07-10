@@ -21,6 +21,7 @@ type SyncOptions = {
   expireAt?: Date | null;
   status?: AccountStatus;
   trafficLimitGb?: Prisma.Decimal | number | string | null;
+  createIfMissing?: boolean;
 };
 
 @Injectable()
@@ -128,8 +129,9 @@ export class XuiService {
     const serverId = server.id;
 
     try {
-      if (!server.enabled) throw new BadRequestException('3x-ui 服务器已停用');
-      if (!customerNode.serviceNode.enabled) throw new BadRequestException('服务节点已停用');
+      const targetStatus = options.status || customerNode.status;
+      if (!server.enabled && targetStatus === 'active') throw new BadRequestException('3x-ui 服务器已停用');
+      if (!customerNode.serviceNode.enabled && targetStatus === 'active') throw new BadRequestException('服务节点已停用');
       if (!customerNode.serviceNode.inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
 
       const client = await this.createAuthenticatedClient(server);
@@ -149,12 +151,32 @@ export class XuiService {
         uuid,
         subId,
         email: customerNode.xuiEmail,
-        enabled: (options.status || customerNode.status) === 'active',
+        enabled: targetStatus === 'active',
         expireAt: options.expireAt === undefined ? customerNode.expireAt : options.expireAt,
         trafficLimitGb: options.trafficLimitGb ?? customerNode.trafficLimitGb
       });
 
       const existing = await this.findClient(client, customerNode.xuiEmail, inbounds);
+      if (!existing.exists && options.createIfMissing === false) {
+        const syncedAt = new Date();
+        const updatedNode = await this.prisma.customerNode.update({
+          where: { id: customerNode.id },
+          data: { uuid, lastSyncedAt: syncedAt, config: this.toJsonValue({ ...(this.xuiObject(customerNode.config)), subId, links: [] }) },
+          include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+        });
+        const detail = {
+          customerId,
+          customerNodeId,
+          inboundId,
+          xuiEmail: customerNode.xuiEmail,
+          route: 'clients/get',
+          action: 'already-absent',
+          subId,
+          links: [] as string[]
+        };
+        await this.writeSyncLog(serverId, 'customer-node-sync', 'success', `Remote client already absent: ${customerNode.xuiEmail}`, detail);
+        return { synced: true, action: 'already-absent', route: 'clients/get', node: updatedNode, detail };
+      }
       const route = existing.exists ? 'clients/update' : 'clients/add';
       const payload = existing.exists
         ? await client.updateClient(customerNode.xuiEmail, { ...xuiClient, inboundIds: [inboundId] })

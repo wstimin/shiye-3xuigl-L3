@@ -28,11 +28,13 @@ body { margin: 0; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; back
 .customer-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
 .customer-form-grid .el-form-item { margin-bottom: 0; }
 .muted-text { color: #94a3b8; }
+.inline-note { margin-left: 10px; color: #64748b; font-size: 12px; }
 .node-list { display: grid; gap: 8px; padding: 6px 0; }
 .node-row { min-height: 52px; display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: center; gap: 10px; }
 .customer-node-row { grid-template-columns: minmax(0, 1fr) auto; }
 .node-actions { display: flex; align-items: center; gap: 6px; }
 .node-meta { min-width: 0; display: grid; gap: 2px; }
+.node-title-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .node-meta strong, .node-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node-meta span { color: #64748b; font-size: 12px; }
 .inline-form { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px 12px; align-items: end; }

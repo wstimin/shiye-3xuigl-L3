@@ -264,7 +264,10 @@ onMounted(loadCustomers);
           <div v-if="row.nodes?.length" class="node-list">
             <div v-for="node in row.nodes" :key="node.id" class="node-row customer-node-row">
               <div class="node-meta">
-                <strong>{{ node.serviceNode?.name || node.xuiEmail }}</strong>
+                <strong class="node-title-line">
+                  {{ node.serviceNode?.name || node.xuiEmail }}
+                  <el-tag size="small" :type="node.status === 'active' ? 'success' : 'info'">{{ node.status === 'active' ? '启用' : '停用' }}</el-tag>
+                </strong>
                 <span>{{ node.serviceNode?.server?.name || '-' }} / {{ node.xuiEmail }}</span>
                 <span>到期 {{ formatDate(node.expireAt) }} · 同步 {{ formatDate(node.lastSyncedAt) }}</span>
               </div>
