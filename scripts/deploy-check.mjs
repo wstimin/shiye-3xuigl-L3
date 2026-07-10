@@ -2,6 +2,10 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const errors = [];
 
+readRequiredFile('apps/api/dist/main.js');
+readRequiredFile('packages/shared/dist/index.js');
+readRequiredFile('packages/xui-client/dist/index.js');
+readRequiredFile('packages/payment-core/dist/index.js');
 const adminIndex = readRequiredFile('dist/admin-web/index.html');
 const userIndex = readRequiredFile('dist/user-web/index.html');
 const nginxConfig = readRequiredFile('infra/nginx/shiye.conf');

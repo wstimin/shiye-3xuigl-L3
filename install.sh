@@ -323,6 +323,14 @@ install_dependencies_and_build() {
   npm prune --omit=dev
 }
 
+verify_runtime_files() {
+  cd "${APP_DIR}"
+  required_files="apps/api/dist/main.js packages/shared/dist/index.js packages/xui-client/dist/index.js packages/payment-core/dist/index.js dist/user-web/index.html dist/admin-web/index.html"
+  for file in ${required_files}; do
+    [ -f "${file}" ] || die "Required runtime file is missing: ${APP_DIR}/${file}. Build did not complete correctly."
+  done
+}
+
 cleanup_runtime_files() {
   if [ "${SCRIPT_DIR:-}" = "${APP_DIR}" ] && [ -d "${APP_DIR}/.git" ]; then
     log "Skipping runtime cleanup because ${APP_DIR} is the source checkout"
@@ -550,7 +558,12 @@ main() {
   log "Installing dependencies, migrating database and building"
   install_dependencies_and_build
 
+  log "Verifying runtime files"
+  verify_runtime_files
+
   cleanup_runtime_files
+
+  verify_runtime_files
 
   log "Writing systemd service"
   write_service

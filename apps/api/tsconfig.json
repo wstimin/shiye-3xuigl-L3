@@ -5,9 +5,16 @@
     "moduleResolution": "NodeNext",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
+    "baseUrl": "../..",
     "outDir": "dist",
+    "rootDir": "src",
     "sourceMap": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@shiye/shared": ["packages/shared/dist/index.d.ts"],
+      "@shiye/xui-client": ["packages/xui-client/dist/index.d.ts"],
+      "@shiye/payment-core": ["packages/payment-core/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*.ts"]
 }
