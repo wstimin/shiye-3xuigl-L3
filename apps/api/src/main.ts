@@ -2,7 +2,8 @@ import 'reflect-metadata';
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './modules/app.module.js';
@@ -27,7 +28,7 @@ async function bootstrap() {
 }
 
 function serveWebApps(server: express.Express) {
-  const rootDir = process.cwd();
+  const rootDir = findRuntimeRoot();
   const userWebDir = join(rootDir, 'dist/user-web');
   const adminWebDir = join(rootDir, 'dist/admin-web');
 
@@ -50,6 +51,20 @@ function serveWebApps(server: express.Express) {
     if (!existsSync(indexFile)) return next();
     return response.sendFile(indexFile);
   });
+}
+
+function findRuntimeRoot() {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.cwd(),
+    resolve(process.cwd(), '../..'),
+    resolve(moduleDir, '../../..')
+  ];
+
+  return candidates.find((candidate) => (
+    existsSync(join(candidate, 'dist/user-web/index.html')) ||
+    existsSync(join(candidate, 'dist/admin-web/index.html'))
+  )) || process.cwd();
 }
 
 void bootstrap();

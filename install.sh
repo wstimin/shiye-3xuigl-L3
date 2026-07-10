@@ -418,6 +418,18 @@ wait_for_api_health() {
   die "API health check did not pass after $((attempts * 2)) seconds: ${health_url}"
 }
 
+verify_web_routes() {
+  for path in / /admin /admin/; do
+    url="http://127.0.0.1:${PORT}${path}"
+    content_type="$(curl -fsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
+    case "${content_type}" in
+      text/html*) ;;
+      *) die "Web route ${url} did not return HTML. Got content-type: ${content_type:-none}" ;;
+    esac
+  done
+  log "Web route checks passed"
+}
+
 validate_domain() {
   [ -n "${DOMAIN}" ] || die "DOMAIN is required when Nginx is enabled"
   echo "${DOMAIN}" | grep -Eq '^[A-Za-z0-9.-]+$' || die "DOMAIN can only contain letters, numbers, dots and hyphens"
@@ -599,6 +611,7 @@ main() {
   systemctl enable "${APP_NAME}"
   systemctl restart "${APP_NAME}"
   wait_for_api_health
+  verify_web_routes
 
   configure_optional_nginx
 
