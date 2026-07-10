@@ -64,6 +64,13 @@ export class NodesController {
     return this.nodes.bindCustomerNode(id, body);
   }
 
+  @Patch('admin/customers/:id/nodes/:nodeId')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  updateCustomerNode(@Param('id') id: string, @Param('nodeId') nodeId: string, @Body(new ZodValidationPipe(customerNodeCreateSchema.partial())) body: Partial<z.infer<typeof customerNodeCreateSchema>>) {
+    return this.nodes.updateCustomerNode(id, nodeId, body);
+  }
+
   @Delete('admin/customers/:id/nodes/:nodeId')
   @UseGuards(AuthGuard)
   @Roles('admin')

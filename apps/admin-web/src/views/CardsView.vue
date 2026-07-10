@@ -20,6 +20,8 @@ const cards = ref<Card[]>([]);
 const batches = ref<CardBatch[]>([]);
 const templates = ref<CardTemplate[]>([]);
 const editingTemplateId = ref('');
+const templateDialogVisible = ref(false);
+const generateDialogVisible = ref(false);
 const generateForm = reactive({ templateId: '', name: defaultBatchName(), amount: 10, quantity: 10, prefix: '' });
 const templateForm = reactive({ name: '', amount: 10, quantity: 10, prefix: '', enabled: true, remark: '' });
 
@@ -56,6 +58,7 @@ async function saveTemplate() {
     const path = editingTemplateId.value ? `/api/admin/card-templates/${editingTemplateId.value}` : '/api/admin/card-templates';
     await api(path, { method: editingTemplateId.value ? 'PATCH' : 'POST', body: templateForm });
     ElMessage.success(editingTemplateId.value ? '模板已更新' : '模板已新增');
+    templateDialogVisible.value = false;
     resetTemplateForm();
     await loadCards();
   } catch (err) {
@@ -85,6 +88,7 @@ async function generateCards() {
       codes: result.codes
     });
     ElMessage.success(`已生成 ${result.codes.length} 张卡密`);
+    generateDialogVisible.value = false;
     resetGenerateForm(template?.id || '');
     await loadCards();
   } catch (err) {
@@ -92,6 +96,17 @@ async function generateCards() {
   } finally {
     generating.value = false;
   }
+}
+
+function openTemplateDialog() {
+  resetTemplateForm();
+  templateDialogVisible.value = true;
+}
+
+function openGenerateDialog(template?: CardTemplate) {
+  resetGenerateForm();
+  if (template) useTemplate(template);
+  generateDialogVisible.value = true;
 }
 
 function useTemplate(template: CardTemplate) {
@@ -110,6 +125,7 @@ function onTemplateChange(templateId: string) {
 function editTemplate(template: CardTemplate) {
   editingTemplateId.value = template.id;
   Object.assign(templateForm, { name: template.name, amount: Number(template.amount), quantity: template.quantity, prefix: template.prefix || '', enabled: template.enabled, remark: template.remark || '' });
+  templateDialogVisible.value = true;
 }
 
 async function removeTemplate(template: CardTemplate) {
@@ -202,43 +218,6 @@ onMounted(loadCards);
   <h1 class="page-title">卡密管理</h1>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
-  <div class="settings-grid card-manage-grid">
-    <section class="panel">
-      <div class="panel-toolbar">
-        <strong>{{ editingTemplateId ? '编辑模板' : '卡密模板' }}</strong>
-        <el-button size="small" @click="resetTemplateForm">新增模板</el-button>
-      </div>
-      <el-form :model="templateForm" label-width="82px">
-        <el-form-item label="模板名称"><el-input v-model="templateForm.name" /></el-form-item>
-        <el-form-item label="金额"><el-input-number v-model="templateForm.amount" :min="0.01" :precision="2" style="width: 100%" /></el-form-item>
-        <el-form-item label="数量"><el-input-number v-model="templateForm.quantity" :min="1" :max="500" style="width: 100%" /></el-form-item>
-        <el-form-item label="前缀"><el-input v-model="templateForm.prefix" maxlength="16" placeholder="可留空" /></el-form-item>
-        <el-form-item label="启用"><el-switch v-model="templateForm.enabled" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="templateForm.remark" /></el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="savingTemplate" :disabled="!templateForm.name" @click="saveTemplate">{{ editingTemplateId ? '保存模板' : '新增模板' }}</el-button>
-          <el-button v-if="editingTemplateId" @click="resetTemplateForm">取消编辑</el-button>
-        </el-form-item>
-      </el-form>
-    </section>
-
-    <section class="panel">
-      <div class="panel-toolbar"><strong>生成卡密</strong></div>
-      <el-form :model="generateForm" label-width="82px">
-        <el-form-item label="选择模板">
-          <el-select v-model="generateForm.templateId" clearable style="width: 100%" @change="onTemplateChange" @clear="clearTemplateSelection">
-            <el-option v-for="item in enabledTemplates" :key="item.id" :label="`${item.name} / ${item.amount} 元 / ${item.quantity} 张`" :value="item.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="批次名称"><el-input v-model="generateForm.name" /></el-form-item>
-        <el-form-item label="金额"><el-input-number v-model="generateForm.amount" :disabled="Boolean(selectedTemplate)" :min="0.01" :precision="2" style="width: 100%" /></el-form-item>
-        <el-form-item label="数量"><el-input-number v-model="generateForm.quantity" :disabled="Boolean(selectedTemplate)" :min="1" :max="500" style="width: 100%" /></el-form-item>
-        <el-form-item label="前缀"><el-input v-model="generateForm.prefix" :disabled="Boolean(selectedTemplate)" maxlength="16" /></el-form-item>
-        <el-form-item><el-button type="primary" :loading="generating" :disabled="!generateForm.name" @click="generateCards">生成卡密</el-button></el-form-item>
-      </el-form>
-    </section>
-  </div>
-
   <div v-if="generatedBatchGroups.length" class="panel list-panel">
     <div class="panel-toolbar"><strong>新生成卡密</strong></div>
     <div class="generated-template-grid">
@@ -271,7 +250,11 @@ onMounted(loadCards);
   <div class="panel list-panel">
     <div class="panel-toolbar">
       <strong>模板列表</strong>
-      <el-button size="small" :loading="loading" @click="loadCards">刷新</el-button>
+      <div class="table-toolbar-actions">
+        <el-button type="primary" @click="openTemplateDialog">新增模板</el-button>
+        <el-button @click="openGenerateDialog()">生成卡密</el-button>
+        <el-button :loading="loading" @click="loadCards">刷新</el-button>
+      </div>
     </div>
     <el-table :data="templates" v-loading="loading" style="width: 100%">
       <el-table-column prop="name" label="模板名称" min-width="150" />
@@ -282,7 +265,7 @@ onMounted(loadCards);
       <el-table-column prop="remark" label="备注" min-width="180" />
       <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }: { row: CardTemplate }">
-          <el-button size="small" @click="useTemplate(row)">套用</el-button>
+          <el-button size="small" @click="openGenerateDialog(row)">生成</el-button>
           <el-button size="small" @click="editTemplate(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="removeTemplate(row)">删除</el-button>
         </template>
@@ -316,4 +299,37 @@ onMounted(loadCards);
       <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }: { row: Card }"><el-button size="small" type="danger" :disabled="row.status === 'used'" @click="removeCard(row)">删除</el-button></template></el-table-column>
     </el-table>
   </div>
+
+  <el-dialog v-model="templateDialogVisible" :title="editingTemplateId ? '编辑卡密模板' : '新增卡密模板'" width="640px" destroy-on-close>
+    <el-form :model="templateForm" label-width="82px" class="dialog-form-grid">
+      <el-form-item label="模板名称"><el-input v-model="templateForm.name" /></el-form-item>
+      <el-form-item label="金额"><el-input-number v-model="templateForm.amount" :min="0.01" :precision="2" style="width: 100%" /></el-form-item>
+      <el-form-item label="数量"><el-input-number v-model="templateForm.quantity" :min="1" :max="500" style="width: 100%" /></el-form-item>
+      <el-form-item label="前缀"><el-input v-model="templateForm.prefix" maxlength="16" placeholder="可留空" /></el-form-item>
+      <el-form-item label="启用"><el-switch v-model="templateForm.enabled" /></el-form-item>
+      <el-form-item label="备注"><el-input v-model="templateForm.remark" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="templateDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="savingTemplate" :disabled="!templateForm.name" @click="saveTemplate">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="generateDialogVisible" title="生成卡密" width="640px" destroy-on-close>
+    <el-form :model="generateForm" label-width="82px" class="dialog-form-grid">
+      <el-form-item label="选择模板">
+        <el-select v-model="generateForm.templateId" clearable style="width: 100%" @change="onTemplateChange" @clear="clearTemplateSelection">
+          <el-option v-for="item in enabledTemplates" :key="item.id" :label="`${item.name} / ${item.amount} 元 / ${item.quantity} 张`" :value="item.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="批次名称"><el-input v-model="generateForm.name" /></el-form-item>
+      <el-form-item label="金额"><el-input-number v-model="generateForm.amount" :disabled="Boolean(selectedTemplate)" :min="0.01" :precision="2" style="width: 100%" /></el-form-item>
+      <el-form-item label="数量"><el-input-number v-model="generateForm.quantity" :disabled="Boolean(selectedTemplate)" :min="1" :max="500" style="width: 100%" /></el-form-item>
+      <el-form-item label="前缀"><el-input v-model="generateForm.prefix" :disabled="Boolean(selectedTemplate)" maxlength="16" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="generateDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="generating" :disabled="!generateForm.name" @click="generateCards">生成</el-button>
+    </template>
+  </el-dialog>
 </template>

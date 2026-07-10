@@ -43,6 +43,8 @@ const syncingNodeIds = ref<Set<string>>(new Set());
 const error = ref('');
 const editingServerId = ref('');
 const editingNodeId = ref('');
+const serverDialogVisible = ref(false);
+const nodeDialogVisible = ref(false);
 const serverForm = reactive({ name: '', baseUrl: '', basePath: '', username: '', password: '', token: '', enabled: true, remark: '' });
 const nodeForm = reactive({ name: '', serverId: '', inboundId: undefined as number | undefined, protocol: 'vless', priceMonthly: 0, trafficLimitGb: 0, enabled: true, remark: '' });
 
@@ -73,6 +75,7 @@ async function saveServer() {
     const path = editingServerId.value ? `/api/admin/xui-servers/${editingServerId.value}` : '/api/admin/xui-servers';
     await api(path, { method: editingServerId.value ? 'PATCH' : 'POST', body: serverForm });
     ElMessage.success(editingServerId.value ? '3x-ui 服务器已更新' : '3x-ui 服务器已新增');
+    serverDialogVisible.value = false;
     resetServerForm();
     await loadNodes();
   } catch (err) {
@@ -135,6 +138,7 @@ async function saveServiceNode() {
     const path = editingNodeId.value ? `/api/admin/service-nodes/${editingNodeId.value}` : '/api/admin/service-nodes';
     await api(path, { method: editingNodeId.value ? 'PATCH' : 'POST', body: nodeForm });
     ElMessage.success(editingNodeId.value ? '服务节点已更新' : '服务节点已新增');
+    nodeDialogVisible.value = false;
     resetNodeForm();
     await loadNodes();
   } catch (err) {
@@ -161,6 +165,16 @@ async function syncServiceNode(node: ServiceNode) {
   }
 }
 
+function openServerDialog() {
+  resetServerForm();
+  serverDialogVisible.value = true;
+}
+
+function openNodeDialog() {
+  resetNodeForm();
+  nodeDialogVisible.value = true;
+}
+
 function editServer(server: XuiServer) {
   editingServerId.value = server.id;
   Object.assign(serverForm, {
@@ -173,6 +187,7 @@ function editServer(server: XuiServer) {
     enabled: server.enabled,
     remark: server.remark || ''
   });
+  serverDialogVisible.value = true;
 }
 
 function editServiceNode(node: ServiceNode) {
@@ -187,6 +202,7 @@ function editServiceNode(node: ServiceNode) {
     enabled: node.enabled,
     remark: node.remark || ''
   });
+  nodeDialogVisible.value = true;
 }
 
 async function removeServer(server: XuiServer) {
@@ -222,58 +238,13 @@ onMounted(loadNodes);
   <h1 class="page-title">节点管理</h1>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
 
-  <div class="panel node-grid">
-    <section>
-      <div class="panel-toolbar">
-        <h2>3x-ui 服务器</h2>
-        <el-button size="small" @click="resetServerForm">新增</el-button>
-      </div>
-      <el-form :model="serverForm" label-width="92px">
-        <el-form-item label="名称"><el-input v-model="serverForm.name" /></el-form-item>
-        <el-form-item label="面板地址"><el-input v-model="serverForm.baseUrl" placeholder="https://xui.example.com" /></el-form-item>
-        <el-form-item label="面板路径"><el-input v-model="serverForm.basePath" placeholder="例如 /panel，根路径可留空" /></el-form-item>
-        <el-form-item label="账号"><el-input v-model="serverForm.username" /></el-form-item>
-        <el-form-item label="密码"><el-input v-model="serverForm.password" type="password" show-password placeholder="编辑时留空表示不修改" /></el-form-item>
-        <el-form-item label="API Token"><el-input v-model="serverForm.token" type="password" show-password placeholder="编辑时留空表示不修改" /></el-form-item>
-        <el-form-item label="启用"><el-switch v-model="serverForm.enabled" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="serverForm.remark" /></el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="savingServer" :disabled="!serverForm.name || !serverForm.baseUrl" @click="saveServer">{{ editingServerId ? '保存服务器' : '新增服务器' }}</el-button>
-          <el-button :loading="testingFormServer" :disabled="!serverForm.baseUrl" @click="testServerForm"><Wifi :size="15" />测试连接</el-button>
-        </el-form-item>
-      </el-form>
-    </section>
-
-    <section>
-      <div class="panel-toolbar">
-        <h2>服务节点</h2>
-        <el-button size="small" @click="resetNodeForm">新增</el-button>
-      </div>
-      <el-form :model="nodeForm" label-width="92px">
-        <el-form-item label="节点名称"><el-input v-model="nodeForm.name" /></el-form-item>
-        <el-form-item label="服务器">
-          <el-select v-model="nodeForm.serverId" placeholder="选择 3x-ui 服务器" style="width: 100%">
-            <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="入站 ID"><el-input-number v-model="nodeForm.inboundId" :min="0" style="width: 100%" /></el-form-item>
-        <el-form-item label="协议"><el-input v-model="nodeForm.protocol" placeholder="vless / vmess / trojan" /></el-form-item>
-        <el-form-item label="月价格"><el-input-number v-model="nodeForm.priceMonthly" :min="0" :precision="2" style="width: 100%" /></el-form-item>
-        <el-form-item label="流量 GB"><el-input-number v-model="nodeForm.trafficLimitGb" :min="0" :precision="2" style="width: 100%" /></el-form-item>
-        <el-form-item label="启用"><el-switch v-model="nodeForm.enabled" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="nodeForm.remark" /></el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="savingNode" :disabled="!nodeForm.name || !nodeForm.serverId" @click="saveServiceNode">{{ editingNodeId ? '保存节点' : '新增节点' }}</el-button>
-          <span v-if="currentServer" class="muted-text">绑定到 {{ currentServer.name }}</span>
-        </el-form-item>
-      </el-form>
-    </section>
-  </div>
-
   <div class="panel list-panel">
     <div class="panel-toolbar">
-      <strong>服务器列表</strong>
-      <el-button size="small" :loading="loading" @click="loadNodes">刷新</el-button>
+      <strong>3x-ui 服务器</strong>
+      <div class="table-toolbar-actions">
+        <el-button type="primary" @click="openServerDialog">新增服务器</el-button>
+        <el-button :loading="loading" @click="loadNodes">刷新</el-button>
+      </div>
     </div>
     <el-table :data="servers" v-loading="loading" style="width: 100%">
       <el-table-column prop="name" label="名称" min-width="140" />
@@ -299,7 +270,12 @@ onMounted(loadNodes);
   </div>
 
   <div class="panel list-panel">
-    <div class="panel-toolbar"><strong>节点列表</strong></div>
+    <div class="panel-toolbar">
+      <strong>服务节点</strong>
+      <div class="table-toolbar-actions">
+        <el-button type="primary" @click="openNodeDialog">新增节点</el-button>
+      </div>
+    </div>
     <el-table :data="nodes" v-loading="loading" style="width: 100%">
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column label="服务器" min-width="140"><template #default="{ row }: { row: ServiceNode }">{{ row.server?.name || '-' }}</template></el-table-column>
@@ -317,4 +293,44 @@ onMounted(loadNodes);
       </el-table-column>
     </el-table>
   </div>
+
+  <el-dialog v-model="serverDialogVisible" :title="editingServerId ? '编辑 3x-ui 服务器' : '新增 3x-ui 服务器'" width="760px" destroy-on-close>
+    <el-form :model="serverForm" label-width="96px" class="dialog-form-grid">
+      <el-form-item label="名称"><el-input v-model="serverForm.name" /></el-form-item>
+      <el-form-item label="面板地址"><el-input v-model="serverForm.baseUrl" placeholder="https://xui.example.com" /></el-form-item>
+      <el-form-item label="面板路径"><el-input v-model="serverForm.basePath" placeholder="例如 /panel，根路径可留空" /></el-form-item>
+      <el-form-item label="账号"><el-input v-model="serverForm.username" /></el-form-item>
+      <el-form-item label="密码"><el-input v-model="serverForm.password" type="password" show-password placeholder="编辑时留空表示不修改" /></el-form-item>
+      <el-form-item label="API Token"><el-input v-model="serverForm.token" type="password" show-password placeholder="编辑时留空表示不修改" /></el-form-item>
+      <el-form-item label="启用"><el-switch v-model="serverForm.enabled" /></el-form-item>
+      <el-form-item label="备注"><el-input v-model="serverForm.remark" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button :loading="testingFormServer" :disabled="!serverForm.baseUrl" @click="testServerForm"><Wifi :size="15" />测试连接</el-button>
+      <el-button @click="serverDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="savingServer" :disabled="!serverForm.name || !serverForm.baseUrl" @click="saveServer">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="nodeDialogVisible" :title="editingNodeId ? '编辑服务节点' : '新增服务节点'" width="720px" destroy-on-close>
+    <el-form :model="nodeForm" label-width="92px" class="dialog-form-grid">
+      <el-form-item label="节点名称"><el-input v-model="nodeForm.name" /></el-form-item>
+      <el-form-item label="服务器">
+        <el-select v-model="nodeForm.serverId" placeholder="选择 3x-ui 服务器" style="width: 100%">
+          <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="入站 ID"><el-input-number v-model="nodeForm.inboundId" :min="0" style="width: 100%" /></el-form-item>
+      <el-form-item label="协议"><el-input v-model="nodeForm.protocol" placeholder="vless / vmess / trojan" /></el-form-item>
+      <el-form-item label="月价格"><el-input-number v-model="nodeForm.priceMonthly" :min="0" :precision="2" style="width: 100%" /></el-form-item>
+      <el-form-item label="流量 GB"><el-input-number v-model="nodeForm.trafficLimitGb" :min="0" :precision="2" style="width: 100%" /></el-form-item>
+      <el-form-item label="启用"><el-switch v-model="nodeForm.enabled" /></el-form-item>
+      <el-form-item label="备注"><el-input v-model="nodeForm.remark" /></el-form-item>
+      <el-form-item v-if="currentServer" label="当前服务器"><span class="muted-text">{{ currentServer.name }}</span></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="nodeDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="savingNode" :disabled="!nodeForm.name || !nodeForm.serverId" @click="saveServiceNode">保存</el-button>
+    </template>
+  </el-dialog>
 </template>

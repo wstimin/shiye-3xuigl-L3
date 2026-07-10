@@ -7,7 +7,9 @@ import { api } from '../api';
 type CustomerNode = {
   id: string;
   xuiEmail: string;
+  uuid?: string | null;
   expireAt: string | null;
+  trafficLimitGb?: string | null;
   status: string;
   lastSyncedAt: string | null;
   serviceNode?: { id: string; name: string; server?: { id: string; name: string } };
@@ -31,6 +33,7 @@ type ServiceNode = { id: string; name: string; server?: { name: string } };
 const loading = ref(false);
 const savingCustomer = ref(false);
 const binding = ref(false);
+const updatingCustomerNode = ref(false);
 const adjustingBalance = ref(false);
 const error = ref('');
 const customers = ref<Customer[]>([]);
@@ -38,8 +41,13 @@ const serviceNodes = ref<ServiceNode[]>([]);
 const syncingIds = ref<Set<string>>(new Set());
 const renewingIds = ref<Set<string>>(new Set());
 const editingCustomerId = ref('');
+const customerDialogVisible = ref(false);
+const bindDialogVisible = ref(false);
+const editNodeDialogVisible = ref(false);
+const balanceDialogVisible = ref(false);
 const customerForm = reactive({ name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active' as 'active' | 'disabled', remark: '' });
 const bindForm = reactive({ customerId: '', serviceNodeId: '', xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
+const nodeEditForm = reactive({ customerId: '', customerNodeId: '', serviceNodeId: '', xuiEmail: '', expireAt: '', trafficLimitGb: undefined as number | undefined });
 const balanceForm = reactive({ customerId: '', mode: 'add' as 'add' | 'subtract' | 'set', amount: 0, remark: '' });
 const renewMonths = ref<Record<string, number>>({});
 
@@ -73,6 +81,7 @@ async function saveCustomer() {
     const path = editingCustomerId.value ? `/api/admin/customers/${editingCustomerId.value}` : '/api/admin/customers';
     await api(path, { method: editingCustomerId.value ? 'PATCH' : 'POST', body });
     ElMessage.success(editingCustomerId.value ? '用户已更新' : '用户已新增');
+    customerDialogVisible.value = false;
     resetCustomerForm();
     await loadCustomers();
   } catch (err) {
@@ -97,12 +106,37 @@ async function bindNode() {
       }
     });
     ElMessage.success('节点已绑定');
+    bindDialogVisible.value = false;
     Object.assign(bindForm, { xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
   } catch (err) {
     error.value = err instanceof Error ? err.message : '绑定失败';
   } finally {
     binding.value = false;
+  }
+}
+
+async function updateCustomerNode() {
+  if (!nodeEditForm.customerId || !nodeEditForm.customerNodeId || !nodeEditForm.serviceNodeId) return;
+  updatingCustomerNode.value = true;
+  error.value = '';
+  try {
+    await api(`/api/admin/customers/${nodeEditForm.customerId}/nodes/${nodeEditForm.customerNodeId}`, {
+      method: 'PATCH',
+      body: {
+        serviceNodeId: nodeEditForm.serviceNodeId,
+        xuiEmail: nodeEditForm.xuiEmail || undefined,
+        expireAt: nodeEditForm.expireAt || undefined,
+        trafficLimitGb: nodeEditForm.trafficLimitGb
+      }
+    });
+    ElMessage.success('绑定节点已更新并同步远端');
+    editNodeDialogVisible.value = false;
+    await loadCustomers();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '更新绑定节点失败';
+  } finally {
+    updatingCustomerNode.value = false;
   }
 }
 
@@ -113,6 +147,7 @@ async function adjustBalance() {
   try {
     await api(`/api/admin/customers/${balanceForm.customerId}/balance-adjustments`, { method: 'POST', body: balanceForm });
     ElMessage.success('余额已调整');
+    balanceDialogVisible.value = false;
     Object.assign(balanceForm, { mode: 'add', amount: 0, remark: '' });
     await loadCustomers();
   } catch (err) {
@@ -162,6 +197,37 @@ async function unbindNode(customer: Customer, node: CustomerNode) {
   await loadCustomers();
 }
 
+function openCustomerDialog() {
+  resetCustomerForm();
+  customerDialogVisible.value = true;
+}
+
+function openBindDialog(customer?: Customer) {
+  if (customer) bindForm.customerId = customer.id;
+  if (!bindForm.customerId && customers.value[0]) bindForm.customerId = customers.value[0].id;
+  if (!bindForm.serviceNodeId && serviceNodes.value[0]) bindForm.serviceNodeId = serviceNodes.value[0].id;
+  bindForm.expireAt = bindForm.expireAt || defaultExpireAt();
+  bindDialogVisible.value = true;
+}
+
+function openBalanceDialog(customer?: Customer) {
+  if (customer) balanceForm.customerId = customer.id;
+  if (!balanceForm.customerId && customers.value[0]) balanceForm.customerId = customers.value[0].id;
+  balanceDialogVisible.value = true;
+}
+
+function editCustomerNode(customer: Customer, node: CustomerNode) {
+  Object.assign(nodeEditForm, {
+    customerId: customer.id,
+    customerNodeId: node.id,
+    serviceNodeId: node.serviceNode?.id || '',
+    xuiEmail: node.xuiEmail,
+    expireAt: node.expireAt || '',
+    trafficLimitGb: node.trafficLimitGb === undefined || node.trafficLimitGb === null ? undefined : Number(node.trafficLimitGb)
+  });
+  editNodeDialogVisible.value = true;
+}
+
 function editCustomer(customer: Customer) {
   editingCustomerId.value = customer.id;
   Object.assign(customerForm, {
@@ -174,6 +240,7 @@ function editCustomer(customer: Customer) {
     status: customer.status,
     remark: customer.remark || ''
   });
+  customerDialogVisible.value = true;
 }
 
 async function removeCustomer(customer: Customer) {
@@ -203,6 +270,20 @@ function clearBindExpire() {
   bindForm.expireAt = '';
 }
 
+function setEditExpireNow() {
+  nodeEditForm.expireAt = formatDatePickerValue(new Date());
+}
+
+function setEditExpireMonths(months: number) {
+  const date = new Date();
+  date.setMonth(date.getMonth() + months);
+  nodeEditForm.expireAt = formatDatePickerValue(date);
+}
+
+function clearEditExpire() {
+  nodeEditForm.expireAt = '';
+}
+
 function defaultExpireAt() {
   const date = new Date();
   date.setMonth(date.getMonth() + 1);
@@ -230,71 +311,23 @@ onMounted(loadCustomers);
   <h1 class="page-title">用户管理</h1>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
-  <div class="panel customer-form-panel">
-    <div class="panel-toolbar">
-      <strong>{{ editingCustomerId ? '编辑用户' : '新增用户' }}</strong>
-      <el-button size="small" @click="resetCustomerForm">新增</el-button>
-    </div>
-    <el-form :model="customerForm" label-width="82px" class="customer-form-grid">
-      <el-form-item label="名称"><el-input v-model="customerForm.name" /></el-form-item>
-      <el-form-item label="登录账号"><el-input v-model="customerForm.loginUsername" /></el-form-item>
-      <el-form-item label="登录密码"><el-input v-model="customerForm.loginPassword" type="password" show-password :placeholder="editingCustomerId ? '留空不修改' : '可留空自动生成'" /></el-form-item>
-      <el-form-item label="邮箱"><el-input v-model="customerForm.email" placeholder="可留空" /></el-form-item>
-      <el-form-item label="手机"><el-input v-model="customerForm.phone" /></el-form-item>
-      <el-form-item label="余额"><el-input-number v-model="customerForm.balance" :min="0" :precision="2" style="width: 100%" /></el-form-item>
-      <el-form-item label="状态"><el-select v-model="customerForm.status" style="width: 100%"><el-option label="启用" value="active" /><el-option label="禁用" value="disabled" /></el-select></el-form-item>
-      <el-form-item label="备注"><el-input v-model="customerForm.remark" /></el-form-item>
-      <el-form-item><el-button type="primary" :loading="savingCustomer" :disabled="!customerForm.name || !customerForm.loginUsername" @click="saveCustomer">{{ editingCustomerId ? '保存用户' : '新增用户' }}</el-button></el-form-item>
-    </el-form>
-  </div>
-
-  <div class="panel bind-panel">
-    <div class="panel-toolbar"><strong>绑定服务节点</strong></div>
-    <div class="bind-row bind-row-wide">
-      <el-select v-model="bindForm.customerId" placeholder="选择用户">
-        <el-option v-for="customer in customers" :key="customer.id" :label="`${customer.name} / ${customer.loginUsername}`" :value="customer.id" />
-      </el-select>
-      <el-select v-model="bindForm.serviceNodeId" placeholder="选择节点">
-        <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
-      </el-select>
-      <el-input v-model="bindForm.xuiEmail" placeholder="3x-ui 邮箱，可留空" />
-      <div class="date-picker-stack">
-        <el-date-picker v-model="bindForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
-        <div class="quick-actions">
-          <el-button size="small" @click="setBindExpireNow">当前时间</el-button>
-          <el-button size="small" @click="setBindExpireMonths(1)">加 1 月</el-button>
-          <el-button size="small" @click="clearBindExpire">清空</el-button>
-        </div>
-      </div>
-      <el-input-number v-model="bindForm.trafficLimitGb" :min="0" :precision="2" placeholder="流量 GB，可留空" style="width: 100%" />
-      <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId" @click="bindNode">绑定</el-button>
-    </div>
-    <div v-if="selectedCustomer?.nodes?.length" class="bind-hint">当前用户已绑定 {{ selectedCustomer.nodes.length }} 个节点</div>
-  </div>
-
-  <div class="panel bind-panel">
-    <div class="panel-toolbar"><strong>调整余额</strong></div>
-    <div class="bind-row balance-row">
-      <el-select v-model="balanceForm.customerId" placeholder="选择用户">
-        <el-option v-for="customer in customers" :key="customer.id" :label="`${customer.name} / ${customer.loginUsername}`" :value="customer.id" />
-      </el-select>
-      <el-select v-model="balanceForm.mode"><el-option label="增加" value="add" /><el-option label="扣减" value="subtract" /><el-option label="设置为" value="set" /></el-select>
-      <el-input-number v-model="balanceForm.amount" :min="0" :precision="2" style="width: 100%" />
-      <el-input v-model="balanceForm.remark" placeholder="备注" />
-      <el-button type="primary" :loading="adjustingBalance" :disabled="!balanceForm.customerId || balanceForm.amount <= 0" @click="adjustBalance">提交</el-button>
-    </div>
-  </div>
-
   <div class="panel">
     <div class="panel-toolbar">
       <strong>用户列表</strong>
-      <el-button size="small" :loading="loading" @click="loadCustomers">刷新</el-button>
+      <div class="table-toolbar-actions">
+        <el-button type="primary" @click="openCustomerDialog">新增用户</el-button>
+        <el-button @click="openBindDialog()">绑定节点</el-button>
+        <el-button @click="openBalanceDialog()">调整余额</el-button>
+        <el-button :loading="loading" @click="loadCustomers">刷新</el-button>
+      </div>
     </div>
     <el-table :data="customers" v-loading="loading" style="width: 100%" row-key="id">
       <el-table-column prop="name" label="名称" min-width="130" />
       <el-table-column prop="loginUsername" label="登录账号" min-width="130" />
       <el-table-column prop="balance" label="余额" width="110" />
-      <el-table-column label="状态" width="90"><template #default="{ row }: { row: Customer }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '禁用' }}</el-tag></template></el-table-column>
+      <el-table-column label="状态" width="90">
+        <template #default="{ row }: { row: Customer }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '禁用' }}</el-tag></template>
+      </el-table-column>
       <el-table-column label="绑定节点" min-width="520">
         <template #default="{ row }: { row: Customer }">
           <div v-if="row.nodes?.length" class="node-list">
@@ -305,15 +338,21 @@ onMounted(loadCustomers);
                   <el-tag size="small" :type="node.status === 'active' ? 'success' : 'info'">{{ node.status === 'active' ? '启用' : '停用' }}</el-tag>
                 </strong>
                 <span>{{ node.serviceNode?.server?.name || '-' }} / {{ node.xuiEmail }}</span>
-                <span>到期 {{ formatDate(node.expireAt) }} · 同步 {{ formatDate(node.lastSyncedAt) }}</span>
+                <span>到期 {{ formatDate(node.expireAt) }} · 流量 {{ node.trafficLimitGb ?? '-' }} GB · 同步 {{ formatDate(node.lastSyncedAt) }}</span>
               </div>
               <div class="node-actions">
-                <el-select v-model="renewMonths[node.id]" size="small" style="width: 82px"><el-option :value="1" label="1月" /><el-option :value="3" label="3月" /><el-option :value="6" label="6月" /><el-option :value="12" label="12月" /></el-select>
+                <el-select v-model="renewMonths[node.id]" size="small" style="width: 82px">
+                  <el-option :value="1" label="1月" />
+                  <el-option :value="3" label="3月" />
+                  <el-option :value="6" label="6月" />
+                  <el-option :value="12" label="12月" />
+                </el-select>
                 <el-button size="small" :loading="renewingIds.has(node.id)" @click="renewNode(row, node)">续费</el-button>
                 <el-tooltip content="同步到 3x-ui" placement="top">
                   <el-button circle size="small" :loading="syncingIds.has(node.id)" @click="syncNode(row, node)"><RefreshCw :size="15" /></el-button>
                 </el-tooltip>
-                <el-button size="small" type="danger" @click="unbindNode(row, node)">解绑</el-button>
+                <el-button size="small" @click="editCustomerNode(row, node)">编辑</el-button>
+                <el-button size="small" type="danger" @click="unbindNode(row, node)">删除</el-button>
               </div>
             </div>
           </div>
@@ -321,12 +360,106 @@ onMounted(loadCustomers);
         </template>
       </el-table-column>
       <el-table-column label="创建时间" min-width="170"><template #default="{ row }: { row: Customer }">{{ formatDate(row.createdAt) }}</template></el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="250" fixed="right">
         <template #default="{ row }: { row: Customer }">
+          <el-button size="small" @click="openBindDialog(row)">绑定</el-button>
+          <el-button size="small" @click="openBalanceDialog(row)">余额</el-button>
           <el-button size="small" @click="editCustomer(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="removeCustomer(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
   </div>
+
+  <el-dialog v-model="customerDialogVisible" :title="editingCustomerId ? '编辑用户' : '新增用户'" width="720px" destroy-on-close>
+    <el-form :model="customerForm" label-width="82px" class="dialog-form-grid">
+      <el-form-item label="名称"><el-input v-model="customerForm.name" /></el-form-item>
+      <el-form-item label="登录账号"><el-input v-model="customerForm.loginUsername" /></el-form-item>
+      <el-form-item label="登录密码"><el-input v-model="customerForm.loginPassword" type="password" show-password :placeholder="editingCustomerId ? '留空不修改' : '可留空自动生成'" /></el-form-item>
+      <el-form-item label="邮箱"><el-input v-model="customerForm.email" placeholder="可留空" /></el-form-item>
+      <el-form-item label="手机"><el-input v-model="customerForm.phone" /></el-form-item>
+      <el-form-item label="余额"><el-input-number v-model="customerForm.balance" :min="0" :precision="2" style="width: 100%" /></el-form-item>
+      <el-form-item label="状态"><el-select v-model="customerForm.status" style="width: 100%"><el-option label="启用" value="active" /><el-option label="禁用" value="disabled" /></el-select></el-form-item>
+      <el-form-item label="备注"><el-input v-model="customerForm.remark" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="customerDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="savingCustomer" :disabled="!customerForm.name || !customerForm.loginUsername" @click="saveCustomer">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="bindDialogVisible" title="绑定服务节点" width="760px" destroy-on-close>
+    <el-form :model="bindForm" label-width="104px" class="dialog-form-grid">
+      <el-form-item label="用户">
+        <el-select v-model="bindForm.customerId" placeholder="选择用户" style="width: 100%">
+          <el-option v-for="customer in customers" :key="customer.id" :label="`${customer.name} / ${customer.loginUsername}`" :value="customer.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="节点">
+        <el-select v-model="bindForm.serviceNodeId" placeholder="选择节点" style="width: 100%">
+          <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="3x-ui 邮箱"><el-input v-model="bindForm.xuiEmail" placeholder="可留空，系统会自动生成" /></el-form-item>
+      <el-form-item label="到期时间">
+        <div class="date-picker-stack">
+          <el-date-picker v-model="bindForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
+          <div class="quick-actions">
+            <el-button size="small" @click="setBindExpireNow">当前时间</el-button>
+            <el-button size="small" @click="setBindExpireMonths(1)">加 1 月</el-button>
+            <el-button size="small" @click="clearBindExpire">清空</el-button>
+          </div>
+        </div>
+      </el-form-item>
+      <el-form-item label="流量 GB"><el-input-number v-model="bindForm.trafficLimitGb" :min="0" :precision="2" placeholder="可留空" style="width: 100%" /></el-form-item>
+      <el-form-item v-if="selectedCustomer?.nodes?.length" label="已绑定"><span class="muted-text">当前用户已绑定 {{ selectedCustomer.nodes.length }} 个节点</span></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="bindDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId" @click="bindNode">绑定</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="editNodeDialogVisible" title="编辑绑定节点" width="760px" destroy-on-close>
+    <el-form :model="nodeEditForm" label-width="104px" class="dialog-form-grid">
+      <el-form-item label="服务节点">
+        <el-select v-model="nodeEditForm.serviceNodeId" placeholder="选择节点" style="width: 100%">
+          <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="3x-ui 邮箱"><el-input v-model="nodeEditForm.xuiEmail" /></el-form-item>
+      <el-form-item label="到期时间">
+        <div class="date-picker-stack">
+          <el-date-picker v-model="nodeEditForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
+          <div class="quick-actions">
+            <el-button size="small" @click="setEditExpireNow">当前时间</el-button>
+            <el-button size="small" @click="setEditExpireMonths(1)">加 1 月</el-button>
+            <el-button size="small" @click="clearEditExpire">清空</el-button>
+          </div>
+        </div>
+      </el-form-item>
+      <el-form-item label="流量 GB"><el-input-number v-model="nodeEditForm.trafficLimitGb" :min="0" :precision="2" style="width: 100%" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="editNodeDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!nodeEditForm.serviceNodeId" @click="updateCustomerNode">保存并同步</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="balanceDialogVisible" title="调整余额" width="680px" destroy-on-close>
+    <el-form :model="balanceForm" label-width="82px" class="dialog-form-grid">
+      <el-form-item label="用户">
+        <el-select v-model="balanceForm.customerId" placeholder="选择用户" style="width: 100%">
+          <el-option v-for="customer in customers" :key="customer.id" :label="`${customer.name} / ${customer.loginUsername}`" :value="customer.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="方式"><el-select v-model="balanceForm.mode" style="width: 100%"><el-option label="增加" value="add" /><el-option label="扣减" value="subtract" /><el-option label="设置为" value="set" /></el-select></el-form-item>
+      <el-form-item label="金额"><el-input-number v-model="balanceForm.amount" :min="0" :precision="2" style="width: 100%" /></el-form-item>
+      <el-form-item label="备注"><el-input v-model="balanceForm.remark" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="balanceDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="adjustingBalance" :disabled="!balanceForm.customerId || balanceForm.amount <= 0" @click="adjustBalance">提交</el-button>
+    </template>
+  </el-dialog>
 </template>

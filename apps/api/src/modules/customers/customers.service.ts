@@ -142,7 +142,9 @@ const customerSelect = {
     select: {
       id: true,
       xuiEmail: true,
+      uuid: true,
       expireAt: true,
+      trafficLimitGb: true,
       status: true,
       lastSyncedAt: true,
       serviceNode: { select: { id: true, name: true, server: { select: { id: true, name: true } } } }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { customerNodeCreateSchema, serviceNodeUpsertSchema, xuiServerUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { Prisma } from '@prisma/client';
@@ -151,6 +151,52 @@ export class NodesService {
       await this.prisma.customerNode.delete({ where: { id: node.id } }).catch(() => undefined);
       throw error;
     }
+
+    return this.prisma.customerNode.findUnique({
+      where: { id: node.id },
+      include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+    });
+  }
+
+  async updateCustomerNode(customerId: string, customerNodeId: string, input: Partial<z.infer<typeof customerNodeCreateSchema>>) {
+    const current = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      include: { serviceNode: true }
+    });
+    if (!current) throw new NotFoundException('用户节点不存在');
+
+    const serviceNodeId = input.serviceNodeId || current.serviceNodeId;
+    const serviceNode = serviceNodeId === current.serviceNodeId
+      ? current.serviceNode
+      : await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId } });
+    if (!serviceNode) throw new NotFoundException('服务节点不存在');
+
+    if (serviceNodeId !== current.serviceNodeId) {
+      const duplicated = await this.prisma.customerNode.findUnique({
+        where: { customerId_serviceNodeId: { customerId, serviceNodeId } },
+        select: { id: true }
+      });
+      if (duplicated) throw new BadRequestException('该用户已绑定这个服务节点');
+    }
+
+    const nextXuiEmail = input.xuiEmail === undefined || input.xuiEmail === '' ? current.xuiEmail : input.xuiEmail;
+    const remoteIdentityChanged = serviceNodeId !== current.serviceNodeId || nextXuiEmail !== current.xuiEmail;
+    if (remoteIdentityChanged) await this.xui.deleteCustomerNode(customerId, customerNodeId);
+
+    const node = await this.prisma.customerNode.update({
+      where: { id: customerNodeId },
+      data: {
+        serviceNodeId: input.serviceNodeId,
+        xuiEmail: nextXuiEmail,
+        uuid: input.uuid === undefined ? undefined : input.uuid || current.uuid,
+        expireAt: input.expireAt === undefined ? undefined : input.expireAt || null,
+        trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb ?? serviceNode.trafficLimitGb),
+        status: 'active'
+      },
+      include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+    });
+
+    await this.xui.syncCustomerNode(customerId, node.id);
 
     return this.prisma.customerNode.findUnique({
       where: { id: node.id },
