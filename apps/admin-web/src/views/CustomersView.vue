@@ -39,7 +39,7 @@ const syncingIds = ref<Set<string>>(new Set());
 const renewingIds = ref<Set<string>>(new Set());
 const editingCustomerId = ref('');
 const customerForm = reactive({ name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active' as 'active' | 'disabled', remark: '' });
-const bindForm = reactive({ customerId: '', serviceNodeId: '', xuiEmail: '', expireAt: '', trafficLimitGb: undefined as number | undefined });
+const bindForm = reactive({ customerId: '', serviceNodeId: '', xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
 const balanceForm = reactive({ customerId: '', mode: 'add' as 'add' | 'subtract' | 'set', amount: 0, remark: '' });
 const renewMonths = ref<Record<string, number>>({});
 
@@ -97,7 +97,7 @@ async function bindNode() {
       }
     });
     ElMessage.success('节点已绑定');
-    Object.assign(bindForm, { xuiEmail: '', expireAt: '', trafficLimitGb: undefined });
+    Object.assign(bindForm, { xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
   } catch (err) {
     error.value = err instanceof Error ? err.message : '绑定失败';
@@ -189,6 +189,35 @@ function resetCustomerForm() {
   Object.assign(customerForm, { name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active', remark: '' });
 }
 
+function setBindExpireNow() {
+  bindForm.expireAt = formatDatePickerValue(new Date());
+}
+
+function setBindExpireMonths(months: number) {
+  const date = new Date();
+  date.setMonth(date.getMonth() + months);
+  bindForm.expireAt = formatDatePickerValue(date);
+}
+
+function clearBindExpire() {
+  bindForm.expireAt = '';
+}
+
+function defaultExpireAt() {
+  const date = new Date();
+  date.setMonth(date.getMonth() + 1);
+  return formatDatePickerValue(date);
+}
+
+function formatDatePickerValue(date: Date) {
+  const pad = (value: number, size = 2) => String(value).padStart(size, '0');
+  const timezoneOffset = -date.getTimezoneOffset();
+  const sign = timezoneOffset >= 0 ? '+' : '-';
+  const offsetHours = pad(Math.floor(Math.abs(timezoneOffset) / 60));
+  const offsetMinutes = pad(Math.abs(timezoneOffset) % 60);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}${sign}${offsetHours}:${offsetMinutes}`;
+}
+
 function formatDate(value?: string | null) {
   if (!value) return '-';
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
@@ -229,7 +258,14 @@ onMounted(loadCustomers);
         <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
       </el-select>
       <el-input v-model="bindForm.xuiEmail" placeholder="3x-ui 邮箱，可留空" />
-      <el-date-picker v-model="bindForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
+      <div class="date-picker-stack">
+        <el-date-picker v-model="bindForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
+        <div class="quick-actions">
+          <el-button size="small" @click="setBindExpireNow">当前时间</el-button>
+          <el-button size="small" @click="setBindExpireMonths(1)">加 1 月</el-button>
+          <el-button size="small" @click="clearBindExpire">清空</el-button>
+        </div>
+      </div>
       <el-input-number v-model="bindForm.trafficLimitGb" :min="0" :precision="2" placeholder="流量 GB，可留空" style="width: 100%" />
       <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId" @click="bindNode">绑定</el-button>
     </div>

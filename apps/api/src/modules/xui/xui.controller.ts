@@ -20,6 +20,11 @@ export class XuiController {
   @Roles('admin')
   testStoredServer(@Param('id') id: string) { return this.xui.testStoredServer(id); }
 
+  @Post('admin/xui-servers/:id/sync')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  syncServer(@Param('id') id: string) { return this.xui.syncServer(id); }
+
   @Post('admin/service-nodes/:id/sync')
   @UseGuards(AuthGuard)
   @Roles('admin')

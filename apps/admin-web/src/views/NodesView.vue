@@ -38,6 +38,7 @@ const savingServer = ref(false);
 const savingNode = ref(false);
 const testingFormServer = ref(false);
 const testingServerIds = ref<Set<string>>(new Set());
+const syncingServerIds = ref<Set<string>>(new Set());
 const syncingNodeIds = ref<Set<string>>(new Set());
 const error = ref('');
 const editingServerId = ref('');
@@ -107,6 +108,23 @@ async function testSavedServer(server: XuiServer) {
     const next = new Set(testingServerIds.value);
     next.delete(server.id);
     testingServerIds.value = next;
+  }
+}
+
+async function syncServer(server: XuiServer) {
+  await ElMessageBox.confirm(`确认把服务器「${server.name}」下全部已绑定用户同步到远端 3x-ui？`, '同步确认', { type: 'warning' });
+  syncingServerIds.value = new Set(syncingServerIds.value).add(server.id);
+  error.value = '';
+  try {
+    const result = await api<SyncResult>(`/api/admin/xui-servers/${server.id}/sync`, { method: 'POST' });
+    ElMessage.success(`服务器同步完成：成功 ${result.success}，失败 ${result.failed}，总数 ${result.total}`);
+    await loadNodes();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '同步服务器失败';
+  } finally {
+    const next = new Set(syncingServerIds.value);
+    next.delete(server.id);
+    syncingServerIds.value = next;
   }
 }
 
@@ -269,9 +287,10 @@ onMounted(loadNodes);
         </template>
       </el-table-column>
       <el-table-column label="状态" width="90"><template #default="{ row }: { row: XuiServer }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
-      <el-table-column label="操作" width="230" fixed="right">
+      <el-table-column label="操作" width="330" fixed="right">
         <template #default="{ row }: { row: XuiServer }">
           <el-button size="small" :loading="testingServerIds.has(row.id)" @click="testSavedServer(row)">测试</el-button>
+          <el-button size="small" :loading="syncingServerIds.has(row.id)" :disabled="!row.enabled" @click="syncServer(row)"><RefreshCw :size="15" />同步远端</el-button>
           <el-button size="small" @click="editServer(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="removeServer(row)">删除</el-button>
         </template>

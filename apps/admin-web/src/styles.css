@@ -24,6 +24,9 @@ body { margin: 0; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; back
 .bind-row-wide { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(180px, 1fr) 220px 96px; }
 .balance-row { grid-template-columns: minmax(0, 1fr) 110px 150px minmax(160px, 1fr) 96px; }
 .bind-hint { margin-top: 10px; color: #64748b; font-size: 13px; }
+.date-picker-stack { display: grid; gap: 6px; min-width: 0; }
+.quick-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick-actions .el-button { margin-left: 0; }
 .customer-form-panel { margin-bottom: 16px; }
 .customer-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
 .customer-form-grid .el-form-item { margin-bottom: 0; }

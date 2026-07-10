@@ -75,6 +75,29 @@ export class XuiService {
     return { serviceNodeId, serviceNodeName: serviceNode.name, total: results.length, success, failed: results.length - success, results };
   }
 
+  async syncServer(serverId: string) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId }, select: { id: true, name: true } });
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
+
+    const customerNodes = await this.prisma.customerNode.findMany({
+      where: { serviceNode: { serverId } },
+      select: { id: true, customerId: true, xuiEmail: true, serviceNode: { select: { id: true, name: true } } }
+    });
+
+    const results: Array<{ customerNodeId: string; customerId: string; serviceNodeId: string; serviceNodeName: string; xuiEmail: string; synced: boolean; message?: string }> = [];
+    for (const node of customerNodes) {
+      try {
+        await this.syncCustomerNode(node.customerId, node.id);
+        results.push({ customerNodeId: node.id, customerId: node.customerId, serviceNodeId: node.serviceNode.id, serviceNodeName: node.serviceNode.name, xuiEmail: node.xuiEmail, synced: true });
+      } catch (error) {
+        results.push({ customerNodeId: node.id, customerId: node.customerId, serviceNodeId: node.serviceNode.id, serviceNodeName: node.serviceNode.name, xuiEmail: node.xuiEmail, synced: false, message: this.errorMessage(error) });
+      }
+    }
+
+    const success = results.filter((item) => item.synced).length;
+    return { serverId, serverName: server.name, total: results.length, success, failed: results.length - success, results };
+  }
+
   async deleteCustomerNode(customerId: string, customerNodeId: string, keepTraffic = false) {
     const customerNode = await this.prisma.customerNode.findFirst({
       where: { id: customerNodeId, customerId },
