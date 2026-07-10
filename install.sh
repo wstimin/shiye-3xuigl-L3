@@ -10,6 +10,7 @@ DOMAIN="${DOMAIN:-${SITE_DOMAIN:-}}"
 ENABLE_NGINX="${ENABLE_NGINX:-ask}"
 ENABLE_HTTPS="${ENABLE_HTTPS:-ask}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
+KEEP_SOURCE="${KEEP_SOURCE:-no}"
 
 MYSQL_DATABASE="${MYSQL_DATABASE:-shiye_management}"
 MYSQL_USER="${MYSQL_USER:-shiye}"
@@ -107,6 +108,32 @@ install_base_packages() {
   install_package curl ca-certificates git openssl
 }
 
+clone_repo() {
+  repo_url="$1"
+  dest="$2"
+  sparse_paths="package.json package-lock.json tsconfig.base.json apps packages prisma scripts infra"
+
+  if git clone --depth 1 --filter=blob:none --sparse "${repo_url}" "${dest}"; then
+    if ! (cd "${dest}" && git sparse-checkout set ${sparse_paths}); then
+      rm -rf "${dest}"
+      git clone --depth 1 "${repo_url}" "${dest}"
+    fi
+  else
+    git clone --depth 1 "${repo_url}" "${dest}"
+  fi
+}
+
+load_existing_env_defaults() {
+  normalize_app_dir
+  env_file="${APP_DIR}/.env"
+  [ -f "${env_file}" ] || return
+
+  existing_database_url="$(grep -E '^DATABASE_URL=' "${env_file}" | tail -n 1 | cut -d= -f2- || true)"
+  if [ -z "${DATABASE_URL:-}" ] && [ -n "${existing_database_url}" ]; then
+    DATABASE_URL="${existing_database_url}"
+  fi
+}
+
 install_node() {
   if command -v node >/dev/null 2>&1; then
     major="$(node -v | sed 's/^v//' | cut -d. -f1)"
@@ -194,23 +221,23 @@ install_local_mysql_if_needed() {
 
 install_app_files() {
   normalize_app_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   mkdir -p "${APP_DIR}"
 
   if [ -n "${REPO_URL}" ]; then
     tmp_dir="$(mktemp -d)"
-    git clone --depth 1 "${REPO_URL}" "${tmp_dir}/app"
+    clone_repo "${REPO_URL}" "${tmp_dir}/app"
     find "${APP_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
     cp -a "${tmp_dir}/app/." "${APP_DIR}/"
     rm -rf "${tmp_dir}"
-  elif [ -f "${script_dir}/package.json" ] && [ -d "${script_dir}/apps" ] && [ -d "${script_dir}/packages" ]; then
-    if [ "${script_dir}" != "${APP_DIR}" ]; then
+  elif [ -f "${SCRIPT_DIR}/package.json" ] && [ -d "${SCRIPT_DIR}/apps" ] && [ -d "${SCRIPT_DIR}/packages" ]; then
+    if [ "${SCRIPT_DIR}" != "${APP_DIR}" ]; then
       find "${APP_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
-      find "${script_dir}" -mindepth 1 -maxdepth 1 ! -name '.env' ! -name 'node_modules' ! -name 'dist' -exec cp -a {} "${APP_DIR}/" \;
+      find "${SCRIPT_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' ! -name 'node_modules' ! -name 'dist' -exec cp -a {} "${APP_DIR}/" \;
     fi
   elif [ -n "${DEFAULT_REPO_URL}" ]; then
     tmp_dir="$(mktemp -d)"
-    git clone --depth 1 "${DEFAULT_REPO_URL}" "${tmp_dir}/app"
+    clone_repo "${DEFAULT_REPO_URL}" "${tmp_dir}/app"
     find "${APP_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
     cp -a "${tmp_dir}/app/." "${APP_DIR}/"
     rm -rf "${tmp_dir}"
@@ -264,6 +291,39 @@ install_dependencies_and_build() {
   fi
   npm run install:prod
   npm prune --omit=dev
+}
+
+cleanup_runtime_files() {
+  if is_yes "${KEEP_SOURCE}"; then
+    log "Keeping source files because KEEP_SOURCE=yes"
+    return
+  fi
+
+  if [ "${SCRIPT_DIR:-}" = "${APP_DIR}" ] && [ -d "${APP_DIR}/.git" ]; then
+    log "Skipping runtime cleanup because ${APP_DIR} is the source checkout"
+    return
+  fi
+
+  cd "${APP_DIR}"
+  log "Removing build-only source files from ${APP_DIR}"
+
+  rm -rf .git .github .vscode scripts infra apps/admin-web apps/user-web
+  rm -f README.md DEPLOY.md ARCHITECTURE.md UNINSTALL.md install.sh uninstall.sh docker-compose.yml .env.example tsconfig.base.json
+  rm -f 1Panel部署教程.md 宝塔部署教程.md 部署教程.md
+
+  if [ -d apps/api ]; then
+    find apps/api -mindepth 1 -maxdepth 1 ! -name dist ! -name package.json -exec rm -rf {} +
+  fi
+
+  for package_name in shared xui-client payment-core; do
+    if [ -d "packages/${package_name}" ]; then
+      find "packages/${package_name}" -mindepth 1 -maxdepth 1 ! -name dist ! -name package.json -exec rm -rf {} +
+    fi
+  done
+
+  if [ -d prisma ]; then
+    find prisma -mindepth 1 -maxdepth 1 ! -name schema.prisma ! -name migrations -exec rm -rf {} +
+  fi
 }
 
 write_service() {
@@ -447,6 +507,8 @@ main() {
   log "Installing base packages"
   install_base_packages
 
+  load_existing_env_defaults
+
   log "Checking Node.js 20+"
   install_node
 
@@ -461,6 +523,8 @@ main() {
 
   log "Installing dependencies, migrating database and building"
   install_dependencies_and_build
+
+  cleanup_runtime_files
 
   log "Writing systemd service"
   write_service

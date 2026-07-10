@@ -28,6 +28,8 @@
 
 服务器上直接执行，默认安装到 `/opt/shiye`，服务名 `shiye-api`。脚本会询问访问方式：选择跳过域名就是 `IP:3388` 访问；选择域名访问会继续输入域名，并可自动申请 HTTPS 证书。
 
+一键脚本默认是精简运行目录：构建时只拉取必要源码目录，安装完成后 `/opt/shiye` 只保留运行必需文件，例如 `.env`、`dist`、`node_modules`、`package*.json`、`apps/api/dist`、`packages/*/dist`、`prisma/schema.prisma` 和迁移文件。README、部署文档、安装脚本、前端源码、后端源码和 `.git` 默认不会保留在服务器运行目录。需要保留源码方便 `git pull` 时，使用 `KEEP_SOURCE=yes`。
+
 ```bash
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
@@ -54,6 +56,12 @@ sudo DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes bash install.sh
 
 ```bash
 sudo REPO_URL=https://github.com/wstimin/shiye-3xuigl-L3.git DOMAIN=panel.example.com bash install.sh
+```
+
+保留完整源码部署：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | sudo env KEEP_SOURCE=yes bash
 ```
 
 一键卸载，默认保留数据库：
