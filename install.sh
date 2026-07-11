@@ -6,6 +6,8 @@ APP_NAME="${APP_NAME:-shiye-api}"
 APP_DIR="${APP_DIR:-/opt/shiye}"
 PORT="${PORT:-3388}"
 DEFAULT_REPO_URL="${DEFAULT_REPO_URL:-https://github.com/wstimin/shiye-3xuigl-L3.git}"
+INSTALL_URL="${INSTALL_URL:-https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh}"
+UNINSTALL_URL="${UNINSTALL_URL:-https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/uninstall.sh}"
 DOMAIN="${DOMAIN:-${SITE_DOMAIN:-}}"
 ENABLE_NGINX="${ENABLE_NGINX:-ask}"
 ENABLE_HTTPS="${ENABLE_HTTPS:-ask}"
@@ -579,6 +581,241 @@ configure_optional_nginx() {
   if [ "${INSTALL_HTTPS_SELECTED}" -eq 1 ]; then request_certificate; fi
 }
 
+write_management_command() {
+  log "Writing shiye management command"
+  cat > /usr/local/bin/shiye <<SHIYE_MENU
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+APP_NAME="\${APP_NAME:-${APP_NAME}}"
+APP_DIR="\${APP_DIR:-${APP_DIR}}"
+PORT="\${PORT:-${PORT}}"
+MYSQL_DATABASE="\${MYSQL_DATABASE:-${MYSQL_DATABASE}}"
+MYSQL_USER="\${MYSQL_USER:-${MYSQL_USER}}"
+DEFAULT_REPO_URL="\${DEFAULT_REPO_URL:-${DEFAULT_REPO_URL}}"
+INSTALL_URL="\${INSTALL_URL:-${INSTALL_URL}}"
+UNINSTALL_URL="\${UNINSTALL_URL:-${UNINSTALL_URL}}"
+
+log() { echo "==> \$*"; }
+die() { echo "ERROR: \$*" >&2; exit 1; }
+pause() { echo; read -r -p "按回车键返回菜单..." _; }
+
+require_root() {
+  [ "\$(id -u)" -eq 0 ] || die "请使用 root 执行：sudo shiye"
+}
+
+to_lower() { printf "%s" "\$1" | tr '[:upper:]' '[:lower:]'; }
+is_yes() { case "\$(to_lower "\$1")" in y|yes|1|true|on|enable|enabled) return 0 ;; *) return 1 ;; esac; }
+
+ask_yes_no() {
+  prompt="\$1"
+  default_answer="\$2"
+  while true; do
+    if is_yes "\${default_answer}"; then
+      read -r -p "\${prompt} [Y/n]: " answer
+      answer="\${answer:-y}"
+    else
+      read -r -p "\${prompt} [y/N]: " answer
+      answer="\${answer:-n}"
+    fi
+    if is_yes "\${answer}"; then return 0; fi
+    case "\$(to_lower "\${answer}")" in n|no|0|false|off|disable|disabled|skip) return 1 ;; esac
+    echo "请输入 y 或 n。"
+  done
+}
+
+prompt_required() {
+  prompt="\$1"
+  value=""
+  while [ -z "\${value}" ]; do
+    read -r -p "\${prompt}: " value
+    value="\$(printf "%s" "\${value}" | sed 's/^[[:space:]]*//;s/[[:space:]]*\$//')"
+  done
+  printf "%s" "\${value}"
+}
+
+detect_server_ip() {
+  detected_ip=""
+  if command -v curl >/dev/null 2>&1; then
+    detected_ip="\$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+  fi
+  if [ -z "\${detected_ip}" ]; then
+    detected_ip="\$(hostname -I 2>/dev/null | awk '{print \$1}' || true)"
+  fi
+  printf "%s" "\${detected_ip:-SERVER_IP}"
+}
+
+escape_sed_replacement() {
+  printf "%s" "\$1" | sed 's/[\/&|]/\\&/g'
+}
+
+set_env_value() {
+  [ -f "\${APP_DIR}/.env" ] || die "未找到 \${APP_DIR}/.env，请先安装项目。"
+  key="\$1"
+  value="\$2"
+  escaped_value="\$(escape_sed_replacement "\${value}")"
+  if grep -qE "^\${key}=" "\${APP_DIR}/.env"; then
+    sed -i "s|^\${key}=.*|\${key}=\${escaped_value}|" "\${APP_DIR}/.env"
+  else
+    printf "\n%s=%s\n" "\${key}" "\${value}" >> "\${APP_DIR}/.env"
+  fi
+}
+
+run_remote_install() {
+  env_args=(APP_NAME="\${APP_NAME}" APP_DIR="\${APP_DIR}" PORT="\${PORT}" DEFAULT_REPO_URL="\${DEFAULT_REPO_URL}")
+  if [ "\$#" -gt 0 ]; then env_args+=("\$@"); fi
+  log "开始安装/更新管理面板"
+  curl -fsSL "\${INSTALL_URL}" | env "\${env_args[@]}" bash
+}
+
+show_status() {
+  systemctl --no-pager --full status "\${APP_NAME}" || true
+}
+
+restart_service() {
+  systemctl restart "\${APP_NAME}"
+  show_status
+}
+
+show_logs() {
+  journalctl -u "\${APP_NAME}" -f
+}
+
+configure_domain() {
+  domain="\$(prompt_required "请输入域名，例如 panel.example.com")"
+  https="yes"
+  if ! ask_yes_no "是否申请 Let's Encrypt HTTPS 证书" "yes"; then https="no"; fi
+  email=""
+  if [ "\${https}" = "yes" ] && ask_yes_no "是否填写证书通知邮箱" "no"; then
+    email="\$(prompt_required "Certbot 邮箱")"
+  fi
+
+  args=(DOMAIN="\${domain}" ENABLE_NGINX=yes ENABLE_HTTPS="\${https}")
+  if [ -n "\${email}" ]; then args+=(CERTBOT_EMAIL="\${email}"); fi
+  run_remote_install "\${args[@]}"
+}
+
+remove_domain_access() {
+  log "取消域名/Nginx 访问，改为 IP + 端口"
+  rm -f "/etc/nginx/conf.d/\${APP_NAME}.conf"
+  rm -f "/etc/nginx/sites-available/\${APP_NAME}.conf"
+  rm -f "/etc/nginx/sites-enabled/\${APP_NAME}.conf"
+  if command -v nginx >/dev/null 2>&1; then
+    nginx -t && systemctl reload nginx || true
+  fi
+  public_url="http://\$(detect_server_ip):\${PORT}"
+  set_env_value PUBLIC_WEB_URL "\${public_url}"
+  systemctl restart "\${APP_NAME}"
+  echo "已切换为：\${public_url}/"
+}
+
+rebuild_project() {
+  echo "精简部署目录默认不保留前后端源码。"
+  echo "此操作会重新拉取最新代码、执行迁移、重新构建并重启服务，保留 .env 和数据库。"
+  if ask_yes_no "确认继续重新构建/更新" "yes"; then
+    run_remote_install
+  fi
+}
+
+run_migration() {
+  [ -d "\${APP_DIR}" ] || die "未找到安装目录：\${APP_DIR}"
+  [ -f "\${APP_DIR}/prisma/schema.prisma" ] || die "未找到 Prisma schema，请使用安装/更新项目恢复运行文件。"
+  cd "\${APP_DIR}"
+  log "安装迁移所需依赖"
+  if [ -f package-lock.json ]; then npm install; else npm install; fi
+  log "执行数据库迁移"
+  npm run prisma:generate
+  npm run prisma:migrate
+  npm prune --omit=dev
+  chown -R shiye:shiye "\${APP_DIR}" 2>/dev/null || true
+  systemctl restart "\${APP_NAME}"
+  log "数据库迁移完成"
+}
+
+read_database_url() {
+  [ -f "\${APP_DIR}/.env" ] || return 1
+  grep -E '^DATABASE_URL=' "\${APP_DIR}/.env" | tail -n 1 | cut -d= -f2-
+}
+
+backup_project() {
+  backup_dir="/root/shiye-backup-\$(date +%Y%m%d%H%M%S)"
+  mkdir -p "\${backup_dir}"
+  if [ -f "\${APP_DIR}/.env" ]; then cp -a "\${APP_DIR}/.env" "\${backup_dir}/.env"; fi
+
+  database_url="\$(read_database_url || true)"
+  if [ -n "\${database_url}" ] && command -v node >/dev/null 2>&1 && command -v mysqldump >/dev/null 2>&1; then
+    db_json="\$(DATABASE_URL="\${database_url}" node -e 'const u = new URL(process.env.DATABASE_URL); console.log(JSON.stringify({user: decodeURIComponent(u.username), password: decodeURIComponent(u.password), host: u.hostname || "127.0.0.1", port: u.port || "3306", database: u.pathname.replace(/^\\//, "")}));')"
+    db_user="\$(printf "%s" "\${db_json}" | node -e 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>console.log(JSON.parse(s).user));')"
+    db_password="\$(printf "%s" "\${db_json}" | node -e 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>console.log(JSON.parse(s).password));')"
+    db_host="\$(printf "%s" "\${db_json}" | node -e 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>console.log(JSON.parse(s).host));')"
+    db_port="\$(printf "%s" "\${db_json}" | node -e 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>console.log(JSON.parse(s).port));')"
+    db_name="\$(printf "%s" "\${db_json}" | node -e 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>console.log(JSON.parse(s).database));')"
+    MYSQL_PWD="\${db_password}" mysqldump -h "\${db_host}" -P "\${db_port}" -u "\${db_user}" "\${db_name}" > "\${backup_dir}/\${db_name}.sql"
+  else
+    echo "未执行数据库备份：未找到 DATABASE_URL、node 或 mysqldump。"
+  fi
+
+  echo "备份目录：\${backup_dir}"
+}
+
+uninstall_project() {
+  if ask_yes_no "确认卸载项目？默认保留数据库" "no"; then
+    curl -fsSL "\${UNINSTALL_URL}" | env APP_NAME="\${APP_NAME}" APP_DIR="\${APP_DIR}" MYSQL_DATABASE="\${MYSQL_DATABASE}" MYSQL_USER="\${MYSQL_USER}" DELETE_DATABASE=no bash
+  fi
+}
+
+uninstall_project_and_database() {
+  echo "此操作会删除项目和数据库，业务数据会清空。"
+  read -r -p "请输入 DELETE 确认删除数据库: " confirm
+  [ "\${confirm}" = "DELETE" ] || die "已取消删除数据库"
+  curl -fsSL "\${UNINSTALL_URL}" | env APP_NAME="\${APP_NAME}" APP_DIR="\${APP_DIR}" MYSQL_DATABASE="\${MYSQL_DATABASE}" MYSQL_USER="\${MYSQL_USER}" DELETE_DATABASE=yes bash
+}
+
+menu() {
+  while true; do
+    clear || true
+    cat <<'MENU'
+管理面板
+
+1. 安装/更新项目
+2. 查看服务状态
+3. 重启服务
+4. 查看运行日志
+5. 配置域名/Nginx/HTTPS
+6. 取消域名，仅使用 IP + 端口
+7. 重新构建前后端
+8. 执行数据库迁移
+9. 备份数据库和 .env
+10. 卸载项目
+11. 卸载项目并删除数据库
+0. 退出
+MENU
+    echo
+    read -r -p "请选择操作: " choice
+    case "\${choice}" in
+      1) run_remote_install; pause ;;
+      2) show_status; pause ;;
+      3) restart_service; pause ;;
+      4) show_logs ;;
+      5) configure_domain; pause ;;
+      6) remove_domain_access; pause ;;
+      7) rebuild_project; pause ;;
+      8) run_migration; pause ;;
+      9) backup_project; pause ;;
+      10) uninstall_project; pause ;;
+      11) uninstall_project_and_database; pause ;;
+      0) exit 0 ;;
+      *) echo "无效选项"; pause ;;
+    esac
+  done
+}
+
+require_root
+menu
+SHIYE_MENU
+  chmod 755 /usr/local/bin/shiye
+}
+
 main() {
   require_root
   detect_pkg_manager
@@ -626,6 +863,8 @@ main() {
 
   configure_optional_nginx
 
+  write_management_command
+
   systemctl --no-pager --full status "${APP_NAME}" || true
 
   base_url="http://$(detect_server_ip):${PORT}"
@@ -650,6 +889,7 @@ main() {
   echo "systemctl status ${APP_NAME}"
   echo "systemctl restart ${APP_NAME}"
   echo "journalctl -u ${APP_NAME} -f"
+  echo "shiye  # open management menu"
 }
 
 main "$@"

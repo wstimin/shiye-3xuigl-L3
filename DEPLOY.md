@@ -37,6 +37,31 @@ README、部署文档、安装脚本、前端源码、后端源码、seed 文件
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
 
+安装完成后会写入 `/usr/local/bin/shiye`，后续常用运维可以直接打开管理菜单：
+
+```bash
+sudo shiye
+```
+
+菜单标题只显示“管理面板”，实际入口如下：
+
+```text
+管理面板
+
+1. 安装/更新项目
+2. 查看服务状态
+3. 重启服务
+4. 查看运行日志
+5. 配置域名/Nginx/HTTPS
+6. 取消域名，仅使用 IP + 端口
+7. 重新构建前后端
+8. 执行数据库迁移
+9. 备份数据库和 .env
+10. 卸载项目
+11. 卸载项目并删除数据库
+0. 退出
+```
+
 也可以提前带入域名和 HTTPS 参数，直接部署：
 
 ```bash

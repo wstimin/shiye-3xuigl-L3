@@ -34,6 +34,14 @@
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
 
+安装完成后脚本会写入管理菜单命令，服务器上可随时执行：
+
+```bash
+sudo shiye
+```
+
+菜单标题只显示“管理面板”，包含安装/更新项目、查看状态、重启服务、查看日志、配置或取消域名、重新构建、数据库迁移、备份和卸载入口。
+
 也可以提前带入域名和 HTTPS 参数，直接部署：
 
 ```bash
