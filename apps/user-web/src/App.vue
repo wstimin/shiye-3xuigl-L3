@@ -109,20 +109,24 @@ onMounted(async () => {
   </div>
 
   <div v-else class="app-shell">
-    <header class="header">
+    <aside class="user-sidebar">
       <div class="header-brand">
         <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
         <span v-else class="brand-mark">{{ branding.brandName.slice(0, 1) }}</span>
         <strong>{{ branding.brandName }}</strong>
       </div>
-      <nav>
+      <nav class="user-nav">
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="nav-link">
           <component :is="item.icon" :size="18" />
           <span>{{ item.label }}</span>
         </router-link>
-        <button class="logout-button" @click="logout"><LogOut :size="16" />退出</button>
       </nav>
-    </header>
+      <div class="user-sidebar-footer">
+        <span>当前账号</span>
+        <strong>{{ user.username }}</strong>
+        <button class="logout-button" @click="logout"><LogOut :size="16" />退出</button>
+      </div>
+    </aside>
     <main class="main">
       <router-view />
     </main>

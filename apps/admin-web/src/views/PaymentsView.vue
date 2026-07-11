@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { Banknote, CircleDollarSign, Landmark, QrCode } from 'lucide-vue-next';
 import { api } from '../api';
 
 type PaymentProvider = 'alipay' | 'wechat' | 'epay' | 'bepusdt';
@@ -41,6 +42,12 @@ const epayTypeOptions = [
 ] as const;
 
 const cryptoTypeOptions = [{ label: 'USDT-TRC20', value: 'usdt.trc20' }] as const;
+const providerCards = [
+  { provider: 'alipay' as const, label: '支付宝', description: '官方支付宝通道，支持扫码、PC、手机网站支付。', icon: Landmark },
+  { provider: 'wechat' as const, label: '微信支付', description: '微信商户 V2 Native 扫码支付。', icon: QrCode },
+  { provider: 'epay' as const, label: '易支付', description: '聚合支付通道，可配置支付宝、微信、PayPal 等子类。', icon: Banknote },
+  { provider: 'bepusdt' as const, label: 'BEpusdt', description: 'USDT-TRC20 余额充值通道。', icon: CircleDollarSign }
+];
 
 const loading = ref(false);
 const savingChannel = ref(false);
@@ -82,6 +89,7 @@ const typeOptions = computed(() => {
   if (channelForm.provider === 'bepusdt') return cryptoTypeOptions;
   return [];
 });
+const activeChannelCount = computed(() => channels.value.filter((item) => item.enabled).length);
 
 async function loadChannels() {
   loading.value = true;
@@ -261,14 +269,25 @@ onMounted(loadChannels);
   <h1 class="page-title">支付设置</h1>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
+  <div class="metric-grid compact-metrics">
+    <div class="metric"><span>支付通道</span><strong>{{ channels.length }}</strong><small>启用 {{ activeChannelCount }}</small></div>
+    <div class="metric"><span>支付宝</span><strong>{{ channels.filter((item) => item.provider === 'alipay').length }}</strong><small>官方通道</small></div>
+    <div class="metric"><span>微信支付</span><strong>{{ channels.filter((item) => item.provider === 'wechat').length }}</strong><small>官方通道</small></div>
+    <div class="metric"><span>易支付</span><strong>{{ channels.filter((item) => item.provider === 'epay').length }}</strong><small>聚合通道</small></div>
+  </div>
+
+  <div class="provider-card-grid">
+    <button v-for="card in providerCards" :key="card.provider" type="button" class="provider-card" @click="openChannelDialog(card.provider)">
+      <component :is="card.icon" :size="22" />
+      <strong>{{ card.label }}</strong>
+      <span>{{ card.description }}</span>
+    </button>
+  </div>
+
   <div class="panel list-panel">
     <div class="panel-toolbar">
       <strong>支付方式列表</strong>
       <div class="table-toolbar-actions">
-        <el-button @click="openChannelDialog('alipay')">添加支付宝</el-button>
-        <el-button @click="openChannelDialog('wechat')">添加微信支付</el-button>
-        <el-button @click="openChannelDialog('epay')">添加易支付</el-button>
-        <el-button @click="openChannelDialog('bepusdt')">添加 BEpusdt</el-button>
         <el-button :loading="loading" @click="loadChannels">刷新</el-button>
       </div>
     </div>
@@ -279,13 +298,19 @@ onMounted(loadChannels);
       <el-table-column label="密钥" width="100"><template #default="{ row }: { row: PaymentChannel }">{{ secretState(row) }}</template></el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }: { row: PaymentChannel }">
-          <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '已启用' : '未启用' }}</el-tag>
+          <el-switch
+            v-model="row.enabled"
+            :loading="togglingIds.has(row.id)"
+            inline-prompt
+            active-text="启"
+            inactive-text="停"
+            @change="(value: boolean | string | number) => toggleChannel(row, value)"
+          />
         </template>
       </el-table-column>
       <el-table-column label="回调地址" min-width="260"><template #default="{ row }: { row: PaymentChannel }">{{ row.notifyUrl }}</template></el-table-column>
-      <el-table-column label="操作" width="230" fixed="right">
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }: { row: PaymentChannel }">
-          <el-button size="small" :type="row.enabled ? 'warning' : 'success'" :loading="togglingIds.has(row.id)" @click="toggleChannel(row, !row.enabled)">{{ row.enabled ? '停用' : '启用' }}</el-button>
           <el-button size="small" @click="editChannel(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="removeChannel(row)">删除</el-button>
         </template>

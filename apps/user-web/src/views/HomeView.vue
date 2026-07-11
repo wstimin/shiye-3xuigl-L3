@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { RouterLink } from 'vue-router';
+import { CreditCard, Network, WalletCards } from 'lucide-vue-next';
 import { api } from '../api';
 
 type UserDashboard = {
@@ -36,11 +38,22 @@ onMounted(loadDashboard);
 </script>
 
 <template>
-  <h1 class="page-title">首页</h1>
+  <div class="page-heading">
+    <div>
+      <h1 class="page-title">首页</h1>
+      <p class="page-subtitle">{{ dashboard?.customer.name || '用户中心' }}</p>
+    </div>
+  </div>
   <div v-if="error" class="panel error-text">{{ error }}</div>
   <div v-else class="metric-grid" :class="{ loading }">
     <div class="metric"><span>账户余额</span><strong>{{ dashboard?.customer.balance ?? '--' }}</strong></div>
     <div class="metric"><span>可用节点</span><strong>{{ dashboard?.nodes.length ?? '--' }}</strong></div>
     <div class="metric"><span>最近到期</span><strong>{{ nearestExpire }}</strong></div>
+  </div>
+
+  <div class="quick-link-grid">
+    <RouterLink to="/nodes" class="quick-link-card"><Network :size="20" /><strong>查看节点</strong><span>复制节点、二维码和余额续费</span></RouterLink>
+    <RouterLink to="/finance" class="quick-link-card"><WalletCards :size="20" /><strong>余额充值</strong><span>选择已启用的支付方式充值</span></RouterLink>
+    <RouterLink to="/finance" class="quick-link-card"><CreditCard :size="20" /><strong>卡密兑换</strong><span>兑换管理员配置的充值卡密</span></RouterLink>
   </div>
 </template>

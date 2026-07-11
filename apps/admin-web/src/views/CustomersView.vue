@@ -53,8 +53,12 @@ const bindForm = reactive({ customerId: '', serviceNodeId: '', xuiEmail: '', exp
 const nodeEditForm = reactive({ customerId: '', customerNodeId: '', serviceNodeId: '', xuiEmail: '', expireAt: '', trafficLimitGb: undefined as number | undefined });
 const balanceForm = reactive({ customerId: '', mode: 'add' as 'add' | 'subtract' | 'set', amount: 0, remark: '' });
 const renewMonths = ref<Record<string, number>>({});
+const activePanels = ref(['customers']);
 
 const selectedCustomer = computed(() => customers.value.find((item) => item.id === bindForm.customerId));
+const activeCustomerCount = computed(() => customers.value.filter((item) => item.status === 'active').length);
+const boundNodeCount = computed(() => customers.value.reduce((total, item) => total + (item.nodes?.length || 0), 0));
+const activeBoundNodeCount = computed(() => customers.value.reduce((total, item) => total + (item.nodes?.filter((node) => node.status === 'active').length || 0), 0));
 
 async function loadCustomers() {
   loading.value = true;
@@ -400,9 +404,16 @@ onMounted(loadCustomers);
   <h1 class="page-title">用户管理</h1>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
+  <div class="metric-grid compact-metrics">
+    <div class="metric"><span>面板用户</span><strong>{{ customers.length }}</strong><small>启用 {{ activeCustomerCount }}</small></div>
+    <div class="metric"><span>绑定节点</span><strong>{{ boundNodeCount }}</strong><small>启用 {{ activeBoundNodeCount }}</small></div>
+    <div class="metric"><span>路由节点</span><strong>{{ serviceNodes.length }}</strong><small>可绑定节点</small></div>
+    <div class="metric"><span>余额操作</span><strong>手动</strong><small>支持增减和设置</small></div>
+  </div>
+
   <div class="panel">
     <div class="panel-toolbar">
-      <strong>用户列表</strong>
+      <strong>用户业务</strong>
       <div class="table-toolbar-actions">
         <el-button type="primary" @click="openCustomerDialog">新增用户</el-button>
         <el-button @click="openBindDialog()">绑定节点</el-button>
@@ -410,61 +421,75 @@ onMounted(loadCustomers);
         <el-button :loading="loading" @click="loadCustomers">刷新</el-button>
       </div>
     </div>
-    <el-table :data="customers" v-loading="loading" style="width: 100%" row-key="id">
-      <el-table-column prop="name" label="名称" min-width="130" />
-      <el-table-column prop="loginUsername" label="登录账号" min-width="130" />
-      <el-table-column prop="balance" label="余额" width="110" />
-      <el-table-column label="状态" width="90">
-        <template #default="{ row }: { row: Customer }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '禁用' }}</el-tag></template>
-      </el-table-column>
-      <el-table-column label="绑定节点" min-width="520">
-        <template #default="{ row }: { row: Customer }">
-          <div v-if="row.nodes?.length" class="node-list">
-            <div v-for="node in row.nodes" :key="node.id" class="node-row customer-node-row">
-              <div class="node-meta">
-                <strong class="node-title-line">
-                  {{ node.serviceNode?.name || node.xuiEmail }}
-                  <el-tag size="small" :type="node.status === 'active' ? 'success' : 'info'">{{ node.status === 'active' ? '启用' : '停用' }}</el-tag>
-                </strong>
-                <span>{{ node.serviceNode?.server?.name || '-' }} / {{ node.xuiEmail }}</span>
-                <span>到期 {{ formatDate(node.expireAt) }} · 流量 {{ node.trafficLimitGb ?? '-' }} GB · 同步 {{ formatDate(node.lastSyncedAt) }}</span>
-              </div>
-              <div class="node-actions">
-                <el-select v-model="renewMonths[node.id]" size="small" style="width: 82px">
-                  <el-option :value="1" label="1月" />
-                  <el-option :value="3" label="3月" />
-                  <el-option :value="6" label="6月" />
-                  <el-option :value="12" label="12月" />
-                </el-select>
-                <el-button size="small" :loading="renewingIds.has(node.id)" @click="renewNode(row, node)">续费</el-button>
-                <el-tooltip content="同步到 3x-ui" placement="top">
-                  <el-button circle size="small" :loading="syncingIds.has(node.id)" @click="syncNode(row, node)"><RefreshCw :size="15" /></el-button>
-                </el-tooltip>
-                <el-tooltip content="查看远端流量" placement="top">
-                  <el-button circle size="small" :loading="trafficIds.has(node.id)" @click="showNodeTraffic(row, node)"><Activity :size="15" /></el-button>
-                </el-tooltip>
-                <el-tooltip content="重置远端流量" placement="top">
-                  <el-button circle size="small" :loading="resettingTrafficIds.has(node.id)" @click="resetNodeTraffic(row, node)"><RotateCcw :size="15" /></el-button>
-                </el-tooltip>
-                <el-button size="small" @click="editCustomerNode(row, node)">编辑</el-button>
-                <el-button size="small" @click="unbindNode(row, node)">解绑</el-button>
-                <el-button size="small" type="danger" :loading="deletingServiceNodeIds.has(node.id)" @click="deleteBoundServiceNode(row, node)">删除节点</el-button>
-              </div>
-            </div>
-          </div>
-          <span v-else class="muted-text">未绑定</span>
+    <el-collapse v-model="activePanels" class="admin-collapse">
+      <el-collapse-item name="customers">
+        <template #title>
+          <div class="collapse-title"><strong>用户列表</strong><span>{{ customers.length }} 个用户</span></div>
         </template>
-      </el-table-column>
-      <el-table-column label="创建时间" min-width="170"><template #default="{ row }: { row: Customer }">{{ formatDate(row.createdAt) }}</template></el-table-column>
-      <el-table-column label="操作" width="250" fixed="right">
-        <template #default="{ row }: { row: Customer }">
-          <el-button size="small" @click="openBindDialog(row)">绑定</el-button>
-          <el-button size="small" @click="openBalanceDialog(row)">余额</el-button>
-          <el-button size="small" @click="editCustomer(row)">编辑</el-button>
-          <el-button size="small" type="danger" @click="removeCustomer(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        <el-table :data="customers" v-loading="loading" style="width: 100%" row-key="id">
+          <el-table-column type="expand" width="44">
+            <template #default="{ row }: { row: Customer }">
+              <div class="expanded-node-panel">
+                <div class="expanded-node-head">
+                  <strong>绑定节点</strong>
+                  <el-button size="small" type="primary" plain @click="openBindDialog(row)">绑定节点</el-button>
+                </div>
+                <div v-if="row.nodes?.length" class="node-list expanded-node-list">
+                  <div v-for="node in row.nodes" :key="node.id" class="node-row customer-node-row">
+                    <div class="node-meta">
+                      <strong class="node-title-line">
+                        {{ node.serviceNode?.name || node.xuiEmail }}
+                        <el-tag size="small" :type="node.status === 'active' ? 'success' : 'info'">{{ node.status === 'active' ? '启用' : '停用' }}</el-tag>
+                      </strong>
+                      <span>{{ node.serviceNode?.server?.name || '-' }} / {{ node.xuiEmail }}</span>
+                      <span>到期 {{ formatDate(node.expireAt) }} · 流量 {{ node.trafficLimitGb ?? '-' }} GB · 同步 {{ formatDate(node.lastSyncedAt) }}</span>
+                    </div>
+                    <div class="node-actions">
+                      <el-select v-model="renewMonths[node.id]" size="small" style="width: 82px">
+                        <el-option :value="1" label="1月" />
+                        <el-option :value="3" label="3月" />
+                        <el-option :value="6" label="6月" />
+                        <el-option :value="12" label="12月" />
+                      </el-select>
+                      <el-button size="small" :loading="renewingIds.has(node.id)" @click="renewNode(row, node)">续费</el-button>
+                      <el-tooltip content="同步到 3x-ui" placement="top">
+                        <el-button circle size="small" :loading="syncingIds.has(node.id)" @click="syncNode(row, node)"><RefreshCw :size="15" /></el-button>
+                      </el-tooltip>
+                      <el-tooltip content="查看远端流量" placement="top">
+                        <el-button circle size="small" :loading="trafficIds.has(node.id)" @click="showNodeTraffic(row, node)"><Activity :size="15" /></el-button>
+                      </el-tooltip>
+                      <el-tooltip content="重置远端流量" placement="top">
+                        <el-button circle size="small" :loading="resettingTrafficIds.has(node.id)" @click="resetNodeTraffic(row, node)"><RotateCcw :size="15" /></el-button>
+                      </el-tooltip>
+                      <el-button size="small" @click="editCustomerNode(row, node)">编辑</el-button>
+                      <el-button size="small" @click="unbindNode(row, node)">解绑</el-button>
+                      <el-button size="small" type="danger" :loading="deletingServiceNodeIds.has(node.id)" @click="deleteBoundServiceNode(row, node)">删除节点</el-button>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="empty-panel compact-empty">该用户还没有绑定节点</div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="name" label="名称" min-width="130" />
+          <el-table-column prop="loginUsername" label="登录账号" min-width="130" />
+          <el-table-column prop="balance" label="余额" width="110" />
+          <el-table-column label="绑定" width="90"><template #default="{ row }: { row: Customer }">{{ row.nodes?.length || 0 }} 个</template></el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }: { row: Customer }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '禁用' }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="创建时间" min-width="170"><template #default="{ row }: { row: Customer }">{{ formatDate(row.createdAt) }}</template></el-table-column>
+          <el-table-column label="操作" width="250" fixed="right">
+            <template #default="{ row }: { row: Customer }">
+              <el-button size="small" @click="openBindDialog(row)">绑定</el-button>
+              <el-button size="small" @click="openBalanceDialog(row)">余额</el-button>
+              <el-button size="small" @click="editCustomer(row)">编辑</el-button>
+              <el-button size="small" type="danger" @click="removeCustomer(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-collapse-item>
+    </el-collapse>
   </div>
 
   <el-dialog v-model="customerDialogVisible" :title="editingCustomerId ? '编辑用户' : '新增用户'" width="720px" destroy-on-close>
