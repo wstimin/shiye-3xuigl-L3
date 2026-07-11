@@ -45,6 +45,26 @@ type DeleteServiceNodeResult = {
   remoteConfigCleanup?: CleanupResult;
   remoteInboundCleanup?: CleanupResult;
 };
+type RemoteConfigSyncResult = {
+  synced: boolean;
+  action: string;
+  serviceNodeId: string;
+  inboundId?: number;
+  inboundTag?: string;
+  outboundTag?: string;
+  socks?: { host?: string; port?: number; username?: string } | null;
+};
+type TrafficSyncItem = { target: string; updated: boolean; skipped?: boolean; message?: string };
+type TrafficSyncResult = {
+  synced: boolean;
+  serviceNodeId: string;
+  inboundId?: number;
+  trafficLimitGb?: string | number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  results?: TrafficSyncItem[];
+};
 const protocolOptions = [
   { label: 'VLESS', value: 'vless' },
   { label: 'VMess', value: 'vmess' },
@@ -129,8 +149,9 @@ async function syncRemoteConfig(node: ServiceNode) {
   syncingConfigIds.value = new Set(syncingConfigIds.value).add(node.id);
   error.value = '';
   try {
-    const result = await api<{ action: string }>(`/api/admin/service-nodes/${node.id}/sync-config`, { method: 'POST' });
+    const result = await api<RemoteConfigSyncResult>(`/api/admin/service-nodes/${node.id}/sync-config`, { method: 'POST' });
     ElMessage.success(result.action === 'updated' ? '远端出站中转配置已同步' : '远端出站中转配置已清理');
+    await showRemoteConfigResult(result);
   } catch (err) {
     error.value = err instanceof Error ? err.message : '同步远端配置失败';
   } finally {
@@ -144,12 +165,13 @@ async function syncTrafficLimit(node: ServiceNode) {
   syncingTrafficLimitIds.value = new Set(syncingTrafficLimitIds.value).add(node.id);
   error.value = '';
   try {
-    const result = await api<{ updated: number; skipped: number; failed: number }>(`/api/admin/service-nodes/${node.id}/sync-traffic-limit`, { method: 'POST' });
+    const result = await api<TrafficSyncResult>(`/api/admin/service-nodes/${node.id}/sync-traffic-limit`, { method: 'POST' });
     if (result.failed > 0) {
       ElMessage.warning(`流量额度已部分同步：成功 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`);
     } else {
       ElMessage.success(`流量额度已同步：成功 ${result.updated}，跳过 ${result.skipped}`);
     }
+    await showTrafficSyncResult(result);
     await loadNodes();
   } catch (err) {
     error.value = err instanceof Error ? err.message : '同步流量额度失败';
@@ -228,6 +250,33 @@ function cleanupStatusLine(label: string, result?: CleanupResult) {
   if (result.deleted) return `${label}：已删除${result.verified?.retried ? '（复查后重试删除成功）' : ''}`;
   if (result.message) return `${label}：失败（${result.message}）`;
   return `${label}：已处理`;
+}
+
+async function showRemoteConfigResult(result: RemoteConfigSyncResult) {
+  await ElMessageBox.alert([
+    `远端状态：${result.synced ? '已同步' : '未同步'}`,
+    `执行动作：${result.action === 'updated' ? '写入/更新出站路由' : '清理出站路由'}`,
+    `入站 ID：${result.inboundId ?? '-'}`,
+    `入站 Tag：${result.inboundTag || '-'}`,
+    `出站 Tag：${result.outboundTag || '-'}`,
+    `出站节点：${result.socks ? `${result.socks.host || '-'}:${result.socks.port || '-'}` : '未启用或已清理'}`
+  ].join('\n'), '出站同步结果', { type: result.synced ? 'success' : 'warning' });
+}
+
+async function showTrafficSyncResult(result: TrafficSyncResult) {
+  const lines = [
+    `远端状态：${result.synced ? '已全部同步' : '部分失败'}`,
+    `入站 ID：${result.inboundId ?? '-'}`,
+    `流量额度：${result.trafficLimitGb ?? '-'} GB`,
+    `汇总：成功 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`
+  ];
+  const items = (result.results || []).slice(0, 8).map((item) => {
+    const status = item.updated ? '成功' : item.skipped ? '跳过' : '失败';
+    return `${item.target}：${status}${item.message ? `（${item.message}）` : ''}`;
+  });
+  if (items.length) lines.push('', ...items);
+  if ((result.results || []).length > items.length) lines.push(`还有 ${(result.results || []).length - items.length} 条结果未显示`);
+  await ElMessageBox.alert(lines.join('\n'), '流量同步结果', { type: result.failed > 0 ? 'warning' : 'success' });
 }
 
 function resetForm() {

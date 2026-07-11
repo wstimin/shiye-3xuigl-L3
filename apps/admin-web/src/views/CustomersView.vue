@@ -47,6 +47,28 @@ type DeleteServiceNodeResult = {
   remoteConfigCleanup?: CleanupResult;
   remoteInboundCleanup?: CleanupResult;
 };
+type SyncDetail = {
+  inboundId?: number;
+  xuiEmail?: string;
+  route?: string;
+  action?: string;
+  subId?: string;
+  links?: string[];
+};
+type CustomerNodeSyncResult = {
+  synced: boolean;
+  action?: string;
+  route?: string;
+  detail?: SyncDetail;
+};
+type CustomerNodeMutationResult = {
+  node?: CustomerNode | null;
+  sync?: CustomerNodeSyncResult;
+};
+type RenewalResult = {
+  node?: CustomerNode;
+  sync?: SyncDetail;
+};
 
 const loading = ref(false);
 const savingCustomer = ref(false);
@@ -121,7 +143,7 @@ async function bindNode() {
   binding.value = true;
   error.value = '';
   try {
-    await api(`/api/admin/customers/${bindForm.customerId}/nodes`, {
+    const result = await api<CustomerNodeMutationResult>(`/api/admin/customers/${bindForm.customerId}/nodes`, {
       method: 'POST',
       body: {
         serviceNodeId: bindForm.serviceNodeId,
@@ -131,6 +153,7 @@ async function bindNode() {
       }
     });
     ElMessage.success('节点已绑定，远端客户端已同步');
+    await showCustomerSyncResult(result.sync, '绑定同步结果');
     bindDialogVisible.value = false;
     Object.assign(bindForm, { xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
@@ -146,7 +169,7 @@ async function updateCustomerNode() {
   updatingCustomerNode.value = true;
   error.value = '';
   try {
-    await api(`/api/admin/customers/${nodeEditForm.customerId}/nodes/${nodeEditForm.customerNodeId}`, {
+    const result = await api<CustomerNodeMutationResult>(`/api/admin/customers/${nodeEditForm.customerId}/nodes/${nodeEditForm.customerNodeId}`, {
       method: 'PATCH',
       body: {
         serviceNodeId: nodeEditForm.serviceNodeId,
@@ -156,6 +179,7 @@ async function updateCustomerNode() {
       }
     });
     ElMessage.success('绑定节点已更新，远端客户端已同步');
+    await showCustomerSyncResult(result.sync, '绑定更新结果');
     editNodeDialogVisible.value = false;
     await loadCustomers();
   } catch (err) {
@@ -186,8 +210,9 @@ async function syncNode(customer: Customer, node: CustomerNode) {
   syncingIds.value = new Set(syncingIds.value).add(node.id);
   error.value = '';
   try {
-    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/sync`, { method: 'POST' });
+    const result = await api<CustomerNodeSyncResult>(`/api/admin/customers/${customer.id}/nodes/${node.id}/sync`, { method: 'POST' });
     ElMessage.success(`已同步 ${node.serviceNode?.name || node.xuiEmail}`);
+    await showCustomerSyncResult(result, '手动同步结果');
     await loadCustomers();
   } catch (err) {
     error.value = err instanceof Error ? err.message : '同步失败';
@@ -203,8 +228,9 @@ async function renewNode(customer: Customer, node: CustomerNode) {
   renewingIds.value = new Set(renewingIds.value).add(node.id);
   error.value = '';
   try {
-    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/renew`, { method: 'POST', body: { months } });
+    const result = await api<RenewalResult>(`/api/admin/customers/${customer.id}/nodes/${node.id}/renew`, { method: 'POST', body: { months } });
     ElMessage.success('续费成功，已同步远端');
+    await showCustomerSyncResult({ synced: true, action: result.sync?.action, route: result.sync?.route, detail: result.sync }, '续费同步结果');
     await loadCustomers();
   } catch (err) {
     error.value = err instanceof Error ? err.message : '续费失败';
@@ -303,6 +329,20 @@ function cleanupStatusLine(label: string, result?: CleanupResult) {
   if (result.deleted) return `${label}：已删除${result.verified?.retried ? '（复查后重试删除成功）' : ''}`;
   if (result.message) return `${label}：失败（${result.message}）`;
   return `${label}：已处理`;
+}
+
+async function showCustomerSyncResult(result: CustomerNodeSyncResult | undefined, title: string) {
+  if (!result) return;
+  const detail = result.detail || {};
+  await ElMessageBox.alert([
+    `远端状态：${result.synced ? '已同步' : '未同步'}`,
+    `远端接口：${result.route || detail.route || '-'}`,
+    `执行动作：${result.action || detail.action || '-'}`,
+    `入站 ID：${detail.inboundId ?? '-'}`,
+    `客户端标识：${detail.xuiEmail || '-'}`,
+    `订阅 ID：${detail.subId || '-'}`,
+    `可用链接：${Array.isArray(detail.links) ? detail.links.length : 0} 条`
+  ].join('\n'), title, { type: result.synced ? 'success' : 'warning' });
 }
 
 function openCustomerDialog() {

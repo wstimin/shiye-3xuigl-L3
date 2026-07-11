@@ -411,8 +411,9 @@ export class NodesService {
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
     });
 
+    let syncResult: Awaited<ReturnType<XuiService['syncCustomerNode']>>;
     try {
-      await this.xui.syncCustomerNode(customerId, node.id, {
+      syncResult = await this.xui.syncCustomerNode(customerId, node.id, {
         expireAt: input.expireAt || null,
         trafficLimitGb: node.trafficLimitGb,
         status: 'active',
@@ -424,10 +425,11 @@ export class NodesService {
       throw error;
     }
 
-    return this.prisma.customerNode.findUnique({
+    const syncedNode = await this.prisma.customerNode.findUnique({
       where: { id: node.id },
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
     });
+    return { node: syncedNode, sync: syncResult };
   }
 
   async updateCustomerNode(customerId: string, customerNodeId: string, input: Partial<z.infer<typeof customerNodeCreateSchema>>) {
@@ -479,8 +481,9 @@ export class NodesService {
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
     });
 
+    let syncResult: Awaited<ReturnType<XuiService['syncCustomerNode']>>;
     try {
-      await this.xui.syncCustomerNode(customerId, customerNodeId, {
+      syncResult = await this.xui.syncCustomerNode(customerId, customerNodeId, {
         expireAt: input.expireAt === undefined ? node.expireAt : input.expireAt || null,
         trafficLimitGb: input.trafficLimitGb === undefined ? node.trafficLimitGb : new Prisma.Decimal(input.trafficLimitGb ?? serviceNode.trafficLimitGb),
         status: 'active',
@@ -503,10 +506,11 @@ export class NodesService {
       throw error;
     }
 
-    return this.prisma.customerNode.findUnique({
+    const syncedNode = await this.prisma.customerNode.findUnique({
       where: { id: node.id },
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
     });
+    return { node: syncedNode, sync: syncResult };
   }
 
   async unbindCustomerNode(customerId: string, customerNodeId: string) {
