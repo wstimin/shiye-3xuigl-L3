@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { renewalSchema, userRenewalSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { AuthGuard } from '../../shared/auth.guard.js';
@@ -21,6 +21,16 @@ export class FinanceController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   balanceLogs() { return this.finance.balanceLogs(); }
+
+  @Delete('admin/recharge-orders/history')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  clearRechargeOrderHistory() { return this.finance.clearRechargeOrderHistory(); }
+
+  @Delete('admin/balance-logs/history')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  clearBalanceLogHistory() { return this.finance.clearBalanceLogHistory(); }
 
   @Post('user/renewals')
   @UseGuards(AuthGuard)

@@ -113,8 +113,8 @@ onMounted(loadDashboard);
 
   <div class="metric-grid" :class="{ loading }">
     <div class="metric"><span>用户总数</span><strong>{{ customers.total }}</strong><small>当前页活跃 {{ activeCustomers }}</small></div>
-    <div class="metric"><span>服务节点</span><strong>{{ serviceNodes.length }}</strong><small>已启用 {{ enabledNodes }}</small></div>
-    <div class="metric"><span>3x-ui 服务器</span><strong>{{ servers.length }}</strong><small>已启用 {{ enabledServers }}</small></div>
+    <div class="metric"><span>路由节点</span><strong>{{ serviceNodes.length }}</strong><small>已启用 {{ enabledNodes }}</small></div>
+    <div class="metric"><span>连接服务器</span><strong>{{ servers.length }}</strong><small>已启用 {{ enabledServers }}</small></div>
     <div class="metric"><span>卡密总数</span><strong>{{ cards.total }}</strong><small>当前页未使用 {{ unusedCards }}</small></div>
   </div>
 

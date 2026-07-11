@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Activity, RefreshCw, Users, Wifi } from 'lucide-vue-next';
@@ -46,7 +46,7 @@ async function loadServers() {
   try {
     servers.value = await api<XuiServer[]>('/api/admin/xui-servers');
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载 3x-ui 服务器失败';
+    error.value = err instanceof Error ? err.message : '加载连接服务器失败';
   } finally {
     loading.value = false;
   }
@@ -58,12 +58,12 @@ async function saveServer() {
   try {
     const path = editingId.value ? `/api/admin/xui-servers/${editingId.value}` : '/api/admin/xui-servers';
     await api(path, { method: editingId.value ? 'PATCH' : 'POST', body: cleanFormBody() });
-    ElMessage.success(editingId.value ? '服务器已更新' : '服务器已添加');
+    ElMessage.success(editingId.value ? '连接服务器已更新' : '连接服务器已添加');
     dialogVisible.value = false;
     resetForm();
     await loadServers();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存服务器失败';
+    error.value = err instanceof Error ? err.message : '保存连接服务器失败';
   } finally {
     saving.value = false;
   }
@@ -90,7 +90,7 @@ async function testSaved(server: XuiServer) {
     const result = await api<{ inboundCount: number }>(`/api/admin/xui-servers/${server.id}/test`, { method: 'POST' });
     ElMessage.success(`${server.name} 连接成功，入站数量：${result.inboundCount}`);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '测试已保存服务器失败';
+    error.value = err instanceof Error ? err.message : '测试已保存连接服务器失败';
   } finally {
     const next = new Set(testingIds.value);
     next.delete(server.id);
@@ -131,7 +131,7 @@ async function showServerStatus(server: XuiServer) {
       `Available versions: ${(result.versions || []).slice(0, 5).join(', ') || '-'}`
     ].join('\n'), `${server.name} status`, { type: 'info' });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取服务器状态失败';
+    error.value = err instanceof Error ? err.message : '读取连接服务器状态失败';
   } finally {
     const next = new Set(statusIds.value);
     next.delete(server.id);
@@ -190,9 +190,9 @@ function editServer(server: XuiServer) {
 }
 
 async function removeServer(server: XuiServer) {
-  await ElMessageBox.confirm(`确认删除服务器“${server.name}”？有关联服务节点时请先处理节点。`, '删除确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除连接服务器“${server.name}”？有关联路由节点时请先处理节点。`, '删除确认', { type: 'warning' });
   await api(`/api/admin/xui-servers/${server.id}`, { method: 'DELETE' });
-  ElMessage.success('服务器已删除');
+  ElMessage.success('连接服务器已删除');
   await loadServers();
 }
 
@@ -245,14 +245,14 @@ onMounted(loadServers);
 </script>
 
 <template>
-  <h1 class="page-title">3x-ui 服务器</h1>
+  <h1 class="page-title">连接服务器</h1>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
 
   <div class="panel list-panel">
     <div class="panel-toolbar">
-      <strong>服务器列表</strong>
+      <strong>连接服务器列表</strong>
       <div class="table-toolbar-actions">
-        <el-button type="primary" @click="openDialog">添加服务器</el-button>
+        <el-button type="primary" @click="openDialog">添加连接服务器</el-button>
         <el-button :loading="loading" @click="loadServers">刷新</el-button>
       </div>
     </div>
@@ -291,7 +291,7 @@ onMounted(loadServers);
     </el-table>
   </div>
 
-  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑 3x-ui 服务器' : '添加 3x-ui 服务器'" width="760px" destroy-on-close>
+  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑连接服务器' : '添加连接服务器'" width="760px" destroy-on-close>
     <el-form :model="form" label-width="96px" class="dialog-form-grid">
       <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
       <el-form-item label="面板地址"><el-input v-model="form.baseUrl" placeholder="https://xui.example.com" /></el-form-item>

@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router';
 import QRCode from 'qrcode';
 import { api } from '../api';
 
-type PaymentResult = { tradeNo: string; status: string; amount: string; paidAt?: string | null; payUrl?: string | null; qrCode?: string | null };
+type PaymentResult = { tradeNo: string; status: string; amount: string; expiresAt?: string | null; paidAt?: string | null; payUrl?: string | null; qrCode?: string | null };
 
 const route = useRoute();
 const loading = ref(false);
@@ -48,6 +48,7 @@ onMounted(loadResult);
     <h2>{{ statusText(result?.status) }}</h2>
     <div class="profile-row"><span>订单号</span><strong>{{ result?.tradeNo || tradeNo || '-' }}</strong></div>
     <div class="profile-row"><span>金额</span><strong>{{ result?.amount || '-' }}</strong></div>
+    <div class="profile-row"><span>有效至</span><strong>{{ result?.expiresAt ? new Date(result.expiresAt).toLocaleString('zh-CN', { hour12: false }) : '-' }}</strong></div>
     <div class="profile-row"><span>到账时间</span><strong>{{ result?.paidAt || '-' }}</strong></div>
     <a v-if="result?.status === 'pending' && result.payUrl" class="pay-link" :href="result.payUrl">继续支付</a>
     <div v-if="result?.status === 'pending' && result.qrCode" class="qr-box">

@@ -28,7 +28,7 @@ async function loadNodes() {
   try {
     nodes.value = await api<SocksNode[]>('/api/admin/socks-nodes');
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载 Socks 节点失败';
+    error.value = err instanceof Error ? err.message : '加载出站节点失败';
   } finally {
     loading.value = false;
   }
@@ -40,12 +40,12 @@ async function saveNode() {
   try {
     const path = editingId.value ? `/api/admin/socks-nodes/${editingId.value}` : '/api/admin/socks-nodes';
     await api(path, { method: editingId.value ? 'PATCH' : 'POST', body: cleanFormBody() });
-    ElMessage.success(editingId.value ? 'Socks 节点已更新' : 'Socks 节点已添加');
+    ElMessage.success(editingId.value ? '出站节点已更新' : '出站节点已添加');
     dialogVisible.value = false;
     resetForm();
     await loadNodes();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存 Socks 节点失败';
+    error.value = err instanceof Error ? err.message : '保存出站节点失败';
   } finally {
     saving.value = false;
   }
@@ -71,9 +71,9 @@ function editNode(node: SocksNode) {
 }
 
 async function removeNode(node: SocksNode) {
-  await ElMessageBox.confirm(`确认删除 Socks 节点“${node.name}”？正在被服务节点使用时，后端会拒绝删除。`, '删除确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除出站节点“${node.name}”？正在被路由节点使用时，后端会拒绝删除。`, '删除确认', { type: 'warning' });
   await api(`/api/admin/socks-nodes/${node.id}`, { method: 'DELETE' });
-  ElMessage.success('Socks 节点已删除');
+  ElMessage.success('出站节点已删除');
   await loadNodes();
 }
 
@@ -95,14 +95,14 @@ onMounted(loadNodes);
 </script>
 
 <template>
-  <h1 class="page-title">Socks 节点</h1>
+  <h1 class="page-title">出站节点</h1>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
 
   <div class="panel list-panel">
     <div class="panel-toolbar">
-      <strong>Socks 节点列表</strong>
+      <strong>出站节点列表</strong>
       <div class="table-toolbar-actions">
-        <el-button type="primary" @click="openDialog">添加 Socks 节点</el-button>
+        <el-button type="primary" @click="openDialog">添加出站节点</el-button>
         <el-button :loading="loading" @click="loadNodes">刷新</el-button>
       </div>
     </div>
@@ -129,7 +129,7 @@ onMounted(loadNodes);
     </el-table>
   </div>
 
-  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑 Socks 节点' : '添加 Socks 节点'" width="720px" destroy-on-close>
+  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑出站节点' : '添加出站节点'" width="720px" destroy-on-close>
     <el-form :model="form" label-width="92px" class="dialog-form-grid">
       <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
       <el-form-item label="地址"><el-input v-model="form.host" placeholder="127.0.0.1 或域名" /></el-form-item>

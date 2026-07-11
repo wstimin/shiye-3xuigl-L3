@@ -17,7 +17,7 @@ type PaymentMethod = {
   image?: string;
   icon?: typeof Banknote;
 };
-type RechargeOrder = { order: { tradeNo: string; amount: string }; payUrl?: string | null; qrCode?: string | null };
+type RechargeOrder = { order: { tradeNo: string; amount: string; expiresAt?: string | null }; payUrl?: string | null; qrCode?: string | null };
 type PublicSettings = { cardPurchaseUrl?: string };
 
 const code = ref('');
@@ -97,7 +97,7 @@ async function createRechargeOrder() {
     });
     lastOrder.value = result;
     qrImage.value = result.qrCode ? await QRCode.toDataURL(result.qrCode, { width: 220, margin: 1 }) : '';
-    message.value = `充值订单已创建：${result.order.tradeNo}`;
+    message.value = `充值订单已创建：${result.order.tradeNo}，请在 30 分钟内完成支付`;
     if (result.payUrl) window.location.href = result.payUrl;
   } catch (err) {
     error.value = err instanceof Error ? err.message : '创建充值订单失败';
@@ -171,6 +171,7 @@ onMounted(loadFinanceData);
       <div v-if="!loading && !channels.length" class="empty-hint">管理员未启用在线支付方式</div>
       <div v-if="lastOrder?.qrCode" class="qr-box">
         <img v-if="qrImage" :src="qrImage" alt="支付二维码" />
+        <small v-if="lastOrder.order.expiresAt">有效至：{{ new Date(lastOrder.order.expiresAt).toLocaleString('zh-CN', { hour12: false }) }}</small>
         <span>{{ lastOrder.qrCode }}</span>
       </div>
     </section>

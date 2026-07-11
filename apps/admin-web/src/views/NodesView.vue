@@ -83,7 +83,7 @@ async function loadNodes() {
     socksNodes.value = socksList;
     if (!form.serverId && serverList[0]) form.serverId = serverList[0].id;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载服务节点失败';
+    error.value = err instanceof Error ? err.message : '加载路由节点失败';
   } finally {
     loading.value = false;
   }
@@ -95,24 +95,24 @@ async function saveNode() {
   try {
     const path = editingId.value ? `/api/admin/service-nodes/${editingId.value}` : '/api/admin/service-nodes';
     await api(path, { method: editingId.value ? 'PATCH' : 'POST', body: form });
-    ElMessage.success(editingId.value ? '服务节点已更新' : '服务节点已添加');
+    ElMessage.success(editingId.value ? '路由节点已更新' : '路由节点已添加');
     dialogVisible.value = false;
     resetForm();
     await loadNodes();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存服务节点失败';
+    error.value = err instanceof Error ? err.message : '保存路由节点失败';
   } finally {
     saving.value = false;
   }
 }
 
 async function syncRemoteConfig(node: ServiceNode) {
-  await ElMessageBox.confirm(`确认把“${node.name}”的 Socks 中转配置写入远端 Xray？系统只会管理本项目标记的出站和路由。`, '同步配置确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认把“${node.name}”的出站中转配置写入远端 Xray？系统只会管理本项目标记的出站和路由。`, '同步出站确认', { type: 'warning' });
   syncingConfigIds.value = new Set(syncingConfigIds.value).add(node.id);
   error.value = '';
   try {
     const result = await api<{ action: string }>(`/api/admin/service-nodes/${node.id}/sync-config`, { method: 'POST' });
-    ElMessage.success(result.action === 'updated' ? '远端 Socks 中转配置已同步' : '远端 Socks 中转配置已清理');
+    ElMessage.success(result.action === 'updated' ? '远端出站中转配置已同步' : '远端出站中转配置已清理');
   } catch (err) {
     error.value = err instanceof Error ? err.message : '同步远端配置失败';
   } finally {
@@ -185,9 +185,9 @@ function editNode(node: ServiceNode) {
 }
 
 async function removeNode(node: ServiceNode) {
-  await ElMessageBox.confirm(`确认删除服务节点“${node.name}”？系统会先删除该节点下远端 3x-ui 客户端，并清理本项目写入的 Socks 路由配置。`, '删除确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除路由节点“${node.name}”？系统会先删除该节点下远端 3x-ui 客户端，并清理本项目写入的出站路由配置。`, '删除确认', { type: 'warning' });
   await api(`/api/admin/service-nodes/${node.id}`, { method: 'DELETE' });
-  ElMessage.success('服务节点已删除');
+  ElMessage.success('路由节点已删除');
   await loadNodes();
 }
 
@@ -223,20 +223,20 @@ onMounted(loadNodes);
 </script>
 
 <template>
-  <h1 class="page-title">服务节点</h1>
+  <h1 class="page-title">路由节点</h1>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
 
   <div class="panel list-panel">
     <div class="panel-toolbar">
-      <strong>服务节点列表</strong>
+      <strong>路由节点列表</strong>
       <div class="table-toolbar-actions">
-        <el-button type="primary" @click="openDialog">添加服务节点</el-button>
+        <el-button type="primary" @click="openDialog">添加路由节点</el-button>
         <el-button :loading="loading" @click="loadNodes">刷新</el-button>
       </div>
     </div>
     <el-table :data="nodes" v-loading="loading" style="width: 100%">
       <el-table-column prop="name" label="名称" min-width="140" />
-      <el-table-column label="3x-ui 服务器" min-width="140">
+      <el-table-column label="连接服务器" min-width="140">
         <template #default="{ row }: { row: ServiceNode }">{{ row.server?.name || '-' }}</template>
       </el-table-column>
       <el-table-column prop="inboundId" label="入站 ID" width="100" />
@@ -249,7 +249,7 @@ onMounted(loadNodes);
       </el-table-column>
       <el-table-column prop="priceMonthly" label="月价格" width="100" />
       <el-table-column prop="trafficLimitGb" label="流量 GB" width="100" />
-      <el-table-column label="Socks 中转" min-width="190">
+      <el-table-column label="出站中转" min-width="190">
         <template #default="{ row }: { row: ServiceNode }">
           <span v-if="row.config?.socksRelayEnabled">{{ socksLabel(row.config.socksNodeId) }}</span>
           <span v-else class="muted-text">未启用</span>
@@ -260,7 +260,7 @@ onMounted(loadNodes);
       </el-table-column>
       <el-table-column label="操作" width="520" fixed="right">
         <template #default="{ row }: { row: ServiceNode }">
-          <el-button size="small" :loading="syncingConfigIds.has(row.id)" :disabled="!row.inboundId" @click="syncRemoteConfig(row)"><UploadCloud :size="15" />同步配置</el-button>
+          <el-button size="small" :loading="syncingConfigIds.has(row.id)" :disabled="!row.inboundId" @click="syncRemoteConfig(row)"><UploadCloud :size="15" />同步出站</el-button>
           <el-button size="small" :loading="syncingTrafficLimitIds.has(row.id)" :disabled="!row.inboundId" @click="syncTrafficLimit(row)"><Gauge :size="15" />同步流量</el-button>
           <el-button size="small" :loading="resettingTrafficIds.has(row.id)" :disabled="!row.inboundId" @click="resetRemoteTraffic(row)"><RotateCcw :size="15" />重置流量</el-button>
           <el-button size="small" @click="editNode(row)">编辑</el-button>
@@ -270,10 +270,10 @@ onMounted(loadNodes);
     </el-table>
   </div>
 
-  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑服务节点' : '添加服务节点'" width="820px" destroy-on-close>
+  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑路由节点' : '添加路由节点'" width="820px" destroy-on-close>
     <el-form :model="form" label-width="112px" class="dialog-form-grid">
       <el-form-item label="节点名称"><el-input v-model="form.name" /></el-form-item>
-      <el-form-item label="3x-ui 服务器">
+      <el-form-item label="连接服务器">
         <el-select v-model="form.serverId" placeholder="选择服务器" style="width: 100%">
           <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id" />
         </el-select>
@@ -298,9 +298,9 @@ onMounted(loadNodes);
       <el-form-item label="月价格"><el-input-number v-model="form.priceMonthly" :min="0" :precision="2" style="width: 100%" /></el-form-item>
       <el-form-item label="流量 GB"><el-input-number v-model="form.trafficLimitGb" :min="0" :precision="2" style="width: 100%" /></el-form-item>
       <el-form-item label="启用节点"><el-switch v-model="form.enabled" /></el-form-item>
-      <el-form-item label="启用 Socks"><el-switch v-model="form.socksRelayEnabled" /></el-form-item>
-      <el-form-item label="Socks 节点">
-        <el-select v-model="form.socksNodeId" :disabled="!form.socksRelayEnabled" placeholder="选择 Socks 节点" style="width: 100%">
+      <el-form-item label="启用出站"><el-switch v-model="form.socksRelayEnabled" /></el-form-item>
+      <el-form-item label="出站节点">
+        <el-select v-model="form.socksNodeId" :disabled="!form.socksRelayEnabled" placeholder="选择出站节点" style="width: 100%">
           <el-option v-for="node in enabledSocksNodes" :key="node.id" :label="`${node.name} (${node.host}:${node.port})`" :value="node.id" />
         </el-select>
       </el-form-item>

@@ -221,6 +221,24 @@ export class CardsService {
     return { deleted: true, templateId, deletedCards: deletedCards.count, deletedBatches: deletedBatches.count };
   }
 
+  async deleteUsedCards() {
+    const [deletedCards, deletedBatches] = await this.prisma.$transaction([
+      this.prisma.card.deleteMany({ where: { status: 'used' } }),
+      this.prisma.cardBatch.deleteMany({ where: { cards: { none: {} } } })
+    ]);
+    return { deleted: true, deletedCards: deletedCards.count, deletedBatches: deletedBatches.count };
+  }
+
+  async deleteUsedBatchCards(batchId: string) {
+    const batch = await this.prisma.cardBatch.findUnique({ where: { id: batchId }, select: { id: true } });
+    if (!batch) throw new NotFoundException('Card batch not found');
+    const [deletedCards, deletedBatches] = await this.prisma.$transaction([
+      this.prisma.card.deleteMany({ where: { batchId, status: 'used' } }),
+      this.prisma.cardBatch.deleteMany({ where: { id: batchId, cards: { none: {} } } })
+    ]);
+    return { deleted: true, batchId, deletedCards: deletedCards.count, deletedBatches: deletedBatches.count };
+  }
+
   private async ensureTemplate(id: string) {
     const exists = await this.prisma.cardTemplate.findUnique({ where: { id }, select: { id: true } });
     if (!exists) throw new NotFoundException('Card template not found');

@@ -47,10 +47,20 @@ export class CardsController {
   @Roles('admin')
   generate(@Body(new ZodValidationPipe(cardGenerateSchema)) body: z.infer<typeof cardGenerateSchema>) { return this.cards.generate(body); }
 
+  @Delete('admin/cards/used/history')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  deleteUsedCards() { return this.cards.deleteUsedCards(); }
+
   @Delete('admin/cards/:id')
   @UseGuards(AuthGuard)
   @Roles('admin')
   deleteCard(@Param('id') id: string) { return this.cards.deleteCard(id); }
+
+  @Delete('admin/card-batches/:id/used-cards')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  deleteUsedBatchCards(@Param('id') id: string) { return this.cards.deleteUsedBatchCards(id); }
 
   @Delete('admin/card-batches/:id')
   @UseGuards(AuthGuard)

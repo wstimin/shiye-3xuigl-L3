@@ -7,16 +7,31 @@ type SessionUser = { role: string; username: string };
 type Branding = { brandName: string; logoDataUrl: string };
 
 const fallbackBrandName = '十夜管理后台';
-const nav = [
-  { to: '/', label: '概览', icon: LayoutDashboard },
-  { to: '/customers', label: '用户', icon: Users },
-  { to: '/xui-servers', label: '3x-ui 服务器', icon: Network },
-  { to: '/nodes', label: '服务节点', icon: Router },
-  { to: '/socks-nodes', label: 'Socks 节点', icon: ShieldCheck },
-  { to: '/finance', label: '财务', icon: WalletCards },
-  { to: '/cards', label: '卡密', icon: CreditCard },
-  { to: '/payments', label: '支付', icon: ReceiptText },
-  { to: '/settings', label: '设置', icon: Settings }
+const navSections = [
+  { label: '总览', items: [{ to: '/', label: '概览', icon: LayoutDashboard }] },
+  {
+    label: '业务',
+    items: [
+      { to: '/customers', label: '用户管理', icon: Users },
+      { to: '/nodes', label: '路由节点', icon: Router }
+    ]
+  },
+  {
+    label: '网络',
+    items: [
+      { to: '/xui-servers', label: '连接服务器', icon: Network },
+      { to: '/socks-nodes', label: '出站节点', icon: ShieldCheck }
+    ]
+  },
+  {
+    label: '资金',
+    items: [
+      { to: '/finance', label: '财务记录', icon: WalletCards },
+      { to: '/cards', label: '卡密管理', icon: CreditCard },
+      { to: '/payments', label: '支付设置', icon: ReceiptText }
+    ]
+  },
+  { label: '系统', items: [{ to: '/settings', label: '系统设置', icon: Settings }] }
 ];
 
 const checking = ref(true);
@@ -120,15 +135,27 @@ onMounted(async () => {
         <span v-else class="brand-mark">{{ branding.brandName.slice(0, 1) }}</span>
         <strong>{{ branding.brandName }}</strong>
       </div>
-      <router-link v-for="item in nav" :key="item.to" :to="item.to" class="nav-item">
-        <component :is="item.icon" :size="18" />
-        <span>{{ item.label }}</span>
-      </router-link>
+      <nav class="sidebar-scroll">
+        <section v-for="section in navSections" :key="section.label" class="nav-section">
+          <div class="nav-section-title">{{ section.label }}</div>
+          <router-link v-for="item in section.items" :key="item.to" :to="item.to" class="nav-item">
+            <component :is="item.icon" :size="18" />
+            <span>{{ item.label }}</span>
+          </router-link>
+        </section>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <span>当前账号</span>
+          <strong>{{ user.username }}</strong>
+        </div>
+        <el-button text class="logout-button" @click="logout"><LogOut :size="16" />退出登录</el-button>
+      </div>
     </el-aside>
     <el-container>
       <el-header class="topbar">
-        <span>{{ user.username }}</span>
-        <el-button text @click="logout"><LogOut :size="16" />退出</el-button>
+        <span>管理后台</span>
+        <el-tag size="small" type="success">{{ user.username }}</el-tag>
       </el-header>
       <el-main>
         <router-view />

@@ -29,6 +29,8 @@ type CreatePaymentResult = {
   raw?: unknown;
 };
 
+const RECHARGE_ORDER_TTL_MINUTES = 30;
+
 @Injectable()
 export class PaymentsService {
   constructor(private readonly prisma: PrismaService, private readonly encryption: EncryptionService) {}
@@ -122,9 +124,11 @@ export class PaymentsService {
 
     const config = this.configObject(channel.configEnc);
     const tradeNo = this.tradeNo();
+    const expiresAt = addMinutes(new Date(), RECHARGE_ORDER_TTL_MINUTES);
     const payment = await this.createPayment(provider, config, {
       tradeNo,
       amount,
+      expiresAt,
       returnUrl: body.returnUrl,
       subject: '账户余额充值'
     });
@@ -137,6 +141,7 @@ export class PaymentsService {
         provider,
         amount,
         status: 'pending',
+        expiresAt,
         payUrl: payment.payUrl || null,
         qrCode: payment.qrCode || null,
         rawPayload: toJsonValue(payment.raw || null)
@@ -165,7 +170,8 @@ export class PaymentsService {
   }
 
   async result(tradeNo: string) {
-    const order = await this.prisma.rechargeOrder.findUnique({ where: { tradeNo }, select: { tradeNo: true, status: true, amount: true, paidAt: true, payUrl: true, qrCode: true } });
+    await this.closeExpiredOrder(tradeNo);
+    const order = await this.prisma.rechargeOrder.findUnique({ where: { tradeNo }, select: { tradeNo: true, status: true, amount: true, expiresAt: true, paidAt: true, payUrl: true, qrCode: true } });
     if (!order) throw new NotFoundException('充值订单不存在');
     return order;
   }
@@ -178,7 +184,7 @@ export class PaymentsService {
     throw new BadRequestException('不支持的支付通道');
   }
 
-  private async createPayment(provider: PaymentProvider, config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; returnUrl?: string }): Promise<CreatePaymentResult> {
+  private async createPayment(provider: PaymentProvider, config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; expiresAt: Date; returnUrl?: string }): Promise<CreatePaymentResult> {
     if (provider === 'epay') return this.createEpayPayment(config, order);
     if (provider === 'bepusdt') return this.createBepusdtPayment(config, order);
     if (provider === 'alipay') return this.createAlipayPayment(config, order);
@@ -186,7 +192,7 @@ export class PaymentsService {
     throw new ServiceUnavailableException('该支付通道暂未实现下单接口');
   }
 
-  private createEpayPayment(config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; returnUrl?: string }): CreatePaymentResult {
+  private createEpayPayment(config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; expiresAt: Date; returnUrl?: string }): CreatePaymentResult {
     const gateway = submitUrl(text(config.url || config.gateway));
     const pid = text(config.pid);
     const key = this.secret(config, 'key', 'merchantKey', 'merchantKeyEnc');
@@ -205,7 +211,7 @@ export class PaymentsService {
     return { payUrl: `${gateway}?${new URLSearchParams(params).toString()}`, raw: { request: params } };
   }
 
-  private createBepusdtPayment(config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; returnUrl?: string }): CreatePaymentResult {
+  private createBepusdtPayment(config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; expiresAt: Date; returnUrl?: string }): CreatePaymentResult {
     const gateway = submitUrl(text(config.appUrl || config.url || config.gateway));
     const token = this.secret(config, 'token', 'key', 'tokenEnc');
     if (!gateway || !token) throw new ServiceUnavailableException('BEpusdt 通道配置不完整');
@@ -223,7 +229,7 @@ export class PaymentsService {
     return { payUrl: `${gateway}?${new URLSearchParams(params).toString()}`, raw: { request: params } };
   }
 
-  private async createAlipayPayment(config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; returnUrl?: string }): Promise<CreatePaymentResult> {
+  private async createAlipayPayment(config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; expiresAt: Date; returnUrl?: string }): Promise<CreatePaymentResult> {
     const gateway = text(config.url) || 'https://openapi.alipay.com/gateway.do';
     const appId = text(config.appId || config.app_id);
     const privateKey = this.secret(config, 'privateKey', 'privateKeyEnc', 'merchantPem');
@@ -237,7 +243,8 @@ export class PaymentsService {
         out_trade_no: order.tradeNo,
         total_amount: order.amount.toFixed(2),
         subject: text(config.productName) || order.subject,
-        product_code: productCode
+        product_code: productCode,
+        timeout_express: `${RECHARGE_ORDER_TTL_MINUTES}m`
       }, order.returnUrl || text(config.returnUrl), `/payment/result?trade_no=${encodeURIComponent(order.tradeNo)}`);
       params.sign = signRsaSha256(sortedSignContent(params, ['sign']), privateKey);
       return { payUrl: `${gateway}?${new URLSearchParams(params).toString()}`, raw: { request: withoutSecrets(params, ['sign']) } };
@@ -246,7 +253,8 @@ export class PaymentsService {
     const params = this.createAlipayBaseParams(config, gateway, appId, 'alipay.trade.precreate', {
       out_trade_no: order.tradeNo,
       total_amount: order.amount.toFixed(2),
-      subject: text(config.productName) || order.subject
+      subject: text(config.productName) || order.subject,
+      timeout_express: `${RECHARGE_ORDER_TTL_MINUTES}m`
     });
     params.sign = signRsaSha256(sortedSignContent(params, ['sign']), privateKey);
 
@@ -282,7 +290,7 @@ export class PaymentsService {
     return params;
   }
 
-  private async createWechatV2Payment(config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; returnUrl?: string }): Promise<CreatePaymentResult> {
+  private async createWechatV2Payment(config: PaymentConfig, order: { tradeNo: string; amount: Prisma.Decimal; subject: string; expiresAt: Date; returnUrl?: string }): Promise<CreatePaymentResult> {
     const gateway = text(config.url) || 'https://api.mch.weixin.qq.com/pay/unifiedorder';
     const appId = text(config.appId || config.app_id);
     const mchId = text(config.mchId || config.mch_id || config.pid);
@@ -298,7 +306,8 @@ export class PaymentsService {
       total_fee: order.amount.mul(100).toDecimalPlaces(0).toString(),
       spbill_create_ip: text(process.env.SERVER_IP) || '127.0.0.1',
       notify_url: this.absolutePaymentUrl(text(config.notifyUrl), '/api/payments/wechat/notify'),
-      trade_type: 'NATIVE'
+      trade_type: 'NATIVE',
+      time_expire: formatWechatTimestamp(order.expiresAt)
     };
     params.sign = wechatMd5Sign(params, apiKey);
 
@@ -397,6 +406,10 @@ export class PaymentsService {
 
       if (order.status === 'paid') return { ok: true, duplicate: true };
       if (order.status !== 'pending') throw new BadRequestException('充值订单当前不可支付');
+      if (isExpired(order.expiresAt)) {
+        await tx.rechargeOrder.update({ where: { id: order.id }, data: { status: 'closed' } });
+        throw new BadRequestException('充值订单已超时关闭');
+      }
       if (detail.amount !== undefined && detail.amount !== null && money(detail.amount).comparedTo(order.amount) !== 0) throw new BadRequestException('支付金额不匹配');
 
       const customer = await tx.customer.findUnique({ where: { id: order.customerId } });
@@ -565,6 +578,13 @@ export class PaymentsService {
     const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
     return `RC${stamp}${randomBytes(4).toString('hex').toUpperCase()}`;
   }
+
+  private async closeExpiredOrder(tradeNo: string) {
+    await this.prisma.rechargeOrder.updateMany({
+      where: { tradeNo, status: 'pending', expiresAt: { lte: new Date() } },
+      data: { status: 'closed' }
+    });
+  }
 }
 
 function mergeParams(query: Record<string, unknown>, body: unknown) {
@@ -620,6 +640,19 @@ function numberOrText(value: unknown) {
 function formatAlipayTimestamp(date: Date) {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatWechatTimestamp(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function isExpired(value?: Date | null) {
+  return Boolean(value && value.getTime() <= Date.now());
 }
 
 function normalizeAlipayMode(value: string) {

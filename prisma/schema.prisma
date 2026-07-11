@@ -247,6 +247,7 @@ model RechargeOrder {
   provider    PaymentProvider
   amount      Decimal         @db.Decimal(12, 2)
   status      RechargeStatus  @default(pending)
+  expiresAt   DateTime?
   paidAt      DateTime?
   payUrl      String?         @db.Text
   qrCode      String?         @db.Text
@@ -259,6 +260,7 @@ model RechargeOrder {
   callbacks   PaymentCallback[]
 
   @@index([customerId])
+  @@index([status, expiresAt])
   @@index([provider, status])
   @@map("recharge_orders")
 }

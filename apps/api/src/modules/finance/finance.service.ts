@@ -7,12 +7,23 @@ import { XuiService } from '../xui/xui.service.js';
 export class FinanceService {
   constructor(private readonly prisma: PrismaService, private readonly xui: XuiService) {}
 
-  rechargeOrders() {
+  async rechargeOrders() {
+    await this.prisma.rechargeOrder.updateMany({ where: { status: 'pending', expiresAt: { lte: new Date() } }, data: { status: 'closed' } });
     return this.prisma.rechargeOrder.findMany({ orderBy: { createdAt: 'desc' }, take: 100, include: { customer: { select: { id: true, name: true, loginUsername: true } } } });
   }
 
   balanceLogs() {
     return this.prisma.balanceLog.findMany({ orderBy: { createdAt: 'desc' }, take: 100, include: { customer: { select: { id: true, name: true, loginUsername: true } } } });
+  }
+
+  async clearRechargeOrderHistory() {
+    const result = await this.prisma.rechargeOrder.deleteMany({ where: { status: { not: 'pending' } } });
+    return { deleted: result.count };
+  }
+
+  async clearBalanceLogHistory() {
+    const result = await this.prisma.balanceLog.deleteMany({});
+    return { deleted: result.count };
   }
 
   async renewCustomerNode(customerId: string, customerNodeId: string, months: number, operator: string) {
