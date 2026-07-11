@@ -70,42 +70,76 @@ async function saveJobSettings(patch: Partial<JobSettings>) {
   try {
     jobSettings.value = await api<JobSettings>('/api/admin/jobs/settings', { method: 'PATCH', body: patch });
     ElMessage.success('任务设置已保存');
+    return true;
   } catch (err) {
     jobSettings.value = previous;
     error.value = err instanceof Error ? err.message : '保存任务设置失败';
+    return false;
   } finally {
     jobSettingsSaving.value = false;
   }
 }
 
-async function disableExpiredNodes() {
-  await ElMessageBox.confirm('系统会把已到期且仍处于启用状态的用户节点同步停用到远端 3x-ui，远端同步成功后再更新本地状态。确认执行？', '停用过期节点', { type: 'warning' });
+async function toggleDisableExpired(value: string | number | boolean) {
+  const enabled = Boolean(value);
+  const saved = await saveJobSettings({ disableExpiredEnabled: enabled });
+  if (!saved) return;
+  if (enabled) await runDisableExpiredNodes();
+}
+
+async function toggleTrafficSync(value: string | number | boolean) {
+  const enabled = Boolean(value);
+  const saved = await saveJobSettings({ trafficSyncEnabled: enabled });
+  if (!saved) return;
+  if (enabled) await runTrafficSync();
+}
+
+async function runDisableExpiredNodes() {
   jobRunning.value = true;
   error.value = '';
   try {
     const result = await api<DisableExpiredResult>('/api/admin/jobs/disable-expired', { method: 'POST' });
     lastDisableExpired.value = result;
-    ElMessage.success(`执行完成：成功 ${result.success}，失败 ${result.failed}，总数 ${result.total}`);
     await loadDashboard();
+    return result;
   } catch (err) {
     error.value = err instanceof Error ? err.message : '停用过期节点失败';
+    throw err;
   } finally {
     jobRunning.value = false;
   }
 }
 
-async function syncTraffic() {
+async function runTrafficSync() {
   trafficJobRunning.value = true;
   error.value = '';
   try {
     const result = await api<TrafficSyncResult>('/api/admin/jobs/sync-traffic', { method: 'POST' });
     lastTrafficSync.value = result;
-    ElMessage.success(`流量同步完成：检查 ${result.checked}，停用 ${result.disabled}，失败 ${result.failed}`);
     await loadDashboard();
+    return result;
   } catch (err) {
     error.value = err instanceof Error ? err.message : '同步远端流量失败';
+    throw err;
   } finally {
     trafficJobRunning.value = false;
+  }
+}
+
+async function disableExpiredNodes() {
+  await ElMessageBox.confirm('系统会把已到期且仍处于启用状态的用户节点同步停用到远端 3x-ui，远端同步成功后再更新本地状态。确认执行？', '停用过期节点', { type: 'warning' });
+  try {
+    const result = await runDisableExpiredNodes();
+    ElMessage.success(`执行完成：成功 ${result.success}，失败 ${result.failed}，总数 ${result.total}`);
+  } catch {
+  }
+}
+
+async function syncTraffic() {
+  try {
+    const result = await runTrafficSync();
+    ElMessage.success(`流量同步完成：检查 ${result.checked}，停用 ${result.disabled}，失败 ${result.failed}`);
+  } catch {
   }
 }
 
@@ -161,19 +195,23 @@ onMounted(loadDashboard);
         <div class="job-icon"><ShieldOff :size="20" /></div>
         <div>
           <strong>自动停用过期节点</strong>
-          <span>每 10 分钟检查一次，到期后同步停用远端。</span>
+          <span>每 10 分钟自动检测；启动后立即检测一次。</span>
         </div>
         <div class="job-toggle">
-          <span>{{ jobSettings.disableExpiredEnabled ? '已启用' : '已停用' }}</span>
           <el-switch
+            class="job-switch"
             :model-value="jobSettings.disableExpiredEnabled"
             :loading="jobSettingsSaving"
-            @change="(value: string | number | boolean) => saveJobSettings({ disableExpiredEnabled: Boolean(value) })"
+            inline-prompt
+            active-text="点击关闭"
+            inactive-text="点击启动"
+            :width="92"
+            @change="toggleDisableExpired"
           />
         </div>
       </div>
       <div class="job-card-body">
-        <div><span>最近执行</span><strong>{{ formatDate(lastDisableExpired?.checkedAt) }}</strong></div>
+        <div><span>上次检测</span><strong>{{ formatDate(lastDisableExpired?.checkedAt) }}</strong></div>
         <div><span>成功</span><strong>{{ lastDisableExpired?.success ?? '-' }}</strong></div>
         <div><span>失败</span><strong>{{ lastDisableExpired?.failed ?? '-' }}</strong></div>
       </div>
@@ -187,19 +225,23 @@ onMounted(loadDashboard);
         <div class="job-icon"><Activity :size="20" /></div>
         <div>
           <strong>远端流量同步任务</strong>
-          <span>读取远端用量，超限后停用本地绑定和远端客户端。</span>
+          <span>每 10 分钟读取远端用量；启动后立即同步一次。</span>
         </div>
         <div class="job-toggle">
-          <span>{{ jobSettings.trafficSyncEnabled ? '已启用' : '已停用' }}</span>
           <el-switch
+            class="job-switch"
             :model-value="jobSettings.trafficSyncEnabled"
             :loading="jobSettingsSaving"
-            @change="(value: string | number | boolean) => saveJobSettings({ trafficSyncEnabled: Boolean(value) })"
+            inline-prompt
+            active-text="点击关闭"
+            inactive-text="点击启动"
+            :width="92"
+            @change="toggleTrafficSync"
           />
         </div>
       </div>
       <div class="job-card-body">
-        <div><span>最近执行</span><strong>{{ formatDate(lastTrafficSync?.checkedAt) }}</strong></div>
+        <div><span>上次检测</span><strong>{{ formatDate(lastTrafficSync?.checkedAt) }}</strong></div>
         <div><span>检查</span><strong>{{ lastTrafficSync?.checked ?? '-' }}</strong></div>
         <div><span>停用</span><strong>{{ lastTrafficSync?.disabled ?? '-' }}</strong></div>
       </div>
