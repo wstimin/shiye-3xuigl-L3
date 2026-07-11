@@ -23,6 +23,7 @@ type SyncOptions = {
   trafficLimitGb?: Prisma.Decimal | number | string | null;
   createIfMissing?: boolean;
   requireExisting?: boolean;
+  syncServiceConfig?: boolean;
 };
 
 type SyncLogQuery = {
@@ -808,10 +809,13 @@ export class XuiService {
           route: 'clients/get',
           action: 'already-absent',
           subId,
-          links: [] as string[]
+          links: [] as string[],
+          remoteConfig: null as unknown
         };
+        const remoteConfigSync = options.syncServiceConfig ? await this.syncServiceNodeRemoteConfig(customerNode.serviceNodeId) : null;
+        detail.remoteConfig = remoteConfigSync ? this.toJsonValue(remoteConfigSync) : null;
         await this.writeSyncLog(serverId, 'customer-node-sync', 'success', `Remote client already absent: ${lookupEmail}`, detail);
-        return { synced: true, action: 'already-absent', route: 'clients/get', node: updatedNode, detail };
+        return { synced: true, action: 'already-absent', route: 'clients/get', node: updatedNode, detail, remoteConfig: remoteConfigSync };
       }
 
       if (!existing.exists) throw new BadRequestException('Remote 3x-ui client was not found for this service node. Customer binding sync will not create a new client. Sync/import the service node first or fill the existing remote client email/UUID.');
@@ -861,10 +865,13 @@ export class XuiService {
         action: 'update',
         subId,
         links,
+        remoteConfig: null as unknown,
         response: this.toJsonValue(payload)
       };
+      const remoteConfigSync = options.syncServiceConfig ? await this.syncServiceNodeRemoteConfig(customerNode.serviceNodeId) : null;
+      detail.remoteConfig = remoteConfigSync ? this.toJsonValue(remoteConfigSync) : null;
       await this.writeSyncLog(serverId, 'customer-node-sync', 'success', `Synced ${xuiEmail}`, detail);
-      return { synced: true, action: 'update', route, node: updatedNode, detail };
+      return { synced: true, action: 'update', route, node: updatedNode, detail, remoteConfig: remoteConfigSync };
     } catch (error) {
       await this.writeSyncLog(serverId, 'customer-node-sync', 'failed', this.errorMessage(error), {
         customerId,

@@ -54,12 +54,23 @@ type SyncDetail = {
   action?: string;
   subId?: string;
   links?: string[];
+  remoteConfig?: RemoteConfigSyncResult | null;
+};
+type RemoteConfigSyncResult = {
+  synced?: boolean;
+  action?: string;
+  serviceNodeId?: string;
+  inboundId?: number;
+  inboundTag?: string;
+  outboundTag?: string;
+  socks?: { host?: string; port?: number; username?: string } | null;
 };
 type CustomerNodeSyncResult = {
   synced: boolean;
   action?: string;
   route?: string;
   detail?: SyncDetail;
+  remoteConfig?: RemoteConfigSyncResult | null;
 };
 type CustomerNodeMutationResult = {
   node?: CustomerNode | null;
@@ -341,7 +352,8 @@ function cleanupStatusLine(label: string, result?: CleanupResult) {
 async function showCustomerSyncResult(result: CustomerNodeSyncResult | undefined, title: string) {
   if (!result) return;
   const detail = result.detail || {};
-  await ElMessageBox.alert([
+  const remoteConfig = result.remoteConfig || detail.remoteConfig;
+  const lines = [
     `远端状态：${result.synced ? '已同步' : '未同步'}`,
     `远端接口：${result.route || detail.route || '-'}`,
     `执行动作：${result.action || detail.action || '-'}`,
@@ -349,7 +361,24 @@ async function showCustomerSyncResult(result: CustomerNodeSyncResult | undefined
     `客户端标识：${detail.xuiEmail || '-'}`,
     `订阅 ID：${detail.subId || '-'}`,
     `可用链接：${Array.isArray(detail.links) ? detail.links.length : 0} 条`
+  ];
+  if (remoteConfig !== undefined) {
+    lines.push(`出站规则：${formatRemoteConfigStatus(remoteConfig)}`);
+    if (remoteConfig?.outboundTag) lines.push(`出站 Tag：${remoteConfig.outboundTag}`);
+    if (remoteConfig?.inboundTag) lines.push(`入站 Tag：${remoteConfig.inboundTag}`);
+  }
+  await ElMessageBox.alert([
+    ...lines
   ].join('\n'), title, { type: result.synced ? 'success' : 'warning' });
+}
+
+function formatRemoteConfigStatus(result: RemoteConfigSyncResult | null | undefined) {
+  if (result === undefined) return '未执行';
+  if (result === null) return '未执行';
+  if (!result.synced) return '未同步';
+  if (result.action === 'updated') return '已同步';
+  if (result.action === 'removed') return '已清理';
+  return '已处理';
 }
 
 function openCustomerDialog() {

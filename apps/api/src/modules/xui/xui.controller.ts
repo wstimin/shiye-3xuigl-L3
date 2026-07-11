@@ -68,7 +68,7 @@ export class XuiController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   syncCustomerNode(@Param('id') id: string, @Param('nodeId') nodeId: string) {
-    return this.xui.syncCustomerNode(id, nodeId);
+    return this.xui.syncCustomerNode(id, nodeId, { syncServiceConfig: true });
   }
 
   @Get('admin/customers/:id/nodes/:nodeId/traffic')
