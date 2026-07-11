@@ -288,7 +288,7 @@ onMounted(loadServers);
     <div class="metric"><span>面板连接</span><strong>{{ servers.length }}</strong><small>启用 {{ enabledServerCount }}</small></div>
     <div class="metric"><span>Token 凭据</span><strong>{{ tokenServerCount }}</strong><small>优先使用 API Token</small></div>
     <div class="metric"><span>TLS 证书</span><strong>{{ tlsServerCount }}</strong><small>可自动创建 TLS 节点</small></div>
-    <div class="metric"><span>Reality 自动</span><strong>{{ realityAutoCount }}</strong><small>目标或 SNI 留空自动生成</small></div>
+    <div class="metric"><span>Reality 探测</span><strong>{{ realityAutoCount }}</strong><small>留空时由 3x-ui 自动扫描</small></div>
   </div>
 
   <div class="panel list-panel">
@@ -312,7 +312,7 @@ onMounted(loadServers);
         <template #default="{ row }: { row: XuiServer }">
           <div class="tag-stack">
             <el-tag v-if="hasTlsConfig(row)" size="small" type="success">TLS 证书</el-tag>
-            <el-tag size="small">Reality {{ row.config?.realityTarget || '自动生成' }}</el-tag>
+            <el-tag size="small">Reality {{ row.config?.realityTarget ? '候选 ' + row.config.realityTarget : '自动探测' }}</el-tag>
           </div>
         </template>
       </el-table-column>
@@ -378,10 +378,10 @@ onMounted(loadServers);
       </section>
 
       <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>Reality 默认值</strong><span>目标和 SNI 可留空，由系统按可用目标自动生成</span></div>
+        <div class="dialog-section-head"><strong>Reality 探测</strong><span>目标和 SNI 可留空，创建节点时优先调用 3x-ui 自动扫描</span></div>
         <div class="dialog-form-grid">
-          <el-form-item label="Reality 目标"><el-input v-model="form.realityTarget" placeholder="留空自动生成，例如 example.com:443" /></el-form-item>
-          <el-form-item label="Reality SNI"><el-input v-model="form.realityServerName" placeholder="留空按 Reality 目标自动生成" /></el-form-item>
+          <el-form-item label="目标候选"><el-input v-model="form.realityTarget" placeholder="可留空；扫描失败时才尝试，例如 example.com:443" /></el-form-item>
+          <el-form-item label="SNI 候选"><el-input v-model="form.realityServerName" placeholder="可留空；优先使用扫描结果" /></el-form-item>
           <el-form-item label="指纹"><el-input v-model="form.realityFingerprint" placeholder="chrome" /></el-form-item>
           <el-form-item label="SpiderX"><el-input v-model="form.realitySpiderX" placeholder="/" /></el-form-item>
           <el-form-item label="备注" class="form-item-full"><el-input v-model="form.remark" /></el-form-item>
