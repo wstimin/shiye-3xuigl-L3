@@ -437,6 +437,16 @@ export class NodesService {
     return { deleted: true, id: customerNodeId, remoteCleanup };
   }
 
+  async deleteServiceNodeFromCustomerNode(customerId: string, customerNodeId: string) {
+    const node = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      select: { id: true, serviceNodeId: true }
+    });
+    if (!node) throw new NotFoundException('Customer node not found');
+    const result = await this.deleteServiceNode(node.serviceNodeId);
+    return { ...result, customerId, customerNodeId };
+  }
+
   private async ensureServer(id: string) {
     const exists = await this.prisma.xuiServer.findUnique({ where: { id }, select: { id: true } });
     if (!exists) throw new NotFoundException('3x-ui server not found');

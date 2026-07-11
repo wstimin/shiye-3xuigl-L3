@@ -37,6 +37,11 @@ export class CardsController {
   @Roles('admin')
   deleteTemplate(@Param('id') id: string) { return this.cards.deleteTemplate(id); }
 
+  @Delete('admin/card-templates/:id/unused-cards')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  deleteUnusedTemplateCards(@Param('id') id: string) { return this.cards.deleteUnusedTemplateCards(id); }
+
   @Post('admin/cards/generate')
   @UseGuards(AuthGuard)
   @Roles('admin')

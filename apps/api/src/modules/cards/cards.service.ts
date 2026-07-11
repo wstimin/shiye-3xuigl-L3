@@ -208,6 +208,19 @@ export class CardsService {
     return { deleted: true, id };
   }
 
+  async deleteUnusedTemplateCards(templateId: string) {
+    await this.ensureTemplate(templateId);
+    const batches = await this.prisma.cardBatch.findMany({ where: { templateId }, select: { id: true } });
+    const batchIds = batches.map((batch) => batch.id);
+    if (batchIds.length === 0) return { deleted: true, templateId, deletedCards: 0, deletedBatches: 0 };
+
+    const [deletedCards, deletedBatches] = await this.prisma.$transaction([
+      this.prisma.card.deleteMany({ where: { batchId: { in: batchIds }, status: 'unused' } }),
+      this.prisma.cardBatch.deleteMany({ where: { templateId, cards: { none: {} } } })
+    ]);
+    return { deleted: true, templateId, deletedCards: deletedCards.count, deletedBatches: deletedBatches.count };
+  }
+
   private async ensureTemplate(id: string) {
     const exists = await this.prisma.cardTemplate.findUnique({ where: { id }, select: { id: true } });
     if (!exists) throw new NotFoundException('Card template not found');

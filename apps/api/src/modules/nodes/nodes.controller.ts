@@ -97,4 +97,11 @@ export class NodesController {
   unbindCustomerNode(@Param('id') id: string, @Param('nodeId') nodeId: string) {
     return this.nodes.unbindCustomerNode(id, nodeId);
   }
+
+  @Delete('admin/customers/:id/nodes/:nodeId/service-node')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  deleteServiceNodeFromCustomerNode(@Param('id') id: string, @Param('nodeId') nodeId: string) {
+    return this.nodes.deleteServiceNodeFromCustomerNode(id, nodeId);
+  }
 }

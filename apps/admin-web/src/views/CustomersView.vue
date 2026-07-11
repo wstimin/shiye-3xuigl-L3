@@ -42,6 +42,7 @@ const syncingIds = ref<Set<string>>(new Set());
 const renewingIds = ref<Set<string>>(new Set());
 const trafficIds = ref<Set<string>>(new Set());
 const resettingTrafficIds = ref<Set<string>>(new Set());
+const deletingServiceNodeIds = ref<Set<string>>(new Set());
 const editingCustomerId = ref('');
 const customerDialogVisible = ref(false);
 const bindDialogVisible = ref(false);
@@ -240,6 +241,27 @@ async function unbindNode(customer: Customer, node: CustomerNode) {
   await loadCustomers();
 }
 
+async function deleteBoundServiceNode(customer: Customer, node: CustomerNode) {
+  if (!node.serviceNode?.id) {
+    ElMessage.error('该绑定缺少服务节点信息，无法删除服务节点');
+    return;
+  }
+  await ElMessageBox.confirm(`确认删除服务节点「${node.serviceNode.name}」？系统会同步删除该服务节点、本地所有用户绑定以及远端 3x-ui 入站/客户端。`, '删除服务节点', { type: 'warning' });
+  deletingServiceNodeIds.value = new Set(deletingServiceNodeIds.value).add(node.id);
+  error.value = '';
+  try {
+    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/service-node`, { method: 'DELETE' });
+    ElMessage.success('服务节点和远端已删除');
+    await loadCustomers();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '删除服务节点失败';
+  } finally {
+    const next = new Set(deletingServiceNodeIds.value);
+    next.delete(node.id);
+    deletingServiceNodeIds.value = next;
+  }
+}
+
 function openCustomerDialog() {
   resetCustomerForm();
   customerDialogVisible.value = true;
@@ -425,7 +447,8 @@ onMounted(loadCustomers);
                   <el-button circle size="small" :loading="resettingTrafficIds.has(node.id)" @click="resetNodeTraffic(row, node)"><RotateCcw :size="15" /></el-button>
                 </el-tooltip>
                 <el-button size="small" @click="editCustomerNode(row, node)">编辑</el-button>
-                <el-button size="small" type="danger" @click="unbindNode(row, node)">删除</el-button>
+                <el-button size="small" @click="unbindNode(row, node)">解绑</el-button>
+                <el-button size="small" type="danger" :loading="deletingServiceNodeIds.has(node.id)" @click="deleteBoundServiceNode(row, node)">删除节点</el-button>
               </div>
             </div>
           </div>
