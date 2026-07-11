@@ -27,6 +27,24 @@ type ServiceNode = {
   config?: ServiceNodeConfig | null;
   server?: XuiServer;
 };
+type CleanupResult = {
+  skipped?: boolean;
+  deleted?: boolean;
+  alreadyAbsent?: boolean;
+  synced?: boolean;
+  action?: string;
+  reason?: string;
+  message?: string;
+  verified?: { retried?: boolean; absent?: boolean };
+  remoteClientCleanup?: CleanupResult;
+};
+type DeleteServiceNodeResult = {
+  deleted: boolean;
+  id: string;
+  remoteClientCleanup?: CleanupResult;
+  remoteConfigCleanup?: CleanupResult;
+  remoteInboundCleanup?: CleanupResult;
+};
 const protocolOptions = [
   { label: 'VLESS', value: 'vless' },
   { label: 'VMess', value: 'vmess' },
@@ -186,9 +204,30 @@ function editNode(node: ServiceNode) {
 
 async function removeNode(node: ServiceNode) {
   await ElMessageBox.confirm(`确认删除路由节点“${node.name}”？系统会先删除该节点下远端 3x-ui 客户端，并清理本项目写入的出站路由配置。`, '删除确认', { type: 'warning' });
-  await api(`/api/admin/service-nodes/${node.id}`, { method: 'DELETE' });
+  const result = await api<DeleteServiceNodeResult>(`/api/admin/service-nodes/${node.id}`, { method: 'DELETE' });
   ElMessage.success('路由节点已删除');
+  await showDeleteResult(result);
   await loadNodes();
+}
+
+async function showDeleteResult(result: DeleteServiceNodeResult) {
+  const remoteClient = result.remoteInboundCleanup?.remoteClientCleanup || result.remoteClientCleanup;
+  await ElMessageBox.alert([
+    cleanupStatusLine('远端出站/路由配置', result.remoteConfigCleanup),
+    cleanupStatusLine('远端入站', result.remoteInboundCleanup),
+    cleanupStatusLine('远端客户端', remoteClient),
+    result.deleted ? '本地路由节点和绑定：已清理' : '本地路由节点和绑定：未清理'
+  ].join('\n'), '删除结果', { type: 'success' });
+}
+
+function cleanupStatusLine(label: string, result?: CleanupResult) {
+  if (!result) return `${label}：没有返回结果`;
+  if (result.skipped) return `${label}：已跳过（${result.reason || result.message || '-'}）`;
+  if (result.synced) return `${label}：${result.action === 'removed' ? '已清理' : '已同步'}`;
+  if (result.deleted && result.alreadyAbsent) return `${label}：远端已不存在，按删除成功处理`;
+  if (result.deleted) return `${label}：已删除${result.verified?.retried ? '（复查后重试删除成功）' : ''}`;
+  if (result.message) return `${label}：失败（${result.message}）`;
+  return `${label}：已处理`;
 }
 
 function resetForm() {

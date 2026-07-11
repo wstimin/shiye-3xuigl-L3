@@ -29,6 +29,24 @@ type Customer = {
 };
 
 type ServiceNode = { id: string; name: string; server?: { name: string } };
+type CleanupResult = {
+  skipped?: boolean;
+  deleted?: boolean;
+  alreadyAbsent?: boolean;
+  synced?: boolean;
+  action?: string;
+  reason?: string;
+  message?: string;
+  verified?: { retried?: boolean; absent?: boolean };
+  remoteClientCleanup?: CleanupResult;
+};
+type DeleteServiceNodeResult = {
+  deleted: boolean;
+  id: string;
+  remoteClientCleanup?: CleanupResult;
+  remoteConfigCleanup?: CleanupResult;
+  remoteInboundCleanup?: CleanupResult;
+};
 
 const loading = ref(false);
 const savingCustomer = ref(false);
@@ -254,8 +272,9 @@ async function deleteBoundServiceNode(customer: Customer, node: CustomerNode) {
   deletingServiceNodeIds.value = new Set(deletingServiceNodeIds.value).add(node.id);
   error.value = '';
   try {
-    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/service-node`, { method: 'DELETE' });
+    const result = await api<DeleteServiceNodeResult>(`/api/admin/customers/${customer.id}/nodes/${node.id}/service-node`, { method: 'DELETE' });
     ElMessage.success('服务节点和远端已删除');
+    await showDeleteResult(result);
     await loadCustomers();
   } catch (err) {
     error.value = err instanceof Error ? err.message : '删除服务节点失败';
@@ -264,6 +283,26 @@ async function deleteBoundServiceNode(customer: Customer, node: CustomerNode) {
     next.delete(node.id);
     deletingServiceNodeIds.value = next;
   }
+}
+
+async function showDeleteResult(result: DeleteServiceNodeResult) {
+  const remoteClient = result.remoteInboundCleanup?.remoteClientCleanup || result.remoteClientCleanup;
+  await ElMessageBox.alert([
+    cleanupStatusLine('远端出站/路由配置', result.remoteConfigCleanup),
+    cleanupStatusLine('远端入站', result.remoteInboundCleanup),
+    cleanupStatusLine('远端客户端', remoteClient),
+    result.deleted ? '本地路由节点和绑定：已清理' : '本地路由节点和绑定：未清理'
+  ].join('\n'), '删除结果', { type: 'success' });
+}
+
+function cleanupStatusLine(label: string, result?: CleanupResult) {
+  if (!result) return `${label}：没有返回结果`;
+  if (result.skipped) return `${label}：已跳过（${result.reason || result.message || '-'}）`;
+  if (result.synced) return `${label}：${result.action === 'removed' ? '已清理' : '已同步'}`;
+  if (result.deleted && result.alreadyAbsent) return `${label}：远端已不存在，按删除成功处理`;
+  if (result.deleted) return `${label}：已删除${result.verified?.retried ? '（复查后重试删除成功）' : ''}`;
+  if (result.message) return `${label}：失败（${result.message}）`;
+  return `${label}：已处理`;
 }
 
 function openCustomerDialog() {
