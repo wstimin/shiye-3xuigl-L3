@@ -17,6 +17,16 @@ type ServiceNodeConfig = {
   remoteInboundPort?: number;
 };
 
+type XuiServerConfig = {
+  tlsServerName?: string;
+  tlsCertFile?: string;
+  tlsKeyFile?: string;
+  realityTarget?: string;
+  realityServerName?: string;
+  realityFingerprint?: string;
+  realitySpiderX?: string;
+};
+
 const SHARE_LINK_PROTOCOLS = new Set(['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria']);
 
 @Injectable()
@@ -37,6 +47,7 @@ export class NodesService {
         username: input.username || null,
         passwordEnc: this.encryption.encryptNullable(input.password),
         tokenEnc: this.encryption.encryptNullable(input.token),
+        config: this.toJsonValue(this.serverConfig(input)),
         enabled: input.enabled,
         remark: input.remark || null
       }
@@ -45,7 +56,8 @@ export class NodesService {
   }
 
   async updateServer(id: string, input: Partial<z.infer<typeof xuiServerUpsertSchema>>) {
-    await this.ensureServer(id);
+    const current = await this.prisma.xuiServer.findUnique({ where: { id }, select: { config: true } });
+    if (!current) throw new NotFoundException('3x-ui server not found');
     const server = await this.prisma.xuiServer.update({
       where: { id },
       data: {
@@ -55,6 +67,7 @@ export class NodesService {
         username: input.username === undefined ? undefined : input.username || null,
         passwordEnc: input.password === undefined ? undefined : this.encryption.encryptNullable(input.password),
         tokenEnc: input.token === undefined ? undefined : this.encryption.encryptNullable(input.token),
+        config: this.toJsonValue(this.serverConfig(input, serverConfigFrom(current.config))),
         enabled: input.enabled,
         remark: input.remark === undefined ? undefined : input.remark || null
       }
@@ -138,6 +151,12 @@ export class NodesService {
     const remoteMode = input.remoteMode || previousConfig.remoteMode || (current.inboundId ? 'bind' : 'create');
     let inboundId = input.inboundId === undefined ? current.inboundId : input.inboundId || null;
     let remoteCreated: { inboundId: number; port: number; tag: string; remark: string } | null = null;
+    const nextName = input.name || current.name;
+    const nextProtocol = input.protocol || current.protocol;
+    const nextEncryption = input.encryption || previousConfig.encryption || 'none';
+    const nextEnabled = input.enabled ?? current.enabled;
+    const nextRemotePort = input.inboundPort === undefined ? previousConfig.remoteInboundPort : input.inboundPort;
+    const nextRemark = input.remark === undefined ? current.remark : input.remark || null;
 
     if (remoteMode === 'bind') {
       if (!inboundId) throw new BadRequestException('绑定已有入站时必须填写入站 ID');
@@ -145,12 +164,12 @@ export class NodesService {
     } else if (!inboundId) {
       remoteCreated = await this.xui.createServiceNodeInbound({
         serverId: nextServerId,
-        name: input.name || current.name,
-        protocol: input.protocol || current.protocol,
-        encryption: input.encryption || previousConfig.encryption || 'none',
-        enabled: input.enabled ?? current.enabled,
+        name: nextName,
+        protocol: nextProtocol,
+        encryption: nextEncryption,
+        enabled: nextEnabled,
         port: input.inboundPort,
-        remark: input.remark === undefined ? current.remark : input.remark || null
+        remark: nextRemark
       });
       inboundId = remoteCreated.inboundId;
     }
@@ -168,6 +187,28 @@ export class NodesService {
     };
     const config = await this.serviceNodeConfig(input, current.config, remotePatch);
     try {
+      const remoteInboundChanged = Boolean(
+        (input.serverId !== undefined && nextServerId !== current.serverId) ||
+        (input.inboundId !== undefined && inboundId !== current.inboundId) ||
+        nextName !== current.name ||
+        nextProtocol !== current.protocol ||
+        nextEncryption !== (previousConfig.encryption || 'none') ||
+        nextEnabled !== current.enabled ||
+        nextRemark !== current.remark ||
+        (input.inboundPort !== undefined && nextRemotePort !== previousConfig.remoteInboundPort)
+      );
+      if (!remoteCreated && inboundId && remoteInboundChanged) {
+        await this.xui.updateServiceNodeInbound({
+          serverId: nextServerId,
+          inboundId,
+          name: nextName,
+          protocol: nextProtocol,
+          encryption: config.encryption || 'none',
+          enabled: nextEnabled,
+          port: nextRemotePort,
+          remark: nextRemark
+        });
+      }
       return await this.prisma.serviceNode.update({
         where: { id },
         data: {
@@ -191,14 +232,17 @@ export class NodesService {
 
   async deleteServiceNode(id: string) {
     const current = await this.ensureServiceNode(id);
-    await this.xui.deleteServiceNodeClients(id);
-    if (current.inboundId) await this.xui.syncServiceNodeRemoteConfig(id, { removeOnly: true });
-    await this.xui.deleteManagedServiceNodeInbound(id);
+    const remoteClientCleanup = await this.xui.deleteServiceNodeClients(id).catch((error) => ({ failed: true, message: error instanceof Error ? error.message : String(error) }));
+    if (current.inboundId) await this.xui.syncServiceNodeRemoteConfig(id, { removeOnly: true }).catch(() => undefined);
+    const remoteInboundCleanup = await this.xui.deleteManagedServiceNodeInbound(id).catch((error) => ({ failed: true, message: error instanceof Error ? error.message : String(error) }));
+    const customerNodes = await this.prisma.customerNode.findMany({ where: { serviceNodeId: id }, select: { id: true } });
+    const customerNodeIds = customerNodes.map((node) => node.id);
     await this.prisma.$transaction([
+      this.prisma.renewalLog.updateMany({ where: { customerNodeId: { in: customerNodeIds } }, data: { customerNodeId: null } }),
       this.prisma.customerNode.deleteMany({ where: { serviceNodeId: id } }),
       this.prisma.serviceNode.delete({ where: { id } })
     ]);
-    return { deleted: true, id };
+    return { deleted: true, id, remoteClientCleanup, remoteInboundCleanup };
   }
 
   async listSocksNodes() {
@@ -273,19 +317,13 @@ export class NodesService {
         customerId,
         serviceNodeId: input.serviceNodeId,
         xuiEmail,
-        uuid: input.uuid || crypto.randomUUID(),
+        uuid: input.uuid || null,
         expireAt: input.expireAt || null,
         trafficLimitGb: new Prisma.Decimal(input.trafficLimitGb ?? serviceNode.trafficLimitGb),
         status: 'active'
       },
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
     });
-    try {
-      await this.xui.syncCustomerNode(customerId, node.id);
-    } catch (error) {
-      await this.prisma.customerNode.delete({ where: { id: node.id } }).catch(() => undefined);
-      throw error;
-    }
 
     return this.prisma.customerNode.findUnique({
       where: { id: node.id },
@@ -310,8 +348,6 @@ export class NodesService {
     }
 
     const nextXuiEmail = input.xuiEmail === undefined || input.xuiEmail === '' ? current.xuiEmail : input.xuiEmail;
-    const remoteIdentityChanged = serviceNodeId !== current.serviceNodeId || nextXuiEmail !== current.xuiEmail;
-    if (remoteIdentityChanged) await this.xui.deleteCustomerNode(customerId, customerNodeId);
 
     const node = await this.prisma.customerNode.update({
       where: { id: customerNodeId },
@@ -326,8 +362,6 @@ export class NodesService {
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
     });
 
-    await this.xui.syncCustomerNode(customerId, node.id);
-
     return this.prisma.customerNode.findUnique({
       where: { id: node.id },
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
@@ -335,11 +369,14 @@ export class NodesService {
   }
 
   async unbindCustomerNode(customerId: string, customerNodeId: string) {
-    const node = await this.prisma.customerNode.findFirst({ where: { id: customerNodeId, customerId }, select: { id: true } });
+    const node = await this.prisma.customerNode.findFirst({ where: { id: customerNodeId, customerId }, select: { id: true, lastSyncedAt: true, config: true } });
     if (!node) throw new NotFoundException('Customer node not found');
-    await this.xui.deleteCustomerNode(customerId, customerNodeId);
+    let remoteCleanup: unknown = { skipped: true, reason: 'not synced to remote' };
+    if (node.lastSyncedAt || hasRemoteSyncConfig(node.config)) {
+      remoteCleanup = await this.xui.deleteCustomerNode(customerId, customerNodeId).catch((error) => ({ failed: true, message: error instanceof Error ? error.message : String(error) }));
+    }
     await this.prisma.customerNode.delete({ where: { id: customerNodeId } });
-    return { deleted: true, id: customerNodeId };
+    return { deleted: true, id: customerNodeId, remoteCleanup };
   }
 
   private async ensureServer(id: string) {
@@ -385,11 +422,24 @@ export class NodesService {
   private toJsonValue(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
   }
+
+  private serverConfig(input: Partial<z.infer<typeof xuiServerUpsertSchema>>, current: XuiServerConfig = {}): XuiServerConfig {
+    return {
+      ...current,
+      tlsServerName: input.tlsServerName === undefined ? current.tlsServerName || '' : input.tlsServerName || '',
+      tlsCertFile: input.tlsCertFile === undefined ? current.tlsCertFile || '' : input.tlsCertFile || '',
+      tlsKeyFile: input.tlsKeyFile === undefined ? current.tlsKeyFile || '' : input.tlsKeyFile || '',
+      realityTarget: input.realityTarget === undefined ? current.realityTarget || '' : input.realityTarget || '',
+      realityServerName: input.realityServerName === undefined ? current.realityServerName || '' : input.realityServerName || '',
+      realityFingerprint: input.realityFingerprint === undefined ? current.realityFingerprint || 'chrome' : input.realityFingerprint || 'chrome',
+      realitySpiderX: input.realitySpiderX === undefined ? current.realitySpiderX || '/' : input.realitySpiderX || '/'
+    };
+  }
 }
 
-function maskXuiServer<T extends { passwordEnc: string | null; tokenEnc: string | null }>(server: T) {
-  const { passwordEnc, tokenEnc, ...safe } = server;
-  return { ...safe, hasPassword: Boolean(passwordEnc), hasToken: Boolean(tokenEnc) };
+function maskXuiServer<T extends { passwordEnc: string | null; tokenEnc: string | null; config?: unknown }>(server: T) {
+  const { passwordEnc, tokenEnc, config, ...safe } = server;
+  return { ...safe, config: serverConfigFrom({ config }), hasPassword: Boolean(passwordEnc), hasToken: Boolean(tokenEnc) };
 }
 
 function maskSocksNode<T extends { passwordEnc: string | null }>(node: T) {
@@ -400,4 +450,22 @@ function maskSocksNode<T extends { passwordEnc: string | null }>(node: T) {
 function jsonObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function serverConfigFrom(value: unknown): XuiServerConfig {
+  const config = jsonObject(jsonObject(value).config || value);
+  return {
+    tlsServerName: String(config.tlsServerName || '').trim(),
+    tlsCertFile: String(config.tlsCertFile || '').trim(),
+    tlsKeyFile: String(config.tlsKeyFile || '').trim(),
+    realityTarget: String(config.realityTarget || '').trim(),
+    realityServerName: String(config.realityServerName || '').trim(),
+    realityFingerprint: String(config.realityFingerprint || 'chrome').trim(),
+    realitySpiderX: String(config.realitySpiderX || '/').trim()
+  };
+}
+
+function hasRemoteSyncConfig(value: unknown) {
+  const config = jsonObject(value);
+  return Boolean(config.subId || (Array.isArray(config.links) && config.links.length));
 }

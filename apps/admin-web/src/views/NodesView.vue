@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { RefreshCw, UploadCloud } from 'lucide-vue-next';
+import { UploadCloud } from 'lucide-vue-next';
 import { api } from '../api';
 
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
@@ -27,8 +27,6 @@ type ServiceNode = {
   config?: ServiceNodeConfig | null;
   server?: XuiServer;
 };
-type SyncResult = { total: number; success: number; failed: number };
-
 const protocolOptions = [
   { label: 'VLESS', value: 'vless' },
   { label: 'VMess', value: 'vmess' },
@@ -47,7 +45,6 @@ const socksNodes = ref<SocksNode[]>([]);
 const nodes = ref<ServiceNode[]>([]);
 const loading = ref(false);
 const saving = ref(false);
-const syncingUserIds = ref<Set<string>>(new Set());
 const syncingConfigIds = ref<Set<string>>(new Set());
 const error = ref('');
 const editingId = ref('');
@@ -104,23 +101,6 @@ async function saveNode() {
     error.value = err instanceof Error ? err.message : '保存服务节点失败';
   } finally {
     saving.value = false;
-  }
-}
-
-async function syncUsers(node: ServiceNode) {
-  await ElMessageBox.confirm(`确认把“${node.name}”下已绑定用户同步到远端 3x-ui？`, '同步确认', { type: 'warning' });
-  syncingUserIds.value = new Set(syncingUserIds.value).add(node.id);
-  error.value = '';
-  try {
-    const result = await api<SyncResult>(`/api/admin/service-nodes/${node.id}/sync`, { method: 'POST' });
-    ElMessage.success(`用户同步完成：成功 ${result.success}，失败 ${result.failed}，总数 ${result.total}`);
-    await loadNodes();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '同步用户失败';
-  } finally {
-    const next = new Set(syncingUserIds.value);
-    next.delete(node.id);
-    syncingUserIds.value = next;
   }
 }
 
@@ -240,9 +220,8 @@ onMounted(loadNodes);
       <el-table-column label="状态" width="90">
         <template #default="{ row }: { row: ServiceNode }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="400" fixed="right">
+      <el-table-column label="操作" width="320" fixed="right">
         <template #default="{ row }: { row: ServiceNode }">
-          <el-button size="small" :loading="syncingUserIds.has(row.id)" :disabled="!row.inboundId" @click="syncUsers(row)"><RefreshCw :size="15" />同步用户</el-button>
           <el-button size="small" :loading="syncingConfigIds.has(row.id)" :disabled="!row.inboundId" @click="syncRemoteConfig(row)"><UploadCloud :size="15" />同步配置</el-button>
           <el-button size="small" @click="editNode(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="removeNode(row)">删除</el-button>

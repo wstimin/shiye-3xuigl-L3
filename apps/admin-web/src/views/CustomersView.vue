@@ -105,7 +105,7 @@ async function bindNode() {
         trafficLimitGb: bindForm.trafficLimitGb
       }
     });
-    ElMessage.success('节点已绑定');
+    ElMessage.success('节点已绑定，本地已保存');
     bindDialogVisible.value = false;
     Object.assign(bindForm, { xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
@@ -130,7 +130,7 @@ async function updateCustomerNode() {
         trafficLimitGb: nodeEditForm.trafficLimitGb
       }
     });
-    ElMessage.success('绑定节点已更新并同步远端');
+    ElMessage.success('绑定节点已更新，本地已保存');
     editNodeDialogVisible.value = false;
     await loadCustomers();
   } catch (err) {
@@ -400,7 +400,7 @@ onMounted(loadCustomers);
           <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="3x-ui 邮箱"><el-input v-model="bindForm.xuiEmail" placeholder="可留空，系统会自动生成" /></el-form-item>
+      <el-form-item label="远端标识"><el-input v-model="bindForm.xuiEmail" placeholder="可留空，系统会自动生成；点同步后写入 3x-ui" /></el-form-item>
       <el-form-item label="到期时间">
         <div class="date-picker-stack">
           <el-date-picker v-model="bindForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
@@ -427,7 +427,7 @@ onMounted(loadCustomers);
           <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="3x-ui 邮箱"><el-input v-model="nodeEditForm.xuiEmail" /></el-form-item>
+      <el-form-item label="远端标识"><el-input v-model="nodeEditForm.xuiEmail" placeholder="本地保存；点同步后写入 3x-ui" /></el-form-item>
       <el-form-item label="到期时间">
         <div class="date-picker-stack">
           <el-date-picker v-model="nodeEditForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
@@ -442,7 +442,7 @@ onMounted(loadCustomers);
     </el-form>
     <template #footer>
       <el-button @click="editNodeDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!nodeEditForm.serviceNodeId" @click="updateCustomerNode">保存并同步</el-button>
+      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!nodeEditForm.serviceNodeId" @click="updateCustomerNode">保存</el-button>
     </template>
   </el-dialog>
 

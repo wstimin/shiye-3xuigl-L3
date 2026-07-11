@@ -12,6 +12,15 @@ type XuiServer = {
   username?: string | null;
   enabled: boolean;
   remark?: string | null;
+  config?: {
+    tlsServerName?: string;
+    tlsCertFile?: string;
+    tlsKeyFile?: string;
+    realityTarget?: string;
+    realityServerName?: string;
+    realityFingerprint?: string;
+    realitySpiderX?: string;
+  } | null;
   hasPassword?: boolean;
   hasToken?: boolean;
 };
@@ -27,7 +36,7 @@ const syncingIds = ref<Set<string>>(new Set());
 const error = ref('');
 const editingId = ref('');
 const dialogVisible = ref(false);
-const form = reactive({ name: '', baseUrl: '', basePath: '', username: '', password: '', token: '', enabled: true, remark: '' });
+const form = reactive({ name: '', baseUrl: '', basePath: '', username: '', password: '', token: '', tlsServerName: '', tlsCertFile: '', tlsKeyFile: '', realityTarget: '', realityServerName: '', realityFingerprint: 'chrome', realitySpiderX: '/', enabled: true, remark: '' });
 
 async function loadServers() {
   loading.value = true;
@@ -117,6 +126,13 @@ function editServer(server: XuiServer) {
     username: server.username || '',
     password: '',
     token: '',
+    tlsServerName: server.config?.tlsServerName || '',
+    tlsCertFile: server.config?.tlsCertFile || '',
+    tlsKeyFile: server.config?.tlsKeyFile || '',
+    realityTarget: server.config?.realityTarget || '',
+    realityServerName: server.config?.realityServerName || '',
+    realityFingerprint: server.config?.realityFingerprint || 'chrome',
+    realitySpiderX: server.config?.realitySpiderX || '/',
     enabled: server.enabled,
     remark: server.remark || ''
   });
@@ -132,7 +148,7 @@ async function removeServer(server: XuiServer) {
 
 function resetForm() {
   editingId.value = '';
-  Object.assign(form, { name: '', baseUrl: '', basePath: '', username: '', password: '', token: '', enabled: true, remark: '' });
+  Object.assign(form, { name: '', baseUrl: '', basePath: '', username: '', password: '', token: '', tlsServerName: '', tlsCertFile: '', tlsKeyFile: '', realityTarget: '', realityServerName: '', realityFingerprint: 'chrome', realitySpiderX: '/', enabled: true, remark: '' });
 }
 
 function cleanFormBody() {
@@ -142,8 +158,19 @@ function cleanFormBody() {
     username: form.username.trim() || undefined,
     password: form.password || undefined,
     token: form.token || undefined,
+    tlsServerName: form.tlsServerName.trim() || undefined,
+    tlsCertFile: form.tlsCertFile.trim() || undefined,
+    tlsKeyFile: form.tlsKeyFile.trim() || undefined,
+    realityTarget: form.realityTarget.trim() || undefined,
+    realityServerName: form.realityServerName.trim() || undefined,
+    realityFingerprint: form.realityFingerprint.trim() || undefined,
+    realitySpiderX: form.realitySpiderX.trim() || undefined,
     remark: form.remark.trim() || undefined
   };
+}
+
+function hasTlsConfig(server: XuiServer) {
+  return Boolean(server.config?.tlsCertFile && server.config?.tlsKeyFile);
 }
 
 onMounted(loadServers);
@@ -165,6 +192,14 @@ onMounted(loadServers);
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="baseUrl" label="面板地址" min-width="220" />
       <el-table-column prop="basePath" label="路径" width="120" />
+      <el-table-column label="证书/Reality" min-width="170">
+        <template #default="{ row }: { row: XuiServer }">
+          <div class="tag-stack">
+            <el-tag v-if="hasTlsConfig(row)" size="small" type="success">TLS 证书</el-tag>
+            <el-tag size="small">Reality {{ row.config?.realityTarget || '自动生成' }}</el-tag>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="凭据" width="150">
         <template #default="{ row }: { row: XuiServer }">
           <el-tag v-if="row.hasToken" size="small" type="success">Token</el-tag>
@@ -194,6 +229,13 @@ onMounted(loadServers);
       <el-form-item label="账号"><el-input v-model="form.username" /></el-form-item>
       <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password placeholder="编辑时留空不修改" /></el-form-item>
       <el-form-item label="API Token"><el-input v-model="form.token" type="password" show-password placeholder="编辑时留空不修改" /></el-form-item>
+      <el-form-item label="TLS 域名"><el-input v-model="form.tlsServerName" placeholder="例如 panel.example.com" /></el-form-item>
+      <el-form-item label="证书路径"><el-input v-model="form.tlsCertFile" placeholder="例如 /root/cert/fullchain.pem" /></el-form-item>
+      <el-form-item label="私钥路径"><el-input v-model="form.tlsKeyFile" placeholder="例如 /root/cert/privkey.pem" /></el-form-item>
+      <el-form-item label="Reality 目标"><el-input v-model="form.realityTarget" placeholder="留空自动生成，例如 example.com:443" /></el-form-item>
+      <el-form-item label="Reality SNI"><el-input v-model="form.realityServerName" placeholder="留空按 Reality 目标自动生成" /></el-form-item>
+      <el-form-item label="指纹"><el-input v-model="form.realityFingerprint" placeholder="chrome" /></el-form-item>
+      <el-form-item label="SpiderX"><el-input v-model="form.realitySpiderX" placeholder="/" /></el-form-item>
       <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
     </el-form>

@@ -43,6 +43,7 @@ enum BalanceLogType {
 }
 
 enum RenewalStatus {
+  pending
   success
   failed
 }
@@ -91,6 +92,7 @@ model XuiServer {
   passwordEnc String?       @db.Text
   tokenEnc    String?       @db.Text
   basePath    String?       @db.VarChar(120)
+  config      Json?
   enabled     Boolean       @default(true)
   remark      String?       @db.Text
   createdAt   DateTime      @default(now())

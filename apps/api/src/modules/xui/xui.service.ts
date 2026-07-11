@@ -45,6 +45,10 @@ type CreateServiceInboundInput = {
   remark?: string | null;
 };
 
+type UpdateServiceInboundInput = CreateServiceInboundInput & {
+  inboundId: number;
+};
+
 const SHIYE_ROUTE_MARK = 'shiye-service-node';
 const SHARE_LINK_PROTOCOLS = new Set(['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria']);
 
@@ -77,26 +81,9 @@ export class XuiService {
   }
 
   async syncServiceNode(serviceNodeId: string) {
-    const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, select: { id: true, name: true } });
+    const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, select: { id: true } });
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
-
-    const customerNodes = await this.prisma.customerNode.findMany({
-      where: { serviceNodeId },
-      select: { id: true, customerId: true, xuiEmail: true }
-    });
-
-    const results: Array<{ customerNodeId: string; customerId: string; xuiEmail: string; synced: boolean; message?: string }> = [];
-    for (const node of customerNodes) {
-      try {
-        await this.syncCustomerNode(node.customerId, node.id);
-        results.push({ customerNodeId: node.id, customerId: node.customerId, xuiEmail: node.xuiEmail, synced: true });
-      } catch (error) {
-        results.push({ customerNodeId: node.id, customerId: node.customerId, xuiEmail: node.xuiEmail, synced: false, message: this.errorMessage(error) });
-      }
-    }
-
-    const success = results.filter((item) => item.synced).length;
-    return { serviceNodeId, serviceNodeName: serviceNode.name, total: results.length, success, failed: results.length - success, results };
+    throw new BadRequestException('服务节点不再批量创建 3x-ui 客户端，请在用户绑定列表中逐个点击同步');
   }
 
   async syncServiceNodeRemoteConfig(serviceNodeId: string, options: { removeOnly?: boolean } = {}) {
@@ -179,7 +166,8 @@ export class XuiService {
     if (usedPorts.has(port)) throw new BadRequestException(`3x-ui 入站端口 ${port} 已被占用`);
 
     const tag = this.serviceInboundTag();
-    const streamSettings = await this.defaultStreamSettings(client, input.encryption || 'none');
+    const serverConfig = { ...this.xuiObject(server.config), baseUrl: server.baseUrl };
+    const streamSettings = await this.defaultStreamSettings(client, input.encryption || 'none', serverConfig);
     const payload = this.buildInboundPayload({ ...input, port, tag, streamSettings });
     const response = await client.addInbound(payload);
     this.assertXuiSuccess(response);
@@ -215,24 +203,87 @@ export class XuiService {
     return { inboundId, valid: true };
   }
 
+  async updateServiceNodeInbound(input: UpdateServiceInboundInput) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id: input.serverId } });
+    if (!server) throw new NotFoundException('3x-ui server not found');
+    if (!server.enabled) throw new BadRequestException('3x-ui server is disabled');
+
+    const client = await this.createAuthenticatedClient(server);
+    const currentPayload = await client.getInbound(input.inboundId);
+    this.assertXuiSuccess(currentPayload);
+    const currentInbound = this.remoteInboundFromPayload(currentPayload);
+    if (!this.inboundIdOf(currentInbound)) throw new BadRequestException(`3x-ui inbound ${input.inboundId} does not exist`);
+
+    const serverConfig = { ...this.xuiObject(server.config), baseUrl: server.baseUrl };
+    const currentStreamSettings = this.xuiObject(this.parseMaybeJson(currentInbound.streamSettings));
+    const currentSecurity = String(currentStreamSettings.security || 'none').trim() || 'none';
+    const nextSecurity = input.encryption || 'none';
+    const streamSettings = currentSecurity === nextSecurity
+      ? currentStreamSettings
+      : await this.defaultStreamSettings(client, nextSecurity, serverConfig);
+    const currentSettings = this.xuiObject(this.parseMaybeJson(currentInbound.settings));
+    const port = input.port || this.positiveInteger(currentInbound.port);
+    if (!port) throw new BadRequestException('3x-ui inbound is missing a valid port');
+    if (port !== this.positiveInteger(currentInbound.port)) {
+      const rawInbounds = await client.listInbounds();
+      this.assertXuiSuccess(rawInbounds);
+      const occupied = this.xuiArray(rawInbounds).some((item) => this.inboundIdOf(item) !== input.inboundId && this.positiveInteger(this.xuiObject(item).port) === port);
+      if (occupied) throw new BadRequestException(`3x-ui inbound port ${port} is already in use`);
+    }
+
+    const payload = {
+      ...currentInbound,
+      ...this.buildInboundPayload({
+        ...input,
+        port,
+        tag: String(currentInbound.tag || this.serviceInboundTag()),
+        streamSettings
+      }),
+      id: input.inboundId,
+      settings: this.mergeInboundSettings(input.protocol, currentSettings),
+      up: Number(currentInbound.up || 0),
+      down: Number(currentInbound.down || 0),
+      total: Number(currentInbound.total || 0)
+    };
+
+    const response = await client.updateInbound(input.inboundId, payload);
+    this.assertXuiSuccess(response);
+    await this.writeSyncLog(server.id, 'service-node-inbound-update', 'success', `Updated inbound ${input.inboundId} for ${input.name}`, {
+      inboundId: input.inboundId,
+      port,
+      protocol: input.protocol,
+      response: this.toJsonValue(response)
+    });
+    return { updated: true, inboundId: input.inboundId, port, response };
+  }
+
   async deleteManagedServiceNodeInbound(serviceNodeId: string) {
     const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
     if (!serviceNode?.inboundId) return { deleted: false, skipped: true };
-    const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
-    if (!config.remoteManaged) return { deleted: false, skipped: true };
 
     try {
       const client = await this.createAuthenticatedClient(serviceNode.server);
+      const beforeDelete = await this.remoteInboundExists(client, serviceNode.inboundId);
+      if (!beforeDelete.exists) {
+        await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'success', `Inbound ${serviceNode.inboundId} already absent`, {
+          serviceNodeId,
+          inboundId: serviceNode.inboundId,
+          alreadyAbsent: true
+        });
+        return { deleted: true, inboundId: serviceNode.inboundId, alreadyAbsent: true };
+      }
       const response = await client.deleteInbound(serviceNode.inboundId);
       this.assertXuiSuccess(response);
+      const verified = await this.verifyRemoteInboundDeleted(client, serviceNode.inboundId);
       await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'success', `Deleted inbound ${serviceNode.inboundId}`, {
         serviceNodeId,
         inboundId: serviceNode.inboundId,
+        verified,
         response: this.toJsonValue(response)
       });
-      return { deleted: true, inboundId: serviceNode.inboundId, response };
+      return { deleted: true, inboundId: serviceNode.inboundId, verified, response };
     } catch (error) {
-      if (/not found|record not found|404/i.test(this.errorMessage(error))) return { deleted: true, inboundId: serviceNode.inboundId, alreadyAbsent: true };
+      if (this.isRemoteNotFound(error)) return { deleted: true, inboundId: serviceNode.inboundId, alreadyAbsent: true };
       await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'failed', this.errorMessage(error), { serviceNodeId, inboundId: serviceNode.inboundId });
       throw new BadGatewayException(`删除远端 3x-ui 入站失败：${this.errorMessage(error)}`);
     }
@@ -242,9 +293,12 @@ export class XuiService {
     const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId } });
     if (!server) return { deleted: false, skipped: true };
     const client = await this.createAuthenticatedClient(server);
+    const beforeDelete = await this.remoteInboundExists(client, inboundId);
+    if (!beforeDelete.exists) return { deleted: true, inboundId, alreadyAbsent: true };
     const response = await client.deleteInbound(inboundId);
     this.assertXuiSuccess(response);
-    return { deleted: true, inboundId, response };
+    const verified = await this.verifyRemoteInboundDeleted(client, inboundId);
+    return { deleted: true, inboundId, verified, response };
   }
 
   async syncServer(serverId: string) {
@@ -278,15 +332,19 @@ export class XuiService {
         const enabled = this.booleanValue(inbound.enable, true);
         const existing = await this.prisma.serviceNode.findFirst({ where: { serverId, inboundId } });
         const previousConfig = this.xuiObject(existing?.config);
+        const existingRemoteManaged = Boolean(previousConfig.remoteManaged);
+        const existingRemoteMode = previousConfig.remoteMode === 'create' || previousConfig.remoteMode === 'bind'
+          ? previousConfig.remoteMode
+          : existingRemoteManaged ? 'create' : 'bind';
         const config = {
           ...previousConfig,
-          remoteMode: 'bind',
-          remoteManaged: false,
+          remoteMode: existing ? existingRemoteMode : 'bind',
+          remoteManaged: existing ? existingRemoteManaged : false,
           remoteInboundTag: String(inbound.tag || previousConfig.remoteInboundTag || ''),
           remoteInboundRemark: String(inbound.remark || previousConfig.remoteInboundRemark || ''),
           remoteInboundPort: port || previousConfig.remoteInboundPort || undefined,
           encryption: String(streamSettings.security || previousConfig.encryption || 'none'),
-          importedFromRemote: true
+          importedFromRemote: existing ? Boolean(previousConfig.importedFromRemote) : true
         };
 
         if (existing) {
@@ -349,9 +407,14 @@ export class XuiService {
     });
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
 
-    const results: Array<{ customerNodeId: string; customerId: string; xuiEmail: string; deleted: boolean; message?: string }> = [];
+    const results: Array<{ customerNodeId: string; customerId: string; xuiEmail: string; deleted: boolean; skipped?: boolean; message?: string }> = [];
     for (const node of serviceNode.customerNodes) {
       try {
+        const customerNode = await this.prisma.customerNode.findUnique({ where: { id: node.id }, select: { lastSyncedAt: true, config: true } });
+        if (!this.shouldDeleteRemoteClient(customerNode)) {
+          results.push({ customerNodeId: node.id, customerId: node.customerId, xuiEmail: node.xuiEmail, deleted: false, skipped: true, message: 'not synced to remote' });
+          continue;
+        }
         await this.deleteRemoteClient(serviceNode.server, node.xuiEmail, keepTraffic, {
           customerId: node.customerId,
           customerNodeId: node.id,
@@ -364,9 +427,9 @@ export class XuiService {
     }
 
     const success = results.filter((item) => item.deleted).length;
-    const failed = results.length - success;
-    if (failed > 0) throw new BadGatewayException(`删除远端 3x-ui 客户端失败：成功 ${success}，失败 ${failed}`);
-    return { serviceNodeId, total: results.length, success, failed, results };
+    const skipped = results.filter((item) => item.skipped).length;
+    const failed = results.filter((item) => !item.deleted && !item.skipped).length;
+    return { serviceNodeId, total: results.length, success, skipped, failed, results };
   }
 
   async syncCustomerNode(customerId: string, customerNodeId: string, options: SyncOptions = {}) {
@@ -407,7 +470,8 @@ export class XuiService {
         email: customerNode.xuiEmail,
         enabled: targetStatus === 'active',
         expireAt: options.expireAt === undefined ? customerNode.expireAt : options.expireAt,
-        trafficLimitGb: options.trafficLimitGb ?? customerNode.trafficLimitGb
+        trafficLimitGb: options.trafficLimitGb ?? customerNode.trafficLimitGb,
+        flow: this.clientFlowForServiceNode(customerNode.serviceNode)
       });
 
       const existing = await this.findClient(client, customerNode.xuiEmail, inbounds);
@@ -513,7 +577,14 @@ export class XuiService {
     }
   }
 
-  private buildXuiClient(input: { uuid: string; subId: string; email: string; enabled: boolean; expireAt?: Date | null; trafficLimitGb: Prisma.Decimal | number | string | null }) {
+  private shouldDeleteRemoteClient(customerNode?: { lastSyncedAt: Date | null; config: Prisma.JsonValue | null } | null) {
+    if (!customerNode) return false;
+    if (customerNode.lastSyncedAt) return true;
+    const config = this.xuiObject(customerNode.config);
+    return Boolean(config.subId || (Array.isArray(config.links) && config.links.length));
+  }
+
+  private buildXuiClient(input: { uuid: string; subId: string; email: string; enabled: boolean; expireAt?: Date | null; trafficLimitGb: Prisma.Decimal | number | string | null; flow?: string }) {
     return {
       id: input.uuid,
       uuid: input.uuid,
@@ -522,11 +593,16 @@ export class XuiService {
       expiryTime: input.expireAt ? input.expireAt.getTime() : 0,
       totalGB: this.gbToBytes(input.trafficLimitGb),
       limitIp: 0,
-      flow: '',
+      flow: input.flow || '',
       tgId: 0,
       subId: input.subId,
       reset: 0
     };
+  }
+
+  private clientFlowForServiceNode(serviceNode: { protocol: string; config?: Prisma.JsonValue | null }) {
+    const config = this.xuiObject(serviceNode.config);
+    return serviceNode.protocol === 'vless' && config.encryption === 'reality' ? 'xtls-rprx-vision' : '';
   }
 
   private buildInboundPayload(input: CreateServiceInboundInput & { port: number; tag: string; streamSettings: Record<string, unknown> }) {
@@ -573,18 +649,29 @@ export class XuiService {
     return { clients: [] };
   }
 
-  private async defaultStreamSettings(client: XuiClient, security: string) {
+  private mergeInboundSettings(protocol: string, currentSettings: Record<string, unknown>) {
+    const next = this.xuiObject(this.defaultInboundSettings(protocol));
+    if (Array.isArray(currentSettings.clients)) next.clients = currentSettings.clients;
+    if (Array.isArray(currentSettings.accounts)) next.accounts = currentSettings.accounts;
+    for (const key of ['method', 'password', 'network', 'auth', 'ip', 'udp']) {
+      if (currentSettings[key] !== undefined) next[key] = currentSettings[key];
+    }
+    return next;
+  }
+
+  private async defaultStreamSettings(client: XuiClient, security: string, serverConfig: Record<string, unknown> = {}) {
     const base: Record<string, unknown> = {
       network: 'tcp',
       tcpSettings: { acceptProxyProtocol: false, header: { type: 'none' } }
     };
     if (security === 'tls') {
-      const certFiles = await this.resolveWebCertFiles(client);
+      const certFiles = await this.resolveTlsCertFiles(client, serverConfig);
+      const serverName = String(serverConfig.tlsServerName || '').trim();
       return {
         ...base,
         security: 'tls',
         tlsSettings: {
-          serverName: '',
+          serverName,
           minVersion: '1.2',
           maxVersion: '',
           cipherSuites: '',
@@ -596,14 +683,19 @@ export class XuiService {
     }
     if (security === 'reality') {
       const keys = await this.resolveRealityKeys(client);
+      const target = this.realityTarget(serverConfig);
+      const serverName = this.realityServerName(serverConfig, target);
+      const fingerprint = String(serverConfig.realityFingerprint || 'chrome').trim() || 'chrome';
+      const spiderX = String(serverConfig.realitySpiderX || '/').trim() || '/';
       return {
         ...base,
         security: 'reality',
         realitySettings: {
           show: false,
           xver: 0,
-          dest: 'www.microsoft.com:443',
-          serverNames: ['www.microsoft.com'],
+          dest: target,
+          target,
+          serverNames: [serverName],
           privateKey: keys.privateKey,
           publicKey: keys.publicKey,
           minClient: '',
@@ -611,7 +703,7 @@ export class XuiService {
           maxTimediff: 0,
           alpn: ['h2', 'http/1.1'],
           shortIds: [this.randomShortId()],
-          settings: { publicKey: keys.publicKey, fingerprint: 'chrome', serverName: 'www.microsoft.com', spiderX: '/' }
+          settings: { publicKey: keys.publicKey, fingerprint, serverName, spiderX }
         }
       };
     }
@@ -628,6 +720,13 @@ export class XuiService {
     return { certFile, keyFile };
   }
 
+  private async resolveTlsCertFiles(client: XuiClient, serverConfig: Record<string, unknown>) {
+    const certFile = String(serverConfig.tlsCertFile || '').trim();
+    const keyFile = String(serverConfig.tlsKeyFile || '').trim();
+    if (certFile && keyFile) return { certFile, keyFile };
+    return this.resolveWebCertFiles(client);
+  }
+
   private async resolveRealityKeys(client: XuiClient) {
     const payload = await client.getNewX25519Cert();
     this.assertXuiSuccess(payload);
@@ -636,6 +735,51 @@ export class XuiService {
     const publicKey = String(object.publicKey || object.public_key || '').trim();
     if (!privateKey || !publicKey) throw new BadGatewayException('3x-ui 没有返回 Reality X25519 密钥');
     return { privateKey, publicKey };
+  }
+
+  private realityTarget(serverConfig: Record<string, unknown>) {
+    const target = String(serverConfig.realityTarget || '').trim();
+    if (target) return this.normalizeRealityTarget(target);
+
+    const host = this.hostFromUrl(String(serverConfig.baseUrl || ''));
+    if (host && !this.isIpAddress(host)) return `${host}:443`;
+
+    throw new BadRequestException('Reality 自动创建需要 3x-ui 面板地址使用域名，或在服务器配置里填写 Reality 目标，例如 example.com:443');
+  }
+
+  private realityServerName(serverConfig: Record<string, unknown>, target: string) {
+    const configured = String(serverConfig.realityServerName || '').trim();
+    if (configured) return configured;
+    const host = this.hostFromTarget(target);
+    if (host && !this.isIpAddress(host)) return host;
+    throw new BadRequestException('Reality 自动创建需要可用域名作为 SNI，请使用域名面板地址或填写 Reality SNI');
+  }
+
+  private normalizeRealityTarget(target: string) {
+    const trimmed = target.trim();
+    const host = this.hostFromTarget(trimmed);
+    if (!host) throw new BadRequestException('Reality 目标格式不正确，请填写 example.com:443');
+    if (/\]:\d+$/.test(trimmed) || /:\d+$/.test(trimmed)) return trimmed;
+    return `${trimmed}:443`;
+  }
+
+  private hostFromTarget(target: string) {
+    const trimmed = target.trim();
+    if (!trimmed) return '';
+    if (trimmed.startsWith('[')) return trimmed.slice(1, trimmed.indexOf(']'));
+    return trimmed.split(':')[0];
+  }
+
+  private hostFromUrl(value: string) {
+    try {
+      return new URL(value).hostname;
+    } catch {
+      return '';
+    }
+  }
+
+  private isIpAddress(value: string) {
+    return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value) || value.includes(':');
   }
 
   private async linksForClient(client: XuiClient, email: string, subId?: string) {
@@ -726,6 +870,43 @@ export class XuiService {
     return `shiye-socks-${serviceNodeId.slice(0, 18)}`;
   }
 
+  private async verifyRemoteInboundDeleted(client: XuiClient, inboundId: number) {
+    const firstCheck = await this.remoteInboundExists(client, inboundId);
+    if (!firstCheck.exists) return { absent: true, checked: true, retried: false };
+
+    const retryResponse = await client.deleteInbound(inboundId);
+    this.assertXuiSuccess(retryResponse);
+    const secondCheck = await this.remoteInboundExists(client, inboundId);
+    if (secondCheck.exists) throw new Error(`3x-ui inbound ${inboundId} still exists after retry delete`);
+
+    return { absent: true, checked: true, retried: true, retryResponse: this.toJsonValue(retryResponse) };
+  }
+
+  private async remoteInboundExists(client: XuiClient, inboundId: number) {
+    try {
+      const payload = await client.getInbound(inboundId);
+      this.assertXuiSuccess(payload);
+      const object = this.xuiObject(payload);
+      if ('obj' in object || 'data' in object) {
+        const value = object.obj ?? object.data;
+        if (!value) return { exists: false };
+        const inbound = this.xuiObject(value);
+        const id = this.inboundIdOf(inbound);
+        return { exists: id ? id === inboundId : Boolean(Object.keys(inbound).length) };
+      }
+      const inbound = this.xuiObject(payload);
+      const id = this.inboundIdOf(inbound);
+      return { exists: id === inboundId };
+    } catch (error) {
+      if (this.isRemoteNotFound(error)) return { exists: false };
+      throw error;
+    }
+  }
+
+  private isRemoteNotFound(error: unknown) {
+    return /not found|record not found|404|不存在|未找到|没有找到|not exist|does not exist/i.test(this.errorMessage(error));
+  }
+
   private assertXuiSuccess(payload: unknown) {
     if (!payload || typeof payload !== 'object') return;
     const record = payload as Record<string, unknown>;
@@ -771,6 +952,12 @@ export class XuiService {
 
   private remoteInboundName(inbound: Record<string, unknown>, inboundId: number) {
     return String(inbound.remark || inbound.tag || `Inbound ${inboundId}`).trim() || `Inbound ${inboundId}`;
+  }
+
+  private remoteInboundFromPayload(payload: unknown) {
+    const object = this.xuiObject(payload);
+    const value = object.obj ?? object.data ?? object.result ?? object.inbound ?? payload;
+    return this.xuiObject(value);
   }
 
   private positiveInteger(value: unknown) {

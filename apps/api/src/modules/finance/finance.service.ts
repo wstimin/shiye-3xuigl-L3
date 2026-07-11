@@ -16,40 +16,38 @@ export class FinanceService {
   }
 
   async renewCustomerNode(customerId: string, customerNodeId: string, months: number, operator: string) {
-    const customerNode = await this.prisma.customerNode.findFirst({
-      where: { id: customerNodeId, customerId },
-      include: { serviceNode: true, customer: true }
-    });
-    if (!customerNode) throw new NotFoundException('用户节点不存在');
+    const pending = await this.prisma.$transaction(async (tx) => {
+      const customerNode = await tx.customerNode.findFirst({
+        where: { id: customerNodeId, customerId },
+        include: { serviceNode: true, customer: true }
+      });
+      if (!customerNode) throw new NotFoundException('用户节点不存在');
 
-    const priceMonthly = new Prisma.Decimal(customerNode.serviceNode.priceMonthly);
-    const amount = priceMonthly.mul(months);
-    const initialBalance = new Prisma.Decimal(customerNode.customer.balance);
-    if (initialBalance.lessThan(amount)) throw new BadRequestException('余额不足');
-
-    const now = new Date();
-    const beforeExpireAt = customerNode.expireAt;
-    const baseDate = beforeExpireAt && beforeExpireAt > now ? beforeExpireAt : now;
-    const afterExpireAt = addMonths(baseDate, months);
-
-    const syncResult = await this.xui.syncCustomerNode(customerId, customerNodeId, { expireAt: afterExpireAt, status: 'active' });
-
-    return this.prisma.$transaction(async (tx) => {
-      const freshCustomer = await tx.customer.findUnique({ where: { id: customerId }, select: { balance: true } });
-      if (!freshCustomer) throw new NotFoundException('用户不存在');
-
-      const beforeBalance = new Prisma.Decimal(freshCustomer.balance);
+      const priceMonthly = new Prisma.Decimal(customerNode.serviceNode.priceMonthly);
+      const amount = priceMonthly.mul(months);
+      const beforeBalance = new Prisma.Decimal(customerNode.customer.balance);
       if (beforeBalance.lessThan(amount)) throw new BadRequestException('余额不足');
+
+      const now = new Date();
+      const beforeExpireAt = customerNode.expireAt;
+      const baseDate = beforeExpireAt && beforeExpireAt > now ? beforeExpireAt : now;
+      const afterExpireAt = addMonths(baseDate, months);
       const afterBalance = beforeBalance.minus(amount);
 
       await tx.customer.update({ where: { id: customerId }, data: { balance: afterBalance } });
-      const updatedNode = await tx.customerNode.update({
-        where: { id: customerNodeId },
-        data: { expireAt: afterExpireAt, status: 'active', lastSyncedAt: new Date() },
-        include: { serviceNode: { include: { server: true } } }
+      const renewalLog = await tx.renewalLog.create({
+        data: {
+          customerId,
+          customerNodeId,
+          months,
+          amount,
+          status: 'pending',
+          beforeExpireAt,
+          afterExpireAt,
+          detail: toJsonValue({ operator, serviceNodeName: customerNode.serviceNode.name, serviceNodeId: customerNode.serviceNodeId })
+        }
       });
-
-      await tx.balanceLog.create({
+      const balanceLog = await tx.balanceLog.create({
         data: {
           customerId,
           type: 'renewal',
@@ -58,27 +56,91 @@ export class FinanceService {
           afterBalance,
           operator,
           remark: `续费 ${customerNode.serviceNode.name} ${months} 个月`,
-          detail: toJsonValue({ customerNodeId, serviceNodeId: customerNode.serviceNodeId, months, sync: syncResult.detail })
+          detail: toJsonValue({ renewalLogId: renewalLog.id, customerNodeId, serviceNodeId: customerNode.serviceNodeId, months, syncStatus: 'pending' })
         }
       });
 
-      const renewalLog = await tx.renewalLog.create({
+      return { customerNode, amount, beforeBalance, afterBalance, beforeExpireAt, afterExpireAt, renewalLog, balanceLog };
+    });
+
+    let syncResult: Awaited<ReturnType<XuiService['syncCustomerNode']>>;
+    try {
+      syncResult = await this.xui.syncCustomerNode(customerId, customerNodeId, { expireAt: pending.afterExpireAt, status: 'active' });
+    } catch (error) {
+      await this.refundFailedRenewal(customerId, pending, operator, error);
+      throw error;
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updatedNode = await tx.customerNode.update({
+        where: { id: customerNodeId },
+        data: { expireAt: pending.afterExpireAt, status: 'active', lastSyncedAt: new Date() },
+        include: { serviceNode: { include: { server: true } } }
+      });
+      const renewalLog = await tx.renewalLog.update({
+        where: { id: pending.renewalLog.id },
+        data: {
+          status: 'success',
+          detail: toJsonValue({
+            operator,
+            serviceNodeName: pending.customerNode.serviceNode.name,
+            serviceNodeId: pending.customerNode.serviceNodeId,
+            balanceLogId: pending.balanceLog.id,
+            syncRoute: syncResult.route,
+            sync: syncResult.detail
+          })
+        }
+      });
+
+      return { node: updatedNode, renewalLog, amount: pending.amount, afterBalance: pending.afterBalance, sync: syncResult.detail };
+    });
+  }
+
+  private async refundFailedRenewal(customerId: string, pending: PendingRenewal, operator: string, error: unknown) {
+    const message = errorMessage(error);
+    await this.prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { balance: true } });
+      if (!customer) return;
+
+      const beforeBalance = new Prisma.Decimal(customer.balance);
+      const afterBalance = beforeBalance.plus(pending.amount);
+      await tx.customer.update({ where: { id: customerId }, data: { balance: afterBalance } });
+      await tx.balanceLog.create({
         data: {
           customerId,
-          customerNodeId,
-          months,
-          amount,
-          status: 'success',
-          beforeExpireAt,
-          afterExpireAt,
-          detail: { operator, serviceNodeName: customerNode.serviceNode.name, syncRoute: syncResult.route }
+          type: 'refund',
+          amount: pending.amount,
+          beforeBalance,
+          afterBalance,
+          operator,
+          remark: `续费同步失败退款 ${pending.customerNode.serviceNode.name}`,
+          detail: toJsonValue({ renewalLogId: pending.renewalLog.id, originalBalanceLogId: pending.balanceLog.id, reason: message })
         }
       });
-
-      return { node: updatedNode, renewalLog, amount, afterBalance, sync: syncResult.detail };
+      await tx.renewalLog.update({
+        where: { id: pending.renewalLog.id },
+        data: {
+          status: 'failed',
+          detail: toJsonValue({
+            operator,
+            serviceNodeName: pending.customerNode.serviceNode.name,
+            serviceNodeId: pending.customerNode.serviceNodeId,
+            balanceLogId: pending.balanceLog.id,
+            refunded: true,
+            error: message
+          })
+        }
+      });
     });
   }
 }
+
+type PendingRenewal = {
+  amount: Prisma.Decimal;
+  renewalLog: { id: string };
+  balanceLog: { id: string };
+  customerNode: { serviceNode: { name: string }; serviceNodeId: string };
+};
 
 function addMonths(date: Date, months: number) {
   const next = new Date(date);
@@ -90,4 +152,8 @@ function addMonths(date: Date, months: number) {
 
 function toJsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
