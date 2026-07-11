@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { RefreshCw } from 'lucide-vue-next';
+import { Activity, RefreshCw, RotateCcw } from 'lucide-vue-next';
 import { api } from '../api';
 
 type CustomerNode = {
@@ -40,6 +40,8 @@ const customers = ref<Customer[]>([]);
 const serviceNodes = ref<ServiceNode[]>([]);
 const syncingIds = ref<Set<string>>(new Set());
 const renewingIds = ref<Set<string>>(new Set());
+const trafficIds = ref<Set<string>>(new Set());
+const resettingTrafficIds = ref<Set<string>>(new Set());
 const editingCustomerId = ref('');
 const customerDialogVisible = ref(false);
 const bindDialogVisible = ref(false);
@@ -190,6 +192,47 @@ async function renewNode(customer: Customer, node: CustomerNode) {
   }
 }
 
+async function showNodeTraffic(customer: Customer, node: CustomerNode) {
+  trafficIds.value = new Set(trafficIds.value).add(node.id);
+  error.value = '';
+  try {
+    const result = await api<{ traffic?: Record<string, unknown>; xuiEmail?: string }>(`/api/admin/customers/${customer.id}/nodes/${node.id}/traffic`);
+    const traffic = result.traffic || {};
+    await ElMessageBox.alert([
+      `Email: ${result.xuiEmail || node.xuiEmail}`,
+      `Enabled: ${traffic.enable ?? '-'}`,
+      `Upload: ${formatBytes(Number(traffic.up || 0))}`,
+      `Download: ${formatBytes(Number(traffic.down || 0))}`,
+      `Total: ${formatBytes(Number(traffic.total || 0))}`,
+      `Expiry: ${formatRemoteExpiry(traffic.expiryTime)}`,
+      `Last online: ${formatRemoteLastOnline(traffic.lastOnline)}`
+    ].join('\n'), '3x-ui client traffic', { type: 'info' });
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '读取远端流量失败';
+  } finally {
+    const next = new Set(trafficIds.value);
+    next.delete(node.id);
+    trafficIds.value = next;
+  }
+}
+
+async function resetNodeTraffic(customer: Customer, node: CustomerNode) {
+  await ElMessageBox.confirm(`确认重置「${node.serviceNode?.name || node.xuiEmail}」这个远端客户端的流量？`, '重置客户端流量', { type: 'warning' });
+  resettingTrafficIds.value = new Set(resettingTrafficIds.value).add(node.id);
+  error.value = '';
+  try {
+    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/reset-traffic`, { method: 'POST' });
+    ElMessage.success('远端客户端流量已重置');
+    await loadCustomers();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '重置远端流量失败';
+  } finally {
+    const next = new Set(resettingTrafficIds.value);
+    next.delete(node.id);
+    resettingTrafficIds.value = next;
+  }
+}
+
 async function unbindNode(customer: Customer, node: CustomerNode) {
   await ElMessageBox.confirm(`确认解绑「${node.serviceNode?.name || node.xuiEmail}」？`, '解绑确认', { type: 'warning' });
   await api(`/api/admin/customers/${customer.id}/nodes/${node.id}`, { method: 'DELETE' });
@@ -304,6 +347,30 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
 }
 
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '-';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+}
+
+function formatRemoteExpiry(value: unknown) {
+  const time = Number(value);
+  if (!Number.isFinite(time) || time <= 0) return '-';
+  return new Date(time).toLocaleString('zh-CN', { hour12: false });
+}
+
+function formatRemoteLastOnline(value: unknown) {
+  const time = Number(value);
+  if (!Number.isFinite(time) || time <= 0) return '-';
+  return new Date(time * 1000).toLocaleString('zh-CN', { hour12: false });
+}
+
 onMounted(loadCustomers);
 </script>
 
@@ -350,6 +417,12 @@ onMounted(loadCustomers);
                 <el-button size="small" :loading="renewingIds.has(node.id)" @click="renewNode(row, node)">续费</el-button>
                 <el-tooltip content="同步到 3x-ui" placement="top">
                   <el-button circle size="small" :loading="syncingIds.has(node.id)" @click="syncNode(row, node)"><RefreshCw :size="15" /></el-button>
+                </el-tooltip>
+                <el-tooltip content="查看远端流量" placement="top">
+                  <el-button circle size="small" :loading="trafficIds.has(node.id)" @click="showNodeTraffic(row, node)"><Activity :size="15" /></el-button>
+                </el-tooltip>
+                <el-tooltip content="重置远端流量" placement="top">
+                  <el-button circle size="small" :loading="resettingTrafficIds.has(node.id)" @click="resetNodeTraffic(row, node)"><RotateCcw :size="15" /></el-button>
                 </el-tooltip>
                 <el-button size="small" @click="editCustomerNode(row, node)">编辑</el-button>
                 <el-button size="small" type="danger" @click="unbindNode(row, node)">删除</el-button>

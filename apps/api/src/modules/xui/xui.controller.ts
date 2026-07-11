@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { xuiServerUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { AuthGuard } from '../../shared/auth.guard.js';
@@ -20,6 +20,16 @@ export class XuiController {
   @Roles('admin')
   testStoredServer(@Param('id') id: string) { return this.xui.testStoredServer(id); }
 
+  @Get('admin/xui-servers/:id/status')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  storedServerStatus(@Param('id') id: string) { return this.xui.storedServerStatus(id); }
+
+  @Get('admin/xui-servers/:id/client-presence')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  storedServerClientPresence(@Param('id') id: string) { return this.xui.storedServerClientPresence(id); }
+
   @Post('admin/xui-servers/:id/sync')
   @UseGuards(AuthGuard)
   @Roles('admin')
@@ -35,10 +45,36 @@ export class XuiController {
   @Roles('admin')
   syncServiceNodeConfig(@Param('id') id: string) { return this.xui.syncServiceNodeRemoteConfig(id); }
 
+  @Post('admin/service-nodes/:id/set-enable')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  setServiceNodeEnable(@Param('id') id: string, @Body() body: { enable?: boolean }) {
+    return this.xui.setServiceNodeRemoteEnable(id, body.enable === true);
+  }
+
+  @Post('admin/service-nodes/:id/reset-traffic')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  resetServiceNodeTraffic(@Param('id') id: string) { return this.xui.resetServiceNodeTraffic(id); }
+
   @Post('admin/customers/:id/nodes/:nodeId/sync')
   @UseGuards(AuthGuard)
   @Roles('admin')
   syncCustomerNode(@Param('id') id: string, @Param('nodeId') nodeId: string) {
     return this.xui.syncCustomerNode(id, nodeId);
+  }
+
+  @Get('admin/customers/:id/nodes/:nodeId/traffic')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  customerNodeTraffic(@Param('id') id: string, @Param('nodeId') nodeId: string) {
+    return this.xui.customerNodeTraffic(id, nodeId);
+  }
+
+  @Post('admin/customers/:id/nodes/:nodeId/reset-traffic')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  resetCustomerNodeTraffic(@Param('id') id: string, @Param('nodeId') nodeId: string) {
+    return this.xui.resetCustomerNodeTraffic(id, nodeId);
   }
 }

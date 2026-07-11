@@ -117,6 +117,14 @@ export class XuiClient {
     return this.request(`/panel/api/inbounds/del/${encodeURIComponent(String(id))}`, { method: 'POST' });
   }
 
+  setInboundEnable(id: number, enable: boolean) {
+    return this.request(`/panel/api/inbounds/setEnable/${encodeURIComponent(String(id))}`, { method: 'POST', body: { enable } });
+  }
+
+  resetInboundTraffic(id: number) {
+    return this.request(`/panel/api/inbounds/${encodeURIComponent(String(id))}/resetTraffic`, { method: 'POST' });
+  }
+
   addClient(body: unknown) {
     return this.request('/panel/api/clients/add', { method: 'POST', body });
   }
@@ -138,6 +146,18 @@ export class XuiClient {
     return this.request(`/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`, { method: 'POST' });
   }
 
+  clientTraffic(email: string) {
+    return this.request(`/panel/api/clients/traffic/${encodeURIComponent(email)}`);
+  }
+
+  clientsLastOnline() {
+    return this.request('/panel/api/clients/lastOnline', { method: 'POST' });
+  }
+
+  onlineClients() {
+    return this.request('/panel/api/clients/onlines', { method: 'POST' });
+  }
+
   clientLinks(email: string) {
     return this.request(`/panel/api/clients/links/${encodeURIComponent(email)}`);
   }
@@ -152,6 +172,14 @@ export class XuiClient {
 
   updateXrayConfig(body: { xraySetting: string; outboundTestUrl?: string }) {
     return this.formRequest('/panel/api/xray/update', { method: 'POST', body });
+  }
+
+  serverStatus() {
+    return this.request('/panel/api/server/status');
+  }
+
+  getXrayVersion() {
+    return this.request('/panel/api/server/getXrayVersion');
   }
 
   private url(endpoint: string) {

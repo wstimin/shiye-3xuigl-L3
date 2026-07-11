@@ -220,17 +220,34 @@ export class NodesService {
         nextRemark !== current.remark ||
         (input.inboundPort !== undefined && nextRemotePort !== previousConfig.remoteInboundPort)
       );
+      const remoteEnableOnlyChanged = Boolean(
+        input.enabled !== undefined &&
+        nextEnabled !== current.enabled &&
+        !remoteCreated &&
+        inboundId &&
+        input.serverId === undefined &&
+        input.inboundId === undefined &&
+        nextName === current.name &&
+        nextProtocol === current.protocol &&
+        nextEncryption === (previousConfig.encryption || 'none') &&
+        nextRemark === current.remark &&
+        (input.inboundPort === undefined || nextRemotePort === previousConfig.remoteInboundPort)
+      );
       if (!remoteCreated && inboundId && remoteInboundChanged) {
-        await this.xui.updateServiceNodeInbound({
-          serverId: nextServerId,
-          inboundId,
-          name: nextName,
-          protocol: nextProtocol,
-          encryption: config.encryption || 'none',
-          enabled: nextEnabled,
-          port: nextRemotePort,
-          remark: nextRemark
-        });
+        if (remoteEnableOnlyChanged) {
+          await this.xui.setServiceNodeRemoteEnable(id, nextEnabled);
+        } else {
+          await this.xui.updateServiceNodeInbound({
+            serverId: nextServerId,
+            inboundId,
+            name: nextName,
+            protocol: nextProtocol,
+            encryption: config.encryption || 'none',
+            enabled: nextEnabled,
+            port: nextRemotePort,
+            remark: nextRemark
+          });
+        }
       }
       return await this.prisma.serviceNode.update({
         where: { id },

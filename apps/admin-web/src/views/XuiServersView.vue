@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { RefreshCw, Wifi } from 'lucide-vue-next';
+import { Activity, RefreshCw, Users, Wifi } from 'lucide-vue-next';
 import { api } from '../api';
 
 type XuiServer = {
@@ -33,6 +33,8 @@ const saving = ref(false);
 const testingForm = ref(false);
 const testingIds = ref<Set<string>>(new Set());
 const syncingIds = ref<Set<string>>(new Set());
+const statusIds = ref<Set<string>>(new Set());
+const presenceIds = ref<Set<string>>(new Set());
 const error = ref('');
 const editingId = ref('');
 const dialogVisible = ref(false);
@@ -112,6 +114,54 @@ async function syncServer(server: XuiServer) {
   }
 }
 
+async function showServerStatus(server: XuiServer) {
+  statusIds.value = new Set(statusIds.value).add(server.id);
+  error.value = '';
+  try {
+    const result = await api<{ status?: Record<string, unknown>; versions?: unknown[] }>(`/api/admin/xui-servers/${server.id}/status`);
+    const status = result.status || {};
+    const xray = (status.xray || {}) as Record<string, unknown>;
+    const mem = (status.mem || {}) as Record<string, unknown>;
+    const disk = (status.disk || {}) as Record<string, unknown>;
+    await ElMessageBox.alert([
+      `Xray: ${xray.state || '-'} ${xray.version || ''}`.trim(),
+      `CPU: ${status.cpu ?? '-'}%`,
+      `Memory: ${formatBytes(Number(mem.current || 0))} / ${formatBytes(Number(mem.total || 0))}`,
+      `Disk: ${formatBytes(Number(disk.current || 0))} / ${formatBytes(Number(disk.total || 0))}`,
+      `Available versions: ${(result.versions || []).slice(0, 5).join(', ') || '-'}`
+    ].join('\n'), `${server.name} status`, { type: 'info' });
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '读取服务器状态失败';
+  } finally {
+    const next = new Set(statusIds.value);
+    next.delete(server.id);
+    statusIds.value = next;
+  }
+}
+
+async function showClientPresence(server: XuiServer) {
+  presenceIds.value = new Set(presenceIds.value).add(server.id);
+  error.value = '';
+  try {
+    const result = await api<{ online?: unknown[]; lastOnline?: Record<string, unknown> }>(`/api/admin/xui-servers/${server.id}/client-presence`);
+    const online = (result.online || []).map(String);
+    const lastOnline = Object.entries(result.lastOnline || {}).slice(0, 12).map(([email, time]) => `${email}: ${formatUnixTime(time)}`);
+    await ElMessageBox.alert([
+      `Online clients: ${online.length}`,
+      online.length ? online.slice(0, 20).join(', ') : '-',
+      '',
+      'Last online:',
+      lastOnline.length ? lastOnline.join('\n') : '-'
+    ].join('\n'), `${server.name} clients`, { type: 'info' });
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '读取客户端在线状态失败';
+  } finally {
+    const next = new Set(presenceIds.value);
+    next.delete(server.id);
+    presenceIds.value = next;
+  }
+}
+
 function openDialog() {
   resetForm();
   dialogVisible.value = true;
@@ -173,6 +223,24 @@ function hasTlsConfig(server: XuiServer) {
   return Boolean(server.config?.tlsCertFile && server.config?.tlsKeyFile);
 }
 
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '-';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+}
+
+function formatUnixTime(value: unknown) {
+  const time = Number(value);
+  if (!Number.isFinite(time) || time <= 0) return '-';
+  return new Date(time * 1000).toLocaleString('zh-CN', { hour12: false });
+}
+
 onMounted(loadServers);
 </script>
 
@@ -210,9 +278,11 @@ onMounted(loadServers);
       <el-table-column label="状态" width="90">
         <template #default="{ row }: { row: XuiServer }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="340" fixed="right">
+      <el-table-column label="操作" width="470" fixed="right">
         <template #default="{ row }: { row: XuiServer }">
           <el-button size="small" :loading="testingIds.has(row.id)" @click="testSaved(row)"><Wifi :size="15" />测试</el-button>
+          <el-button size="small" :loading="statusIds.has(row.id)" @click="showServerStatus(row)"><Activity :size="15" />状态</el-button>
+          <el-button size="small" :loading="presenceIds.has(row.id)" @click="showClientPresence(row)"><Users :size="15" />在线</el-button>
           <el-button size="small" :loading="syncingIds.has(row.id)" :disabled="!row.enabled" @click="syncServer(row)"><RefreshCw :size="15" />同步节点</el-button>
           <el-button size="small" @click="editServer(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="removeServer(row)">删除</el-button>

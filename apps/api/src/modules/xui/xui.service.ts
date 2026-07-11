@@ -105,6 +105,38 @@ export class XuiService {
     return { connected: true, serverId: id, enabled: server.enabled, inboundCount: this.xuiArray(inbounds).length, inbounds };
   }
 
+  async storedServerStatus(id: string) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id } });
+    if (!server) throw new NotFoundException('3x-ui server not found');
+
+    const client = await this.createAuthenticatedClient(server);
+    const [statusPayload, versionPayload] = await Promise.all([client.serverStatus(), client.getXrayVersion()]);
+    this.assertXuiSuccess(statusPayload);
+    this.assertXuiSuccess(versionPayload);
+    return {
+      serverId: id,
+      status: this.xuiObject(this.xuiObject(statusPayload).obj || this.xuiObject(statusPayload).data || statusPayload),
+      versions: this.xuiArray(versionPayload),
+      raw: { status: statusPayload, versions: versionPayload }
+    };
+  }
+
+  async storedServerClientPresence(id: string) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id } });
+    if (!server) throw new NotFoundException('3x-ui server not found');
+
+    const client = await this.createAuthenticatedClient(server);
+    const [onlinePayload, lastOnlinePayload] = await Promise.all([client.onlineClients(), client.clientsLastOnline()]);
+    this.assertXuiSuccess(onlinePayload);
+    this.assertXuiSuccess(lastOnlinePayload);
+    return {
+      serverId: id,
+      online: this.xuiArray(onlinePayload),
+      lastOnline: this.xuiObject(this.xuiObject(lastOnlinePayload).obj || this.xuiObject(lastOnlinePayload).data || lastOnlinePayload),
+      raw: { online: onlinePayload, lastOnline: lastOnlinePayload }
+    };
+  }
+
   async syncServiceNode(serviceNodeId: string) {
     const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, select: { id: true } });
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
@@ -313,6 +345,78 @@ export class XuiService {
       response: this.toJsonValue(response)
     });
     return { updated: true, inboundId: input.inboundId, port, response };
+  }
+
+  async setServiceNodeRemoteEnable(serviceNodeId: string, enable: boolean) {
+    const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
+    if (!serviceNode) throw new NotFoundException('Service node not found');
+    if (!serviceNode.inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
+
+    const client = await this.createAuthenticatedClient(serviceNode.server);
+    const response = await client.setInboundEnable(serviceNode.inboundId, enable);
+    this.assertXuiSuccess(response);
+    await this.writeSyncLog(serviceNode.serverId, 'service-node-enable-sync', 'success', `${enable ? 'Enabled' : 'Disabled'} inbound ${serviceNode.inboundId}`, {
+      serviceNodeId,
+      inboundId: serviceNode.inboundId,
+      enable,
+      response: this.toJsonValue(response)
+    });
+    return { synced: true, serviceNodeId, inboundId: serviceNode.inboundId, enable, response };
+  }
+
+  async resetServiceNodeTraffic(serviceNodeId: string) {
+    const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
+    if (!serviceNode) throw new NotFoundException('Service node not found');
+    if (!serviceNode.inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
+
+    const client = await this.createAuthenticatedClient(serviceNode.server);
+    const response = await client.resetInboundTraffic(serviceNode.inboundId);
+    this.assertXuiSuccess(response);
+    await this.writeSyncLog(serviceNode.serverId, 'service-node-reset-traffic', 'success', `Reset inbound traffic ${serviceNode.inboundId}`, {
+      serviceNodeId,
+      inboundId: serviceNode.inboundId,
+      response: this.toJsonValue(response)
+    });
+    return { reset: true, serviceNodeId, inboundId: serviceNode.inboundId, response };
+  }
+
+  async resetCustomerNodeTraffic(customerId: string, customerNodeId: string) {
+    const customerNode = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      include: { serviceNode: { include: { server: true } } }
+    });
+    if (!customerNode) throw new NotFoundException('Customer node not found');
+
+    const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
+    const response = await client.resetTraffic(customerNode.xuiEmail);
+    this.assertXuiSuccess(response);
+    await this.writeSyncLog(customerNode.serviceNode.serverId, 'customer-node-reset-traffic', 'success', `Reset client traffic ${customerNode.xuiEmail}`, {
+      customerId,
+      customerNodeId,
+      serviceNodeId: customerNode.serviceNodeId,
+      xuiEmail: customerNode.xuiEmail,
+      response: this.toJsonValue(response)
+    });
+    return { reset: true, customerId, customerNodeId, xuiEmail: customerNode.xuiEmail, response };
+  }
+
+  async customerNodeTraffic(customerId: string, customerNodeId: string) {
+    const customerNode = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      include: { serviceNode: { include: { server: true } } }
+    });
+    if (!customerNode) throw new NotFoundException('Customer node not found');
+
+    const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
+    const payload = await client.clientTraffic(customerNode.xuiEmail);
+    this.assertXuiSuccess(payload);
+    return {
+      customerId,
+      customerNodeId,
+      xuiEmail: customerNode.xuiEmail,
+      traffic: this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload),
+      raw: payload
+    };
   }
 
   async deleteManagedServiceNodeInbound(serviceNodeId: string) {
@@ -668,8 +772,38 @@ export class XuiService {
   private async deleteRemoteClientWithClient(client: XuiClient, serverId: string | null | undefined, xuiEmail: string, keepTraffic: boolean, detail: Record<string, unknown>) {
     const payload = await client.deleteClient(xuiEmail, keepTraffic);
     this.assertXuiSuccess(payload);
-    await this.writeSyncLog(serverId || null, 'customer-node-delete', 'success', `Deleted ${xuiEmail}`, { ...detail, xuiEmail, keepTraffic, response: this.toJsonValue(payload) });
-    return { deleted: true, xuiEmail, response: payload };
+    const verified = await this.verifyRemoteClientDeleted(client, xuiEmail, keepTraffic);
+    await this.writeSyncLog(serverId || null, 'customer-node-delete', 'success', `Deleted ${xuiEmail}`, { ...detail, xuiEmail, keepTraffic, verified, response: this.toJsonValue(payload) });
+    return { deleted: true, xuiEmail, verified, response: payload };
+  }
+
+  private async verifyRemoteClientDeleted(client: XuiClient, xuiEmail: string, keepTraffic: boolean) {
+    const firstCheck = await this.remoteClientExists(client, xuiEmail);
+    if (!firstCheck.exists) return { absent: true, checked: true, retried: false };
+
+    const retryResponse = await client.deleteClient(xuiEmail, keepTraffic);
+    this.assertXuiSuccess(retryResponse);
+    const secondCheck = await this.remoteClientExists(client, xuiEmail);
+    if (secondCheck.exists) throw new Error(`3x-ui client ${xuiEmail} still exists after retry delete`);
+
+    return { absent: true, checked: true, retried: true, retryResponse: this.toJsonValue(retryResponse) };
+  }
+
+  private async remoteClientExists(client: XuiClient, xuiEmail: string) {
+    try {
+      const payload = await client.getClient(xuiEmail);
+      this.assertXuiSuccess(payload);
+      const object = this.xuiObject(payload);
+      if ('obj' in object || 'data' in object) {
+        const value = object.obj ?? object.data;
+        if (!value) return { exists: false };
+        if (typeof value === 'object' && !Array.isArray(value) && !Object.keys(value as Record<string, unknown>).length) return { exists: false };
+      }
+      return { exists: Boolean(Object.keys(this.xuiObject(payload)).length) };
+    } catch (error) {
+      if (this.isRemoteNotFound(error)) return { exists: false };
+      throw error;
+    }
   }
 
   private shouldDeleteRemoteClient(customerNode?: { lastSyncedAt: Date | null; config: Prisma.JsonValue | null } | null) {

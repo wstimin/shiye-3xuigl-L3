@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { UploadCloud } from 'lucide-vue-next';
+import { RotateCcw, UploadCloud } from 'lucide-vue-next';
 import { api } from '../api';
 
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
@@ -46,6 +46,7 @@ const nodes = ref<ServiceNode[]>([]);
 const loading = ref(false);
 const saving = ref(false);
 const syncingConfigIds = ref<Set<string>>(new Set());
+const resettingTrafficIds = ref<Set<string>>(new Set());
 const error = ref('');
 const editingId = ref('');
 const dialogVisible = ref(false);
@@ -117,6 +118,22 @@ async function syncRemoteConfig(node: ServiceNode) {
     const next = new Set(syncingConfigIds.value);
     next.delete(node.id);
     syncingConfigIds.value = next;
+  }
+}
+
+async function resetRemoteTraffic(node: ServiceNode) {
+  await ElMessageBox.confirm(`确认重置「${node.name}」远端入站流量统计？此操作不会清空每个客户端的流量。`, '重置流量确认', { type: 'warning' });
+  resettingTrafficIds.value = new Set(resettingTrafficIds.value).add(node.id);
+  error.value = '';
+  try {
+    await api(`/api/admin/service-nodes/${node.id}/reset-traffic`, { method: 'POST' });
+    ElMessage.success('远端入站流量已重置');
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '重置远端流量失败';
+  } finally {
+    const next = new Set(resettingTrafficIds.value);
+    next.delete(node.id);
+    resettingTrafficIds.value = next;
   }
 }
 
@@ -220,9 +237,10 @@ onMounted(loadNodes);
       <el-table-column label="状态" width="90">
         <template #default="{ row }: { row: ServiceNode }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="320" fixed="right">
+      <el-table-column label="操作" width="420" fixed="right">
         <template #default="{ row }: { row: ServiceNode }">
           <el-button size="small" :loading="syncingConfigIds.has(row.id)" :disabled="!row.inboundId" @click="syncRemoteConfig(row)"><UploadCloud :size="15" />同步配置</el-button>
+          <el-button size="small" :loading="resettingTrafficIds.has(row.id)" :disabled="!row.inboundId" @click="resetRemoteTraffic(row)"><RotateCcw :size="15" />重置流量</el-button>
           <el-button size="small" @click="editNode(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="removeNode(row)">删除</el-button>
         </template>
