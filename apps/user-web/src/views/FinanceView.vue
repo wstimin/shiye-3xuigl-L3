@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import QRCode from 'qrcode';
 import { Banknote } from 'lucide-vue-next';
 import { api } from '../api';
+import { notifyError, notifySuccess } from '../notify';
 import alipayIcon from '../assets/payments/alipay.webp';
 import paypalIcon from '../assets/payments/paypal.webp';
 import usdtIcon from '../assets/payments/usdt.webp';
@@ -57,6 +58,7 @@ async function loadFinanceData() {
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载财务数据失败';
+    notifyError(error.value);
   } finally {
     loading.value = false;
   }
@@ -103,9 +105,11 @@ async function createRechargeOrder() {
     lastOrder.value = result;
     qrImage.value = result.qrCode ? await QRCode.toDataURL(result.qrCode, { width: 220, margin: 1 }) : '';
     message.value = `充值订单已创建：${result.order.tradeNo}，请在 30 分钟内完成支付`;
+    notifySuccess(message.value, '订单已创建');
     if (result.payUrl) window.location.href = result.payUrl;
   } catch (err) {
     error.value = err instanceof Error ? err.message : '创建充值订单失败';
+    notifyError(error.value);
   } finally {
     recharging.value = false;
   }
@@ -118,9 +122,11 @@ async function redeemCard() {
   try {
     const result = await api<{ amount: string }>('/api/user/cards/redeem', { method: 'POST', body: { code: code.value } });
     message.value = `兑换成功，余额增加 ${result.amount}`;
+    notifySuccess(message.value);
     code.value = '';
   } catch (err) {
     error.value = err instanceof Error ? err.message : '兑换失败';
+    notifyError(error.value);
   } finally {
     redeeming.value = false;
   }

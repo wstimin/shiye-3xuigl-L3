@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './auth/auth.module.js';
 import { CardsModule } from './cards/cards.module.js';
 import { CustomersModule } from './customers/customers.module.js';
+import { DiagnosticsModule } from './diagnostics/diagnostics.module.js';
 import { FinanceModule } from './finance/finance.module.js';
 import { HealthModule } from './health/health.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
@@ -26,6 +27,7 @@ import { XuiModule } from './xui/xui.module.js';
     AuthModule,
     SettingsModule,
     CustomersModule,
+    DiagnosticsModule,
     NodesModule,
     XuiModule,
     CardsModule,

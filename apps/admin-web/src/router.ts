@@ -5,6 +5,7 @@ import NodesView from './views/NodesView.vue';
 import XuiServersView from './views/XuiServersView.vue';
 import SocksNodesView from './views/SocksNodesView.vue';
 import SyncLogsView from './views/SyncLogsView.vue';
+import DiagnosticsView from './views/DiagnosticsView.vue';
 import FinanceView from './views/FinanceView.vue';
 import CardsView from './views/CardsView.vue';
 import PaymentsView from './views/PaymentsView.vue';
@@ -19,6 +20,7 @@ export const router = createRouter({
     { path: '/nodes', component: NodesView },
     { path: '/socks-nodes', component: SocksNodesView },
     { path: '/sync-logs', component: SyncLogsView },
+    { path: '/diagnostics', component: DiagnosticsView },
     { path: '/finance', component: FinanceView },
     { path: '/cards', component: CardsView },
     { path: '/payments', component: PaymentsView },

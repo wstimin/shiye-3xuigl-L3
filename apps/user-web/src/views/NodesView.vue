@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import QRCode from 'qrcode';
 import { Copy, QrCode, RefreshCw, Search, X } from 'lucide-vue-next';
 import { api } from '../api';
+import { notifyError, notifySuccess } from '../notify';
 
 type UserNode = {
   id: string;
@@ -43,7 +44,8 @@ async function loadNodes() {
   try {
     nodes.value = await api<UserNode[]>('/api/user/nodes');
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载失败';
+    error.value = err instanceof Error ? err.message : '加载节点失败';
+    notifyError(error.value);
   } finally {
     loading.value = false;
   }
@@ -57,9 +59,11 @@ async function renewNode(nodeId: string) {
     const months = monthsByNode.value[nodeId] || 1;
     await api('/api/user/renewals', { method: 'POST', body: { nodeId, months } });
     message.value = '续费成功，节点已同步远端';
+    notifySuccess(message.value);
     await loadNodes();
   } catch (err) {
     error.value = err instanceof Error ? err.message : '续费失败';
+    notifyError(error.value);
   } finally {
     renewingId.value = '';
   }
@@ -74,13 +78,16 @@ async function copyText(text: string) {
     } else {
       fallbackCopyText(text);
     }
-    message.value = '已复制';
+    message.value = '节点链接已复制';
+    notifySuccess(message.value, '复制成功');
   } catch (err) {
     try {
       fallbackCopyText(text);
-      message.value = '已复制';
+      message.value = '节点链接已复制';
+      notifySuccess(message.value, '复制成功');
     } catch {
       error.value = err instanceof Error ? err.message : '复制失败，请使用 HTTPS 访问后重试';
+      notifyError(error.value);
     }
   }
 }
@@ -108,6 +115,7 @@ async function showQrCode(node: UserNode, link: string, index: number) {
     };
   } catch (err) {
     error.value = err instanceof Error ? err.message : '生成二维码失败';
+    notifyError(error.value);
   }
 }
 
@@ -120,14 +128,32 @@ function formatDate(value?: string | null) {
 }
 
 function nodeSearchText(node: UserNode) {
-  return [
-    node.serviceNode.name,
-    node.serviceNode.server.name,
-    node.serviceNode.protocol,
-    node.status,
-    node.subId,
-    node.expireAt
-  ].filter(Boolean).join(' ').toLowerCase();
+  return [node.serviceNode.name, node.serviceNode.server.name, node.serviceNode.protocol, node.status, node.subId, node.expireAt].filter(Boolean).join(' ').toLowerCase();
+}
+
+function nodeStatusHint(node: UserNode) {
+  const limit = numericValue(node.trafficLimitGb);
+  const used = numericValue(node.usedTrafficGb);
+  const remaining = limit > 0 ? Math.max(limit - used, 0) : null;
+  const expireTime = node.expireAt ? new Date(node.expireAt).getTime() : null;
+  const diff = expireTime ? expireTime - Date.now() : null;
+
+  if (node.status !== 'active') return { type: 'danger', label: '已停用', text: '该节点当前不可用，请续费或联系管理员处理。' };
+  if (diff !== null && diff <= 0) return { type: 'danger', label: '已到期', text: '节点已到期，续费成功后会重新同步远端状态。' };
+  if (limit > 0 && used >= limit) return { type: 'danger', label: '流量用尽', text: '可用流量已用完，续费或增加流量后再使用。' };
+  if (diff !== null && diff <= 3 * 24 * 60 * 60 * 1000) return { type: 'warning', label: '临近到期', text: `还剩 ${daysLeft(diff)} 天到期，建议提前续费。` };
+  if (diff !== null && diff <= 7 * 24 * 60 * 60 * 1000) return { type: 'warning', label: '即将到期', text: `还剩 ${daysLeft(diff)} 天到期。` };
+  if (remaining !== null && limit > 0 && remaining / limit <= 0.1) return { type: 'warning', label: '流量不足', text: `剩余约 ${remaining.toFixed(2)} GB。` };
+  return { type: 'success', label: '正常可用', text: '节点状态正常，复制链接或扫码即可使用。' };
+}
+
+function numericValue(value: string) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function daysLeft(diffMs: number) {
+  return Math.max(Math.ceil(diffMs / 24 / 60 / 60 / 1000), 0);
 }
 
 onMounted(loadNodes);
@@ -159,8 +185,9 @@ onMounted(loadNodes);
           <h2>{{ node.serviceNode.name }}</h2>
           <p>{{ node.serviceNode.server.name }} / {{ node.serviceNode.protocol }}</p>
         </div>
-        <span class="status-pill" :class="node.status">{{ node.status === 'active' ? '正常' : '停用' }}</span>
+        <span class="status-pill" :class="[node.status, nodeStatusHint(node).type]">{{ nodeStatusHint(node).label }}</span>
       </div>
+      <div class="node-status-hint" :class="nodeStatusHint(node).type">{{ nodeStatusHint(node).text }}</div>
       <div class="node-meta">
         <span>到期：{{ formatDate(node.expireAt) }}</span>
         <span>流量：{{ node.usedTrafficGb }} / {{ node.trafficLimitGb }} GB</span>
@@ -174,7 +201,7 @@ onMounted(loadNodes);
           <button class="copy-button" type="button" title="显示二维码" @click="showQrCode(node, link, index)"><QrCode :size="15" /></button>
         </div>
       </div>
-      <div v-else class="empty-hint">{{ node.linkError ? `节点链接获取失败：${node.linkError}` : '暂未获取到 3-xui 节点链接，请联系管理员同步节点。' }}</div>
+      <div v-else class="empty-hint">{{ node.linkError ? `节点链接获取失败：${node.linkError}` : '暂未获取到 3-x-ui 节点链接，请联系管理员同步节点。' }}</div>
       <form class="renew-form" @submit.prevent="renewNode(node.id)">
         <select v-model.number="monthsByNode[node.id]">
           <option :value="1">1 个月</option>

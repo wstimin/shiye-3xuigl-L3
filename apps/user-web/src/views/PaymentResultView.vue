@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import QRCode from 'qrcode';
 import { api } from '../api';
+import { notifyError } from '../notify';
 
 type PaymentResult = { tradeNo: string; status: string; amount: string; expiresAt?: string | null; paidAt?: string | null; payUrl?: string | null; qrCode?: string | null };
 
@@ -16,6 +17,7 @@ const tradeNo = computed(() => String(route.query.trade_no || route.query.out_tr
 async function loadResult() {
   if (!tradeNo.value) {
     error.value = '缺少充值订单号';
+    notifyError(error.value);
     return;
   }
   loading.value = true;
@@ -25,6 +27,7 @@ async function loadResult() {
     qrImage.value = result.value.qrCode ? await QRCode.toDataURL(result.value.qrCode, { width: 220, margin: 1 }) : '';
   } catch (err) {
     error.value = err instanceof Error ? err.message : '查询支付结果失败';
+    notifyError(error.value);
   } finally {
     loading.value = false;
   }

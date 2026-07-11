@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue';
-import { ArrowRight, ClipboardList, CreditCard, LayoutDashboard, LockKeyhole, LogOut, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards } from 'lucide-vue-next';
+import { ArrowRight, ClipboardList, CreditCard, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards } from 'lucide-vue-next';
 import { api } from './api';
 
 type SessionUser = { role: string; username: string };
@@ -22,7 +22,8 @@ const navSections = [
     items: [
       { to: '/xui-servers', label: '面板连接', icon: Network },
       { to: '/socks-nodes', label: '出站节点', icon: ShieldCheck },
-      { to: '/sync-logs', label: '同步日志', icon: ClipboardList }
+      { to: '/sync-logs', label: '同步日志', icon: ClipboardList },
+      { to: '/diagnostics', label: '健康诊断', icon: HeartPulse }
     ]
   },
   {

@@ -193,6 +193,19 @@ https://panel.example.com/payment/result?trade_no=订单号
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
 
+重复执行一键脚本的行为是“更新部署”，不是清库重装：
+
+- 保留：`/opt/shiye/.env`、现有 MySQL 数据库、已有业务数据、已有管理员密码。
+- 覆盖：除 `.env` 外的程序运行文件、前端构建产物、后端构建产物、依赖和 systemd 服务文件。
+- 自动执行：数据库迁移、seed 幂等初始化、构建检查、运行文件检查、服务重启和健康检查。
+- 不会执行：删除数据库、清空用户、清空订单、清空卡密、清空节点配置。
+
+如果上一次选择了域名/Nginx，更新时建议继续带同样域名参数，避免 `PUBLIC_WEB_URL` 被改回 IP + 端口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | sudo env DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
+```
+
 如果你是手动上传完整源码部署，可以使用源码更新方式：
 
 ```bash

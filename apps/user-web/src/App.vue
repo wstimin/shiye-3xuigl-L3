@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { onMounted, onUnmounted, reactive, ref } from 'vue';
 import { ArrowRight, CircleUserRound, Home, LockKeyhole, LogOut, Network, ReceiptText, UserRound } from 'lucide-vue-next';
 import { api } from './api';
+import { onNotify, type NotifyPayload } from './notify';
 
 type SessionUser = { role: string; username: string };
 type Branding = { brandName: string; logoDataUrl: string };
@@ -20,6 +21,9 @@ const loginError = ref('');
 const user = ref<SessionUser | null>(null);
 const branding = reactive<Branding>({ brandName: fallbackBrandName, logoDataUrl: '' });
 const loginForm = reactive({ username: '', password: '' });
+const notices = ref<Array<NotifyPayload & { id: number }>>([]);
+let noticeId = 0;
+let stopNotify: (() => void) | undefined;
 
 async function loadBranding() {
   try {
@@ -95,13 +99,38 @@ function escapeSvg(value: string) {
   return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] || char);
 }
 
+function pushNotice(payload: NotifyPayload) {
+  const id = ++noticeId;
+  notices.value = [...notices.value, { id, ...payload }].slice(-3);
+  window.setTimeout(() => closeNotice(id), payload.type === 'error' ? 5200 : 3600);
+}
+
+function closeNotice(id: number) {
+  notices.value = notices.value.filter((notice) => notice.id !== id);
+}
+
 onMounted(async () => {
+  stopNotify = onNotify(pushNotice);
   await loadBranding();
   await loadMe();
+});
+
+onUnmounted(() => {
+  stopNotify?.();
 });
 </script>
 
 <template>
+  <div class="toast-stack" aria-live="polite">
+    <div v-for="notice in notices" :key="notice.id" class="toast-card" :class="notice.type">
+      <div>
+        <strong>{{ notice.title }}</strong>
+        <p>{{ notice.message }}</p>
+      </div>
+      <button type="button" @click="closeNotice(notice.id)">关闭</button>
+    </div>
+  </div>
+
   <div v-if="checking" class="boot-screen">正在检查登录状态</div>
 
   <div v-else-if="!user" class="login-screen">

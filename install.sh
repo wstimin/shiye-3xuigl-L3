@@ -129,12 +129,21 @@ load_existing_env_defaults() {
     return 0
   fi
 
+  log "Existing deployment detected. ${env_file} will be preserved; application files will be refreshed."
+
   existing_database_url="$(grep -E '^DATABASE_URL=' "${env_file}" | tail -n 1 | cut -d= -f2- || true)"
   if [ -z "${DATABASE_URL:-}" ] && [ -n "${existing_database_url}" ]; then
     DATABASE_URL="${existing_database_url}"
   fi
 
   return 0
+}
+
+stop_existing_service_for_update() {
+  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files "${APP_NAME}.service" >/dev/null 2>&1; then
+    log "Stopping existing service ${APP_NAME} before refreshing files"
+    systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
+  fi
 }
 
 install_node() {
@@ -588,6 +597,8 @@ main() {
 
   log "Checking MySQL"
   install_local_mysql_if_needed
+
+  stop_existing_service_for_update
 
   log "Installing project files to ${APP_DIR}"
   install_app_files

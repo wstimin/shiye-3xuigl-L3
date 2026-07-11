@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { api } from '../api';
+import { notifyError, notifySuccess } from '../notify';
 
 type SessionUser = { role: string; username: string; customerId?: string };
 
@@ -18,6 +19,7 @@ async function loadProfile() {
     user.value = await api<SessionUser>('/api/auth/me?entry=user');
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败';
+    notifyError(error.value);
   } finally {
     loading.value = false;
   }
@@ -30,9 +32,11 @@ async function changePassword() {
   try {
     await api('/api/change-password', { method: 'POST', body: form });
     message.value = '密码已修改，请重新登录';
+    notifySuccess(message.value);
     Object.assign(form, { currentPassword: '', newPassword: '' });
   } catch (err) {
     error.value = err instanceof Error ? err.message : '修改失败';
+    notifyError(error.value);
   } finally {
     changing.value = false;
   }
