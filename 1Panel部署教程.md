@@ -34,7 +34,7 @@ API 前缀：https://你的域名/api/
 默认构建包地址：`https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip`
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
 
 一键脚本部署成功后，项目由 systemd 服务 `shiye-api` 管理，不需要再到 1Panel 里创建 Node.js 运行环境。服务器上可以随时打开管理菜单：
@@ -48,7 +48,7 @@ shiye
 也可以提前带入域名和 HTTPS 参数：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
+curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
 ```
 
 继续使用 1Panel 面板部署时，按下面步骤操作。
@@ -283,7 +283,7 @@ https://你的域名/payment/result?trade_no=订单号
 如果使用一键脚本默认精简部署，运行目录不是 Git 仓库，不能直接 `git pull`。推荐重新执行一键脚本，脚本会保留现有 `.env`，优先获取最新预构建包、迁移数据库、校验并重启服务；如果预构建包不可用，会回退源码构建：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
 
 也可以执行 `shiye`，在“管理面板”菜单里选择：

@@ -36,7 +36,7 @@ README、部署文档、安装脚本、前端源码、后端源码、seed 文件
 默认构建包地址：`https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip`
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
 
 安装完成后会写入 `/usr/local/bin/shiye`，后续常用运维可以直接打开管理菜单：
@@ -68,7 +68,7 @@ shiye
 也可以提前带入域名和 HTTPS 参数，直接部署：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
+curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
 ```
 
 把仓库上传到服务器后，在项目根目录执行：
@@ -220,7 +220,7 @@ https://panel.example.com/payment/result?trade_no=订单号
 默认精简部署时，`/opt/shiye` 不是 Git 仓库，不能直接 `git pull`。推荐重新执行一键脚本，脚本会保留现有 `.env`，优先获取最新预构建包、迁移数据库、校验并重启服务；如果预构建包不可用，会回退源码构建：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
 
 重复执行一键脚本的行为是“更新部署”，不是清库重装：
@@ -233,7 +233,7 @@ curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/instal
 一键脚本默认不会在安装开头询问 Nginx。需要域名/HTTPS 时，安装完成后运行 `shiye`，选择第 6 项配置；也可以更新时显式带同样域名参数，避免 `PUBLIC_WEB_URL` 被改回 IP + 端口：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
+curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
 ```
 
 如果你是手动上传完整源码部署，可以使用源码更新方式：

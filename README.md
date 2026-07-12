@@ -33,7 +33,7 @@
 默认构建包地址：`https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip`
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh)"
 ```
 
 安装完成后脚本会写入管理菜单命令，服务器上可随时执行：
@@ -47,7 +47,7 @@ shiye
 也可以提前带入域名和 HTTPS 参数，直接部署：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env PACKAGE_URL=https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip INSTALL_SOURCE=auto DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
+curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/install.sh | env DOMAIN=panel.example.com ENABLE_NGINX=yes ENABLE_HTTPS=yes CERTBOT_EMAIL=admin@example.com bash
 ```
 
 服务器项目根目录执行：
