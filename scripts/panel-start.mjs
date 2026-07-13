@@ -192,8 +192,10 @@ function normalizeConfig(body, existing) {
 }
 
 function normalizeAdminPath(value) {
-  const trimmed = String(value || '/admin').trim() || '/admin';
-  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  const trimmed = String(value || '/admin').trim().replace(/\/+$/, '') || '/admin';
+  const path = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  if (path === '/' || /^\/api(?:\/|$)/i.test(path)) return '/admin';
+  return path;
 }
 
 function startInstall() {

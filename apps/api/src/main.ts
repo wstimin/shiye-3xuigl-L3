@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import cookieParser from 'cookie-parser';
 import express from 'express';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NestFactory } from '@nestjs/core';
@@ -33,19 +33,38 @@ function serveWebApps(server: express.Express) {
   const rootDir = findRuntimeRoot();
   const userWebDir = join(rootDir, 'dist/user-web');
   const adminWebDir = join(rootDir, 'dist/admin-web');
+  const adminStatic = express.static(adminWebDir, { index: false });
 
   if (existsSync(userWebDir)) {
     server.use(express.static(userWebDir, { index: false }));
   }
 
   if (existsSync(adminWebDir)) {
-    server.use('/admin', express.static(adminWebDir, { index: false }));
+    server.use((request, response, next) => {
+      const adminPath = currentAdminPath();
+      if (!isPathWithin(request.path, adminPath)) return next();
+      const originalUrl = request.url;
+      const stripped = originalUrl.slice(adminPath.length);
+      request.url = stripped.startsWith('/') ? stripped : `/${stripped}`;
+      adminStatic(request, response, (error?: unknown) => {
+        request.url = originalUrl;
+        if (error) return next(error);
+        return next();
+      });
+    });
   }
 
-  server.get(/^\/admin(?:\/.*)?$/, (_request, response, next) => {
+  server.get(/^\/.*$/, (request, response, next) => {
+    const adminPath = currentAdminPath();
+    if (!isPathWithin(request.path, adminPath)) {
+      if (adminPath !== '/admin' && isPathWithin(request.path, '/admin')) {
+        return response.status(404).type('text/plain').send('Admin path not found');
+      }
+      return next();
+    }
     const indexFile = join(adminWebDir, 'index.html');
     if (!existsSync(indexFile)) return next();
-    return response.sendFile(indexFile);
+    return response.type('html').send(renderAdminIndex(indexFile, adminPath));
   });
 
   server.get(/^\/(?!api(?:\/|$)).*$/, (_request, response, next) => {
@@ -53,6 +72,32 @@ function serveWebApps(server: express.Express) {
     if (!existsSync(indexFile)) return next();
     return response.sendFile(indexFile);
   });
+}
+
+function currentAdminPath() {
+  return normalizeAdminPath(process.env.ADMIN_PATH || '/admin');
+}
+
+function normalizeAdminPath(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, '') || '/admin';
+  const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  if (withLeadingSlash === '/' || /^\/api(?:\/|$)/i.test(withLeadingSlash)) return '/admin';
+  return withLeadingSlash;
+}
+
+function isPathWithin(path: string, basePath: string) {
+  return path === basePath || path.startsWith(`${basePath}/`);
+}
+
+function renderAdminIndex(indexFile: string, adminPath: string) {
+  const html = readFileSync(indexFile, 'utf8');
+  const basePath = `${adminPath}/`.replace(/\/+/g, '/');
+  const script = `<base href="${escapeHtml(basePath)}"><script>window.__SHIYE_ADMIN_BASE__=${JSON.stringify(basePath)};</script>`;
+  return /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${script}`) : `${script}${html}`;
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] || char);
 }
 
 function findRuntimeRoot() {

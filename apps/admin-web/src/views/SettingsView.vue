@@ -4,15 +4,18 @@ import { ElMessage } from 'element-plus';
 import { Upload, X } from 'lucide-vue-next';
 import { api } from '../api';
 
-type AdminSettings = { brand: { brandName: string; logoDataUrl: string }; business: { cardPurchaseUrl: string } };
+type RuntimeSettings = { adminPath: string; activeAdminPath: string; restartRequired: boolean };
+type AdminSettings = { brand: { brandName: string; logoDataUrl: string }; business: { cardPurchaseUrl: string }; runtime: RuntimeSettings };
 
 const loading = ref(false);
 const savingBrand = ref(false);
 const savingBusiness = ref(false);
+const savingRuntime = ref(false);
 const changingPassword = ref(false);
 const error = ref('');
 const brandForm = reactive({ brandName: '十夜管理系统', logoDataUrl: '' });
 const businessForm = reactive({ cardPurchaseUrl: '' });
+const runtimeForm = reactive<RuntimeSettings>({ adminPath: '/admin', activeAdminPath: '/admin', restartRequired: false });
 const passwordForm = reactive({ currentPassword: '', newPassword: '' });
 
 async function loadSettings() {
@@ -22,10 +25,31 @@ async function loadSettings() {
     const settings = await api<AdminSettings>('/api/admin/settings');
     Object.assign(brandForm, settings.brand);
     Object.assign(businessForm, settings.business || { cardPurchaseUrl: '' });
+    Object.assign(runtimeForm, settings.runtime || { adminPath: '/admin', activeAdminPath: '/admin', restartRequired: false });
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败';
   } finally {
     loading.value = false;
+  }
+}
+
+async function saveRuntime() {
+  savingRuntime.value = true;
+  error.value = '';
+  const previousAdminPath = runtimeForm.activeAdminPath;
+  try {
+    const settings = await api<AdminSettings>('/api/admin/settings', { method: 'PUT', body: { runtime: { adminPath: runtimeForm.adminPath } } });
+    Object.assign(runtimeForm, settings.runtime || { adminPath: '/admin', activeAdminPath: '/admin', restartRequired: false });
+    ElMessage.success('管理路径已保存并生效');
+    if (runtimeForm.activeAdminPath !== previousAdminPath) {
+      window.setTimeout(() => {
+        window.location.assign(`${window.location.origin}${runtimeForm.activeAdminPath}/settings`);
+      }, 400);
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '保存管理路径失败';
+  } finally {
+    savingRuntime.value = false;
   }
 }
 
@@ -158,6 +182,19 @@ onMounted(loadSettings);
       <el-form :model="businessForm" label-width="112px" v-loading="loading">
         <el-form-item label="卡密购买地址"><el-input v-model="businessForm.cardPurchaseUrl" placeholder="https://example.com/buy" /></el-form-item>
         <el-form-item><el-button type="primary" :loading="savingBusiness" @click="saveBusiness">保存业务设置</el-button></el-form-item>
+      </el-form>
+    </div>
+
+    <div class="panel">
+      <div class="panel-toolbar"><strong>运行环境</strong></div>
+      <el-form :model="runtimeForm" label-width="112px" v-loading="loading">
+        <el-form-item label="管理路径">
+          <el-input v-model="runtimeForm.adminPath" placeholder="/admin" maxlength="80" />
+        </el-form-item>
+        <el-form-item label="当前生效">
+          <span class="muted-text">{{ runtimeForm.activeAdminPath }}</span>
+        </el-form-item>
+        <el-form-item><el-button type="primary" :loading="savingRuntime" @click="saveRuntime">保存管理路径</el-button></el-form-item>
       </el-form>
     </div>
   </div>

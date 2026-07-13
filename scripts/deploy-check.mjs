@@ -11,9 +11,9 @@ const userIndex = readRequiredFile('dist/user-web/index.html');
 const nginxConfig = readRequiredFile('infra/nginx/shiye.conf');
 
 if (adminIndex) {
-  requireMatch(adminIndex, /src="\/admin\/assets\//, 'Admin build must load JS from /admin/assets/.');
-  requireMatch(adminIndex, /href="\/admin\/assets\//, 'Admin build must load CSS from /admin/assets/.');
-  forbidMatch(adminIndex, /(?:src|href)="\/assets\//, 'Admin build must not reference root /assets/.');
+  requireMatch(adminIndex, /src="\.\/assets\//, 'Admin build must load JS from relative ./assets/ so ADMIN_PATH can change at runtime.');
+  requireMatch(adminIndex, /href="\.\/assets\//, 'Admin build must load CSS from relative ./assets/ so ADMIN_PATH can change at runtime.');
+  forbidMatch(adminIndex, /(?:src|href)="\/(?:admin\/)?assets\//, 'Admin build must not reference fixed /admin/assets/ or root /assets/.');
 }
 
 if (userIndex) {

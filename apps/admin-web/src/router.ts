@@ -12,7 +12,7 @@ import PaymentsView from './views/PaymentsView.vue';
 import SettingsView from './views/SettingsView.vue';
 
 export const router = createRouter({
-  history: createWebHistory('/admin/'),
+  history: createWebHistory(adminBasePath()),
   routes: [
     { path: '/', component: DashboardView },
     { path: '/customers', component: CustomersView },
@@ -27,3 +27,9 @@ export const router = createRouter({
     { path: '/settings', component: SettingsView }
   ]
 });
+
+function adminBasePath() {
+  const runtimeBase = (window as Window & { __SHIYE_ADMIN_BASE__?: string }).__SHIYE_ADMIN_BASE__;
+  if (runtimeBase) return runtimeBase;
+  return import.meta.env.BASE_URL === './' ? '/' : import.meta.env.BASE_URL || '/admin/';
+}

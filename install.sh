@@ -244,6 +244,25 @@ resolve_public_url() {
   fi
 }
 
+current_env_value() {
+  key="$1"
+  [ -f .env ] || return 1
+  grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2-
+}
+
+resolve_admin_path() {
+  value="${ADMIN_PATH:-}"
+  if [ -z "${value}" ] && [ -f .env ]; then
+    value="$(current_env_value ADMIN_PATH || true)"
+  fi
+  value="${value:-/admin}"
+  value="$(printf "%s" "${value}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s#/*$##')"
+  [ -n "${value}" ] || value="/admin"
+  case "${value}" in /*) ;; *) value="/${value}" ;; esac
+  case "${value}" in /|/api|/api/*) value="/admin" ;; esac
+  printf "%s" "${value}"
+}
+
 escape_sed_replacement() {
   printf "%s" "$1" | sed 's/[\/&|]/\\&/g'
 }
@@ -369,13 +388,14 @@ install_app_files() {
 write_env_file() {
   cd "${APP_DIR}"
   public_url="$(resolve_public_url)"
+  admin_path="$(resolve_admin_path)"
 
   if [ -f .env ]; then
     log "Keeping existing ${APP_DIR}/.env"
     set_env_value NODE_ENV production
     set_env_value PORT "${PORT}"
     set_env_value PUBLIC_WEB_URL "${public_url}"
-    set_env_value ADMIN_PATH /admin
+    set_env_value ADMIN_PATH "${admin_path}"
     return
   fi
 
@@ -383,7 +403,7 @@ write_env_file() {
 NODE_ENV=production
 PORT=${PORT}
 PUBLIC_WEB_URL=${public_url}
-ADMIN_PATH=/admin
+ADMIN_PATH=${admin_path}
 
 DATABASE_URL=${DATABASE_URL}
 
@@ -512,7 +532,8 @@ wait_for_api_health() {
 }
 
 verify_web_routes() {
-  for path in / /admin /admin/; do
+  admin_path="$(cd "${APP_DIR}" && resolve_admin_path)"
+  for path in / "${admin_path}" "${admin_path}/"; do
     url="http://127.0.0.1:${PORT}${path}"
     content_type="$(curl -fsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
     case "${content_type}" in
@@ -1148,7 +1169,8 @@ main() {
   echo
   echo "Installation complete."
   echo "User URL:  ${base_url}/"
-  echo "Admin URL: ${base_url}/admin/"
+  admin_path="$(cd "${APP_DIR}" && resolve_admin_path)"
+  echo "Admin URL: ${base_url}${admin_path}/"
   echo "API health: ${base_url}/api/health"
   echo "Default admin username: $(grep -E '^DEFAULT_ADMIN_USERNAME=' "${APP_DIR}/.env" | tail -n 1 | cut -d= -f2-)"
   echo "Default admin password: ${admin_password}"
