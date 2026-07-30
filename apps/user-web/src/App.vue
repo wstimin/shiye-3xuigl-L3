@@ -8,6 +8,7 @@ import { onNotify, type NotifyPayload } from './notify';
 
 type SessionUser = { role: string; username: string };
 type Branding = { brandName: string; logoDataUrl: string };
+type UserIdentity = { customer: { name: string; loginUsername: string } };
 
 const fallbackBrandName = '十夜用户中心';
 const nav = [
@@ -22,6 +23,7 @@ const checking = ref(true);
 const loggingIn = ref(false);
 const loginError = ref('');
 const user = ref<SessionUser | null>(null);
+const userIdentity = ref<UserIdentity['customer'] | null>(null);
 const branding = reactive<Branding>({ brandName: fallbackBrandName, logoDataUrl: '' });
 const loginForm = reactive({ username: '', password: '' });
 const notices = ref<Array<NotifyPayload & { id: number }>>([]);
@@ -30,7 +32,9 @@ const currentPageTitle = computed(() => {
   if (route.path === '/payment/result') return '支付结果';
   return nav.find((item) => item.to === route.path)?.label || '用户中心';
 });
-const currentUserInitial = computed(() => userInitial(user.value?.username));
+const displayName = computed(() => userIdentity.value?.name || user.value?.username || '用户');
+const displayLoginUsername = computed(() => userIdentity.value?.loginUsername || user.value?.username || '');
+const currentUserInitial = computed(() => userInitial(displayName.value));
 let noticeId = 0;
 let stopNotify: (() => void) | undefined;
 
@@ -52,10 +56,22 @@ async function loadMe() {
   try {
     const session = await api<SessionUser>('/api/auth/me?entry=user');
     user.value = session.role === 'user' ? session : null;
+    if (user.value) await loadUserIdentity();
+    else userIdentity.value = null;
   } catch {
     user.value = null;
+    userIdentity.value = null;
   } finally {
     checking.value = false;
+  }
+}
+
+async function loadUserIdentity() {
+  try {
+    const payload = await api<UserIdentity>('/api/user/me');
+    userIdentity.value = payload.customer;
+  } catch {
+    userIdentity.value = null;
   }
 }
 
@@ -69,6 +85,7 @@ async function login() {
       throw new Error('当前账号不是用户账号');
     }
     user.value = session;
+    await loadUserIdentity();
     Object.assign(loginForm, { username: '', password: '' });
   } catch (err) {
     loginError.value = err instanceof Error ? err.message : '登录失败';
@@ -80,6 +97,7 @@ async function login() {
 async function logout() {
   await api('/api/logout', { method: 'POST', body: { entry: 'user' } }).catch(() => undefined);
   user.value = null;
+  userIdentity.value = null;
   mobileNavOpen.value = false;
 }
 
@@ -248,10 +266,10 @@ watch(() => route.fullPath, () => {
       </nav>
       <div class="user-sidebar-footer">
         <div class="sidebar-user-card">
-          <span class="user-avatar" :style="userAvatarStyle(user.username)" aria-hidden="true">{{ currentUserInitial }}</span>
+          <span class="user-avatar" :style="userAvatarStyle(displayName)" aria-hidden="true">{{ currentUserInitial }}</span>
           <span class="sidebar-user-copy">
-            <strong>{{ user.username }}</strong>
-            <small>用户账号</small>
+            <strong>{{ displayName }}</strong>
+            <small v-if="displayLoginUsername">@{{ displayLoginUsername }}</small>
           </span>
         </div>
         <button class="logout-button" type="button" @click="logout"><LogOut :size="16" />退出登录</button>
