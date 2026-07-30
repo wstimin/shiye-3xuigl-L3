@@ -106,6 +106,7 @@ const renewingIds = ref<Set<string>>(new Set());
 const trafficIds = ref<Set<string>>(new Set());
 const resettingTrafficIds = ref<Set<string>>(new Set());
 const deletingServiceNodeIds = ref<Set<string>>(new Set());
+const deletingCustomerIds = ref<Set<string>>(new Set());
 const togglingCustomerIds = ref<Set<string>>(new Set());
 const readingPasswordIds = ref<Set<string>>(new Set());
 const customerTotal = ref(0);
@@ -515,14 +516,36 @@ function editCustomer(customer: Customer) {
 }
 
 async function removeCustomer(customer: Customer) {
-  await ElMessageBox.confirm(`确认删除用户「${customer.name}」？系统只会删除面板用户和本地绑定，不会删除路由节点或远端 3x-ui 入站/客户端。`, '删除确认', { type: 'warning', customClass: 'customer-dark-message-box' });
-  await api(`/api/admin/customers/${customer.id}`, { method: 'DELETE' });
-  ElMessage.success('用户已删除');
-  if (editingCustomerId.value === customer.id) resetCustomerForm();
-  await loadCustomers();
+  try {
+    await ElMessageBox.confirm(`确认删除用户「${customer.name}」？系统只会删除面板用户和本地绑定，不会删除路由节点或远端 3x-ui 入站/客户端。`, '删除确认', {
+      type: 'warning',
+      customClass: 'customer-dark-message-box',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+
+  error.value = '';
+  deletingCustomerIds.value = new Set(deletingCustomerIds.value).add(customer.id);
+  try {
+    await api(`/api/admin/customers/${customer.id}`, { method: 'DELETE' });
+    ElMessage.success('用户已删除');
+    if (editingCustomerId.value === customer.id) resetCustomerForm();
+    await loadCustomers();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '删除用户失败';
+    ElMessage.error(error.value);
+  } finally {
+    const next = new Set(deletingCustomerIds.value);
+    next.delete(customer.id);
+    deletingCustomerIds.value = next;
+  }
 }
 
 async function handleCustomerCommand(customer: Customer, command: string) {
+  if (command === 'edit') return editCustomer(customer);
   if (command === 'bind') return openBindDialog(customer);
   if (command === 'balance') return openBalanceDialog(customer);
   if (command === 'toggle') return toggleCustomerStatus(customer, customer.status !== 'active');
@@ -771,16 +794,15 @@ onMounted(loadCustomers);
         <footer class="customer-card-actions">
           <el-button type="primary" plain @click="openCustomerNodesDialog(customer)"><Link2 :size="14" />节点详情</el-button>
           <el-button class="customer-secondary-button" @click="editCustomer(customer)"><Edit3 :size="14" />编辑</el-button>
-          <el-dropdown trigger="click" @command="(command: string) => handleCustomerCommand(customer, command)">
-            <el-tooltip content="更多操作" placement="top">
-              <el-button class="customer-more-button" aria-label="更多操作"><MoreHorizontal :size="17" /></el-button>
-            </el-tooltip>
+          <el-dropdown trigger="click" placement="bottom-end" @command="(command: string) => handleCustomerCommand(customer, command)">
+            <el-button class="customer-more-button" aria-label="更多操作" title="更多操作"><MoreHorizontal :size="17" /></el-button>
             <template #dropdown>
               <el-dropdown-menu class="customer-action-menu">
+                <el-dropdown-item command="edit"><Edit3 :size="14" />编辑用户</el-dropdown-item>
                 <el-dropdown-item command="bind"><Link2 :size="14" />绑定节点</el-dropdown-item>
                 <el-dropdown-item command="balance"><Wallet :size="14" />调整余额</el-dropdown-item>
-                <el-dropdown-item command="toggle"><Ban :size="14" />{{ customer.status === 'active' ? '禁用用户' : '启用用户' }}</el-dropdown-item>
-                <el-dropdown-item command="delete" divided><Trash2 :size="14" />删除用户</el-dropdown-item>
+                <el-dropdown-item command="toggle" :disabled="togglingCustomerIds.has(customer.id)"><Ban :size="14" />{{ customer.status === 'active' ? '禁用用户' : '启用用户' }}</el-dropdown-item>
+                <el-dropdown-item command="delete" divided :disabled="deletingCustomerIds.has(customer.id)"><Trash2 :size="14" />{{ deletingCustomerIds.has(customer.id) ? '正在删除' : '删除用户' }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
