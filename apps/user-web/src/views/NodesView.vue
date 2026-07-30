@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import QRCode from 'qrcode';
-import { Copy, QrCode, RefreshCw, Search, X } from 'lucide-vue-next';
+import { Activity, CalendarClock, Copy, ListFilter, Network, QrCode, RefreshCw, Search, X } from 'lucide-vue-next';
 import { api } from '../api';
 import { notifyError, notifySuccess } from '../notify';
 
@@ -38,6 +38,10 @@ const expiringCount = computed(() => nodes.value.filter((node) => {
   const diff = new Date(node.expireAt).getTime() - Date.now();
   return diff > 0 && diff <= 7 * 24 * 60 * 60 * 1000;
 }).length);
+const trafficPercent = (node: UserNode) => {
+  const limit = numericValue(node.trafficLimitGb);
+  return limit > 0 ? Math.min((numericValue(node.usedTrafficGb) / limit) * 100, 100) : 0;
+};
 
 async function loadNodes() {
   loading.value = true;
@@ -166,17 +170,26 @@ onMounted(loadNodes);
 </script>
 
 <template>
-  <div class="page-heading">
+  <div class="user-page">
+  <div class="user-page-header">
     <div>
-      <h1 class="page-title">我的节点</h1>
-      <p class="page-subtitle">{{ activeCount }} 个可用，{{ expiringCount }} 个 7 天内到期</p>
+      <span class="user-page-kicker">NODE SERVICES</span>
+      <h2>我的节点</h2>
+      <p>查看真实节点状态、连接链接、二维码、流量与续费信息。</p>
     </div>
-    <button class="icon-action" :disabled="loading" @click="loadNodes"><RefreshCw :size="16" />刷新</button>
+    <button class="user-action-button secondary" type="button" :disabled="loading" @click="loadNodes"><RefreshCw :size="16" />刷新节点</button>
   </div>
-  <div v-if="message" class="panel success-text">{{ message }}</div>
-  <div v-if="error" class="panel error-text">{{ error }}</div>
+  <div v-if="message" class="user-feedback success">{{ message }}</div>
+  <div v-if="error" class="user-feedback error">{{ error }}</div>
 
-  <div v-if="!error" class="panel node-filter-panel">
+  <div v-if="!error" class="node-stat-grid">
+    <article><i class="purple"><Network :size="17" /></i><span>全部节点</span><strong>{{ nodes.length }}</strong></article>
+    <article><i class="green"><Activity :size="17" /></i><span>正常可用</span><strong>{{ activeCount }}</strong></article>
+    <article><i class="orange"><CalendarClock :size="17" /></i><span>7 天内到期</span><strong>{{ expiringCount }}</strong></article>
+    <article><i class="blue"><ListFilter :size="17" /></i><span>当前结果</span><strong>{{ filteredNodes.length }}</strong></article>
+  </div>
+
+  <div v-if="!error" class="user-section-card node-filter-panel">
     <label class="search-field">
       <Search :size="16" />
       <input v-model="searchQuery" placeholder="搜索节点、服务器、协议、状态" />
@@ -185,7 +198,7 @@ onMounted(loadNodes);
   </div>
 
   <div v-if="!error" class="node-list" :class="{ loading }">
-    <article v-for="node in filteredNodes" :key="node.id" class="panel node-card">
+    <article v-for="node in filteredNodes" :key="node.id" class="user-section-card node-card">
       <div class="node-card-head">
         <div>
           <h2>{{ node.serviceNode.name }}</h2>
@@ -194,9 +207,12 @@ onMounted(loadNodes);
         <span class="status-pill" :class="[node.status, nodeStatusHint(node).type]">{{ nodeStatusHint(node).label }}</span>
       </div>
       <div class="node-status-hint" :class="nodeStatusHint(node).type">{{ nodeStatusHint(node).text }}</div>
+      <div class="node-traffic-block">
+        <div><span>流量使用</span><strong>{{ node.usedTrafficGb }} / {{ node.trafficLimitGb }} GB</strong></div>
+        <span class="node-traffic-track"><i :class="nodeStatusHint(node).type" :style="{ width: `${trafficPercent(node)}%` }"></i></span>
+      </div>
       <div class="node-meta">
         <span>到期：{{ formatDate(node.expireAt) }}</span>
-        <span>流量：{{ node.usedTrafficGb }} / {{ node.trafficLimitGb }} GB</span>
         <span>月费：{{ node.serviceNode.priceMonthly }} 元</span>
         <span v-if="node.subId">订阅标识：{{ node.subId }}</span>
       </div>
@@ -218,7 +234,7 @@ onMounted(loadNodes);
         <button :disabled="renewingId === node.id">{{ renewingId === node.id ? '续费中' : '余额续费' }}</button>
       </form>
     </article>
-    <div v-if="!loading && !filteredNodes.length" class="panel">暂无节点</div>
+    <div v-if="!loading && !filteredNodes.length" class="user-empty-state user-section-card">暂无符合条件的节点</div>
   </div>
 
   <div v-if="qrPreview" class="qr-modal" @click.self="closeQrCode">
@@ -240,5 +256,6 @@ onMounted(loadNodes);
       <p class="message-modal-text">{{ renewErrorDialog.message }}</p>
       <button class="modal-primary-button" type="button" @click="closeRenewError">知道了</button>
     </div>
+  </div>
   </div>
 </template>

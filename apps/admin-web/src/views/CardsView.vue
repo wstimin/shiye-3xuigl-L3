@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Copy, CreditCard, Download, Edit3, Layers, Plus, RefreshCw, Trash2 } from 'lucide-vue-next';
+import { Copy, CreditCard, Download, Edit3, Layers, LayoutTemplate, Plus, RefreshCw, TicketCheck, TicketX, Trash2 } from 'lucide-vue-next';
 import { api } from '../api';
 
 type CardTemplate = { id: string; name: string; amount: string; quantity: number; prefix?: string | null; enabled: boolean; remark?: string | null };
@@ -350,7 +350,7 @@ onMounted(loadCards);
 
 <template>
   <div class="operations-page cards-page" :class="{ loading }">
-  <div class="page-head">
+  <div class="page-head operations-page-header">
     <div class="page-head-main">
       <h1 class="page-title">卡密管理</h1>
       <p>按模板归档卡密批次，新生成的卡密会保留在对应批次里，刷新后仍可继续复制未使用卡密。</p>
@@ -363,14 +363,14 @@ onMounted(loadCards);
   </div>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
-  <div class="metric-grid compact-metrics">
-    <div class="metric"><span>模板</span><strong>{{ templateCount }}</strong><small>可按模板继续追加批次</small></div>
-    <div class="metric"><span>批次</span><strong>{{ batchCount }}</strong><small>同模板批次集中展示</small></div>
-    <div class="metric"><span>未使用卡密</span><strong>{{ unusedCardCount }}</strong><small>可一键复制或清理</small></div>
-    <div class="metric"><span>已使用记录</span><strong>{{ usedCardCount }}</strong><small>可按批次或全局清除</small></div>
+  <div class="metric-grid compact-metrics operations-stat-grid">
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-indigo"><LayoutTemplate :size="19" /></span><div><span>模板</span><strong>{{ templateCount }}</strong><small>可按模板继续追加批次</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-cyan"><Layers :size="19" /></span><div><span>批次</span><strong>{{ batchCount }}</strong><small>同模板批次集中展示</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-emerald"><TicketCheck :size="19" /></span><div><span>未使用卡密</span><strong>{{ unusedCardCount }}</strong><small>可一键复制或清理</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-amber"><TicketX :size="19" /></span><div><span>已使用记录</span><strong>{{ usedCardCount }}</strong><small>可按批次或全局清除</small></div></div>
   </div>
 
-  <div class="panel list-panel">
+  <div class="panel list-panel operations-content-card cards-business-card">
     <div class="panel-toolbar">
       <strong>卡密业务</strong>
     </div>

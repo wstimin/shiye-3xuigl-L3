@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue';
-import { ArrowRight, CalendarClock, CircleAlert, CircleUserRound, Gauge, Home, LockKeyhole, LogOut, Network, QrCode, ReceiptText, ShieldCheck, UserRound } from 'lucide-vue-next';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { ArrowRight, CalendarClock, CircleAlert, CircleUserRound, Gauge, Home, LockKeyhole, LogOut, Menu, Network, QrCode, ReceiptText, ShieldCheck, TicketCheck, UserRound, WalletCards, X } from 'lucide-vue-next';
 import { api } from './api';
+import { userAvatarStyle, userInitial } from './avatar';
 import { onNotify, type NotifyPayload } from './notify';
 
 type SessionUser = { role: string; username: string };
@@ -9,12 +11,13 @@ type Branding = { brandName: string; logoDataUrl: string };
 
 const fallbackBrandName = '十夜用户中心';
 const nav = [
-  { to: '/', label: '首页', icon: Home },
-  { to: '/nodes', label: '节点', icon: Network },
-  { to: '/finance', label: '财务', icon: ReceiptText },
-  { to: '/profile', label: '资料', icon: CircleUserRound }
+  { to: '/', label: '用户概览', icon: Home },
+  { to: '/nodes', label: '我的节点', icon: Network },
+  { to: '/finance', label: '账户财务', icon: ReceiptText },
+  { to: '/profile', label: '个人设置', icon: CircleUserRound }
 ];
 
+const route = useRoute();
 const checking = ref(true);
 const loggingIn = ref(false);
 const loginError = ref('');
@@ -22,6 +25,12 @@ const user = ref<SessionUser | null>(null);
 const branding = reactive<Branding>({ brandName: fallbackBrandName, logoDataUrl: '' });
 const loginForm = reactive({ username: '', password: '' });
 const notices = ref<Array<NotifyPayload & { id: number }>>([]);
+const mobileNavOpen = ref(false);
+const currentPageTitle = computed(() => {
+  if (route.path === '/payment/result') return '支付结果';
+  return nav.find((item) => item.to === route.path)?.label || '用户中心';
+});
+const currentUserInitial = computed(() => userInitial(user.value?.username));
 let noticeId = 0;
 let stopNotify: (() => void) | undefined;
 
@@ -71,6 +80,7 @@ async function login() {
 async function logout() {
   await api('/api/logout', { method: 'POST', body: { entry: 'user' } }).catch(() => undefined);
   user.value = null;
+  mobileNavOpen.value = false;
 }
 
 function applyBrowserBranding(settings: Branding) {
@@ -117,6 +127,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopNotify?.();
+});
+
+watch(() => route.fullPath, () => {
+  mobileNavOpen.value = false;
 });
 </script>
 
@@ -212,12 +226,19 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <div v-else class="app-shell">
+  <div v-else class="user-app-shell" :class="{ 'mobile-nav-open': mobileNavOpen }">
+    <button v-if="mobileNavOpen" class="user-nav-backdrop" type="button" aria-label="关闭导航" @click="mobileNavOpen = false"></button>
     <aside class="user-sidebar">
-      <div class="header-brand">
-        <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
-        <span v-else class="brand-mark">{{ branding.brandName.slice(0, 1) }}</span>
-        <strong>{{ branding.brandName }}</strong>
+      <div class="user-sidebar-brand">
+        <span class="user-brand-logo">
+          <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
+          <span v-else>{{ branding.brandName.slice(0, 1) }}</span>
+        </span>
+        <span class="user-brand-copy">
+          <strong>{{ branding.brandName }}</strong>
+          <small>用户服务中心</small>
+        </span>
+        <button class="mobile-nav-close" type="button" title="关闭导航" @click="mobileNavOpen = false"><X :size="18" /></button>
       </div>
       <nav class="user-nav">
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="nav-link">
@@ -226,13 +247,31 @@ onUnmounted(() => {
         </router-link>
       </nav>
       <div class="user-sidebar-footer">
-        <span>当前账号</span>
-        <strong>{{ user.username }}</strong>
-        <button class="logout-button" @click="logout"><LogOut :size="16" />退出</button>
+        <div class="sidebar-user-card">
+          <span class="user-avatar" :style="userAvatarStyle(user.username)" aria-hidden="true">{{ currentUserInitial }}</span>
+          <span class="sidebar-user-copy">
+            <strong>{{ user.username }}</strong>
+            <small>用户账号</small>
+          </span>
+        </div>
+        <button class="logout-button" type="button" @click="logout"><LogOut :size="16" />退出登录</button>
+        <span class="user-version">Version 1.0.1</span>
       </div>
     </aside>
-    <main class="main">
-      <router-view />
-    </main>
+    <div class="user-workspace">
+      <header class="user-topbar">
+        <div class="user-topbar-title">
+          <button class="mobile-menu-button" type="button" title="打开导航" @click="mobileNavOpen = true"><Menu :size="19" /></button>
+          <h1>{{ currentPageTitle }}</h1>
+        </div>
+        <div class="user-topbar-actions">
+          <router-link to="/finance" class="topbar-button secondary"><TicketCheck :size="16" />卡密兑换</router-link>
+          <router-link to="/finance" class="topbar-button primary"><WalletCards :size="16" />余额充值</router-link>
+        </div>
+      </header>
+      <main class="user-main">
+        <router-view />
+      </main>
+    </div>
   </div>
 </template>

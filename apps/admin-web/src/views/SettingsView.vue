@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Upload, X } from 'lucide-vue-next';
+import { Link2, LockKeyhole, Palette, RefreshCw, Route, Upload, X } from 'lucide-vue-next';
 import { api } from '../api';
 
 type RuntimeSettings = { adminPath: string; activeAdminPath: string; restartRequired: boolean };
@@ -143,12 +143,20 @@ onMounted(loadSettings);
 
 <template>
   <div class="operations-page settings-page" :class="{ loading }">
-  <h1 class="page-title">系统设置</h1>
+  <div class="page-head operations-page-header">
+    <div class="page-head-main">
+      <h1 class="page-title">系统设置</h1>
+      <p>管理面板品牌、管理员安全、卡密购买入口和后台访问路径。</p>
+    </div>
+    <div class="page-actions">
+      <el-button :loading="loading" @click="loadSettings"><RefreshCw :size="15" />刷新配置</el-button>
+    </div>
+  </div>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
   <div class="settings-grid">
-    <div class="panel">
-      <div class="panel-toolbar"><strong>品牌设置</strong></div>
+    <div class="panel settings-module-card tone-indigo">
+      <div class="settings-module-head"><span class="settings-module-icon"><Palette :size="19" /></span><div><strong>品牌设置</strong><span>管理后台名称、Logo 与登录页品牌展示。</span></div></div>
       <el-form :model="brandForm" label-width="88px" v-loading="loading">
         <el-form-item label="系统名称"><el-input v-model="brandForm.brandName" maxlength="80" /></el-form-item>
         <el-form-item label="Logo">
@@ -169,8 +177,8 @@ onMounted(loadSettings);
       </el-form>
     </div>
 
-    <div class="panel">
-      <div class="panel-toolbar"><strong>账号安全</strong></div>
+    <div class="panel settings-module-card tone-rose">
+      <div class="settings-module-head"><span class="settings-module-icon"><LockKeyhole :size="19" /></span><div><strong>账号安全</strong><span>更新当前管理员账号的登录密码。</span></div></div>
       <el-form :model="passwordForm" label-width="88px" autocomplete="off">
         <el-form-item label="当前密码"><el-input v-model="passwordForm.currentPassword" name="shiye-current-passcode" type="password" show-password autocomplete="new-password" maxlength="256" /></el-form-item>
         <el-form-item label="新密码"><el-input v-model="passwordForm.newPassword" name="shiye-next-passcode" type="password" show-password autocomplete="new-password" minlength="8" maxlength="256" /></el-form-item>
@@ -178,16 +186,16 @@ onMounted(loadSettings);
       </el-form>
     </div>
 
-    <div class="panel">
-      <div class="panel-toolbar"><strong>业务设置</strong></div>
+    <div class="panel settings-module-card tone-emerald">
+      <div class="settings-module-head"><span class="settings-module-icon"><Link2 :size="19" /></span><div><strong>业务设置</strong><span>配置用户端可访问的卡密购买入口。</span></div></div>
       <el-form :model="businessForm" label-width="112px" v-loading="loading">
         <el-form-item label="卡密购买地址"><el-input v-model="businessForm.cardPurchaseUrl" type="url" placeholder="https://example.com/buy" /></el-form-item>
         <el-form-item><el-button type="primary" :loading="savingBusiness" @click="saveBusiness">保存业务设置</el-button></el-form-item>
       </el-form>
     </div>
 
-    <div class="panel">
-      <div class="panel-toolbar"><strong>运行环境</strong></div>
+    <div class="panel settings-module-card tone-cyan">
+      <div class="settings-module-head"><span class="settings-module-icon"><Route :size="19" /></span><div><strong>运行环境</strong><span>调整管理后台路径并查看当前生效地址。</span></div></div>
       <el-form :model="runtimeForm" label-width="112px" v-loading="loading">
         <el-form-item label="管理路径">
           <el-input v-model="runtimeForm.adminPath" placeholder="/admin" maxlength="80" />

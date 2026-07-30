@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-vue-next';
+import { CircleCheckBig, Landmark, ReceiptText, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, WalletCards } from 'lucide-vue-next';
 import { api } from '../api';
 
 type RechargeOrder = {
@@ -288,21 +288,29 @@ onMounted(loadFinance);
 
 <template>
   <div class="operations-page finance-page" :class="{ loading }">
-  <h1 class="page-title">财务中心</h1>
+  <div class="page-head operations-page-header">
+    <div class="page-head-main">
+      <h1 class="page-title">财务中心</h1>
+      <p>集中查看在线充值订单、账户余额流水和支付通道状态，所有记录均来自真实业务数据。</p>
+    </div>
+    <div class="page-actions">
+      <el-button :loading="loading" @click="loadFinance()"><RefreshCw :size="15" />刷新</el-button>
+    </div>
+  </div>
   <el-alert v-if="!paymentChannels.some((item) => item.enabled)" class="page-alert" title="尚未启用在线支付方式；用户仍可使用卡密兑换，管理员也可手工调整余额。" type="warning" show-icon :closable="false" />
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
-  <div class="metric-grid">
-    <div class="metric"><span>充值订单</span><strong>{{ orderTotal }}</strong><small>当前页成功 {{ paidOrders }} / 待支付 {{ pendingOrders }}</small></div>
-    <div class="metric"><span>余额流水</span><strong>{{ logTotal }}</strong><small>当前页 {{ logs.length }} 条</small></div>
-    <div class="metric"><span>支付通道</span><strong>{{ enabledChannels }}</strong><small>已启用通道</small></div>
-    <div class="metric"><span>财务状态</span><strong>{{ enabledChannels ? '正常' : '待配置' }}</strong><small>{{ enabledChannels ? '用户可在线充值' : '仅卡密/手动充值' }}</small></div>
+  <div class="metric-grid operations-stat-grid">
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-indigo"><ReceiptText :size="19" /></span><div><span>充值订单</span><strong>{{ orderTotal }}</strong><small>当前页成功 {{ paidOrders }} / 待支付 {{ pendingOrders }}</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-cyan"><WalletCards :size="19" /></span><div><span>余额流水</span><strong>{{ logTotal }}</strong><small>当前页 {{ logs.length }} 条</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-emerald"><Landmark :size="19" /></span><div><span>支付通道</span><strong>{{ enabledChannels }}</strong><small>已启用通道</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon" :class="enabledChannels ? 'tone-emerald' : 'tone-amber'"><component :is="enabledChannels ? CircleCheckBig : ShieldCheck" :size="19" /></span><div><span>财务状态</span><strong>{{ enabledChannels ? '正常' : '待配置' }}</strong><small>{{ enabledChannels ? '用户可在线充值' : '仅卡密/手动充值' }}</small></div></div>
   </div>
 
-  <div class="panel list-panel">
+  <div class="panel list-panel operations-content-card finance-record-card">
     <div class="panel-toolbar">
       <strong>财务记录</strong>
-      <el-button size="small" :loading="loading" @click="loadFinance()"><RefreshCw :size="15" />刷新</el-button>
+      <span class="muted-text">订单与流水按真实业务记录汇总</span>
     </div>
     <el-collapse v-model="activePanels" class="admin-collapse">
       <el-collapse-item name="orders">

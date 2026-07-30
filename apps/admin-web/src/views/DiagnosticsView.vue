@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { AlertTriangle, Database, RefreshCw, Server, Timer } from 'lucide-vue-next';
+import { AlertTriangle, CircleCheckBig, Database, PanelTop, RefreshCw, Server, ShoppingCart, Timer, UsersRound } from 'lucide-vue-next';
 import { api } from '../api';
 
 type CheckStatus = 'ok' | 'warning' | 'error' | 'skipped';
@@ -101,7 +101,7 @@ onMounted(loadDiagnostics);
 
 <template>
   <div class="operations-page diagnostics-page" :class="{ loading }">
-  <div class="page-head">
+  <div class="page-head operations-page-header">
     <div class="page-head-main">
       <h1 class="page-title">健康诊断</h1>
       <p>集中检查 API、数据库、自动任务、3-x-ui 面板连接和最近失败同步日志。</p>
@@ -112,27 +112,27 @@ onMounted(loadDiagnostics);
   </div>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
-  <div v-if="diagnostics" class="metric-grid compact-metrics" :class="{ loading }">
-    <div class="metric"><span>整体状态</span><strong>{{ statusLabel(diagnostics.summary.status) }}</strong><small>{{ summaryText() }}</small></div>
-    <div class="metric"><span>用户 / 路由节点</span><strong>{{ diagnostics.counts.activeCustomers }}/{{ diagnostics.counts.enabledServiceNodes }}</strong><small>启用用户 / 启用路由节点</small></div>
-    <div class="metric"><span>面板连接</span><strong>{{ diagnostics.counts.enabledXuiServers }}/{{ diagnostics.counts.xuiServers }}</strong><small>启用面板 / 总面板</small></div>
-    <div class="metric"><span>待支付订单</span><strong>{{ diagnostics.counts.pendingOrders }}</strong><small>pending 状态订单数量</small></div>
+  <div v-if="diagnostics" class="metric-grid compact-metrics operations-stat-grid" :class="{ loading }">
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-emerald"><CircleCheckBig :size="19" /></span><div><span>整体状态</span><strong>{{ statusLabel(diagnostics.summary.status) }}</strong><small>{{ summaryText() }}</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-indigo"><UsersRound :size="19" /></span><div><span>用户 / 路由节点</span><strong>{{ diagnostics.counts.activeCustomers }}/{{ diagnostics.counts.enabledServiceNodes }}</strong><small>启用用户 / 启用路由节点</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-cyan"><PanelTop :size="19" /></span><div><span>面板连接</span><strong>{{ diagnostics.counts.enabledXuiServers }}/{{ diagnostics.counts.xuiServers }}</strong><small>启用面板 / 总面板</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-amber"><ShoppingCart :size="19" /></span><div><span>待支付订单</span><strong>{{ diagnostics.counts.pendingOrders }}</strong><small>pending 状态订单数量</small></div></div>
   </div>
 
   <div class="diagnostic-grid" v-if="diagnostics">
-    <div class="panel diagnostic-card">
+    <div class="panel diagnostic-card operations-service-card tone-indigo">
       <div class="diagnostic-card-head"><Database :size="20" /><strong>数据库</strong><el-tag :type="statusType(databaseCheck?.status)">{{ statusLabel(databaseCheck?.status) }}</el-tag></div>
       <p>{{ databaseCheck?.message || '未检查' }}</p>
       <small>{{ formatDate(databaseCheck?.checkedAt) }}</small>
     </div>
-    <div class="panel diagnostic-card">
+    <div class="panel diagnostic-card operations-service-card tone-cyan">
       <div class="diagnostic-card-head"><Timer :size="20" /><strong>自动任务</strong><el-tag :type="statusType(jobsCheck?.status)">{{ statusLabel(jobsCheck?.status) }}</el-tag></div>
       <p>{{ jobsCheck?.message || '未检查' }}</p>
       <small>{{ formatDate(jobsCheck?.checkedAt) }}</small>
     </div>
   </div>
 
-  <div class="panel list-panel" v-if="diagnostics">
+  <div class="panel list-panel operations-content-card diagnostics-panel-card" v-if="diagnostics">
     <div class="panel-toolbar">
       <strong>3-x-ui 面板连接检查</strong>
       <span class="muted-text">只检查已启用的面板连接</span>
@@ -146,7 +146,7 @@ onMounted(loadDiagnostics);
     </div>
   </div>
 
-  <div class="panel list-panel" v-if="diagnostics">
+  <div class="panel list-panel operations-content-card diagnostics-failure-card" v-if="diagnostics">
     <div class="panel-toolbar">
       <strong>最近异常同步</strong>
       <span class="muted-text">最近 10 条失败或部分成功记录</span>

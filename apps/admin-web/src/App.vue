@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ArrowRight, CircleAlert, ClipboardList, CreditCard, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards } from 'lucide-vue-next';
+import { ArrowRight, CircleAlert, ClipboardList, CreditCard, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
 import { api } from './api';
 
 type SessionUser = { role: string; username: string };
@@ -9,6 +9,7 @@ type Branding = { brandName: string; logoDataUrl: string };
 
 const fallbackBrandName = '十夜管理后台';
 const brandingUpdatedEvent = 'shiye:branding-updated';
+const appVersion = '1.0.1';
 const navSections = [
   { label: '总览看板', items: [{ to: '/', label: '数据概览', icon: LayoutDashboard }] },
   {
@@ -41,6 +42,7 @@ const navSections = [
 const checking = ref(true);
 const loggingIn = ref(false);
 const loginError = ref('');
+const mobileNavOpen = ref(false);
 const user = ref<SessionUser | null>(null);
 const branding = reactive<Branding>({ brandName: fallbackBrandName, logoDataUrl: '' });
 const loginForm = reactive({ username: '', password: '' });
@@ -61,6 +63,10 @@ const currentRouteLabel = computed(() => {
   if (route.path === '/payments') return '\u652f\u4ed8\u8bbe\u7f6e';
   if (route.path === '/settings') return '\u7cfb\u7edf\u8bbe\u7f6e';
   return '';
+});
+
+watch(() => route.path, () => {
+  mobileNavOpen.value = false;
 });
 
 async function loadBranding() {
@@ -107,6 +113,7 @@ async function login() {
 }
 
 async function logout() {
+  mobileNavOpen.value = false;
   await api('/api/logout', { method: 'POST', body: { entry: 'admin' } }).catch(() => undefined);
   user.value = null;
 }
@@ -237,17 +244,19 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <el-container v-else class="shell" :class="{ 'overview-shell': isDarkAdminRoute }">
-    <el-aside width="220px" class="sidebar">
+  <el-container v-else class="shell" :class="{ 'overview-shell': isDarkAdminRoute, 'mobile-nav-open': mobileNavOpen }">
+    <button v-if="mobileNavOpen" class="mobile-nav-backdrop" type="button" aria-label="关闭导航" @click="mobileNavOpen = false"></button>
+    <el-aside width="220px" class="sidebar" aria-label="管理后台导航">
       <div class="brand">
         <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
         <span v-else class="brand-mark">{{ branding.brandName.slice(0, 1) }}</span>
         <strong>{{ branding.brandName }}</strong>
+        <button class="mobile-nav-close" type="button" aria-label="关闭导航" title="关闭导航" @click="mobileNavOpen = false"><X :size="18" /></button>
       </div>
       <nav class="sidebar-scroll">
         <section v-for="section in navSections" :key="section.label" class="nav-section">
           <div class="nav-section-title">{{ section.label }}</div>
-          <router-link v-for="item in section.items" :key="item.to" :to="item.to" class="nav-item">
+          <router-link v-for="item in section.items" :key="item.to" :to="item.to" class="nav-item" :title="item.label">
             <component :is="item.icon" :size="18" />
             <span>{{ item.label }}</span>
           </router-link>
@@ -262,11 +271,13 @@ onUnmounted(() => {
           </div>
         </div>
         <el-button text class="logout-button" @click="logout"><LogOut :size="16" />退出登录</el-button>
+        <div class="sidebar-version" aria-label="当前版本">Version {{ appVersion }}</div>
       </div>
     </el-aside>
     <el-container class="admin-workspace">
       <el-header class="topbar">
         <div class="topbar-heading">
+          <button class="mobile-nav-toggle" type="button" aria-label="打开导航" title="打开导航" @click="mobileNavOpen = true"><Menu :size="19" /></button>
           <strong>管理后台</strong>
           <span v-if="currentRouteLabel">/ <b>{{ currentRouteLabel }}</b></span>
         </div>

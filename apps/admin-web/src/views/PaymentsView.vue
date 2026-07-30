@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Banknote, CircleDollarSign, Eye, Landmark, QrCode } from 'lucide-vue-next';
+import { Banknote, CheckCircle2, CircleDollarSign, CreditCard, Eye, Landmark, Plus, QrCode, RefreshCw, ShieldCheck } from 'lucide-vue-next';
 import { api } from '../api';
 
 type PaymentProvider = 'alipay' | 'wechat' | 'epay' | 'bepusdt';
@@ -305,14 +305,23 @@ onMounted(loadChannels);
 
 <template>
   <div class="operations-page payments-page" :class="{ loading }">
-  <h1 class="page-title">支付设置</h1>
+  <div class="page-head operations-page-header">
+    <div class="page-head-main">
+      <h1 class="page-title">支付设置</h1>
+      <p>管理用户在线充值使用的真实支付通道、接口凭据、回调地址和启停状态。</p>
+    </div>
+    <div class="page-actions">
+      <el-button type="primary" @click="openChannelDialog()"><Plus :size="15" />新增通道</el-button>
+      <el-button :loading="loading" @click="loadChannels"><RefreshCw :size="15" />刷新</el-button>
+    </div>
+  </div>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
-  <div class="metric-grid compact-metrics">
-    <div class="metric"><span>支付通道</span><strong>{{ channels.length }}</strong><small>启用 {{ activeChannelCount }}</small></div>
-    <div class="metric"><span>支付宝</span><strong>{{ channels.filter((item) => item.provider === 'alipay').length }}</strong><small>官方通道</small></div>
-    <div class="metric"><span>微信支付</span><strong>{{ channels.filter((item) => item.provider === 'wechat').length }}</strong><small>官方通道</small></div>
-    <div class="metric"><span>易支付</span><strong>{{ channels.filter((item) => item.provider === 'epay').length }}</strong><small>聚合通道</small></div>
+  <div class="metric-grid compact-metrics operations-stat-grid">
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-indigo"><CreditCard :size="19" /></span><div><span>支付通道</span><strong>{{ channels.length }}</strong><small>启用 {{ activeChannelCount }}</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-emerald"><CheckCircle2 :size="19" /></span><div><span>支付宝</span><strong>{{ channels.filter((item) => item.provider === 'alipay').length }}</strong><small>官方通道</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-cyan"><QrCode :size="19" /></span><div><span>微信支付</span><strong>{{ channels.filter((item) => item.provider === 'wechat').length }}</strong><small>官方通道</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-amber"><ShieldCheck :size="19" /></span><div><span>易支付</span><strong>{{ channels.filter((item) => item.provider === 'epay').length }}</strong><small>聚合通道</small></div></div>
   </div>
 
   <div class="provider-card-grid">
@@ -323,11 +332,11 @@ onMounted(loadChannels);
     </button>
   </div>
 
-  <div class="panel list-panel">
+  <div class="panel list-panel operations-content-card payment-list-card">
     <div class="panel-toolbar">
       <strong>支付方式列表</strong>
       <div class="table-toolbar-actions">
-        <el-button :loading="loading" @click="loadChannels">刷新</el-button>
+        <span class="muted-text">{{ activeChannelCount }} 个通道正在启用</span>
       </div>
     </div>
     <div v-loading="loading" class="entity-card-grid payment-channel-grid">

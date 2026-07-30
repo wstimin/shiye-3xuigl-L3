@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import QRCode from 'qrcode';
-import { Banknote, ShoppingBag, TicketCheck } from 'lucide-vue-next';
+import { Banknote, CreditCard, QrCode, ShoppingBag, TicketCheck, WalletCards } from 'lucide-vue-next';
 import { api } from '../api';
 import { notifyError, notifySuccess } from '../notify';
 import alipayIcon from '../assets/payments/alipay.webp';
@@ -22,6 +22,7 @@ type PaymentMethod = {
 };
 type RechargeOrder = { order: { tradeNo: string; amount: string; expiresAt?: string | null }; payUrl?: string | null; qrCode?: string | null };
 type PublicSettings = { cardPurchaseUrl?: string };
+type UserDashboard = { customer: { balance: string } };
 
 const code = ref('');
 const loading = ref(false);
@@ -34,6 +35,7 @@ const publicSettings = reactive({ cardPurchaseUrl: '' });
 const rechargeForm = reactive({ amount: 10, channelId: '', provider: 'alipay' as PaymentProvider, paymentType: '' });
 const lastOrder = ref<RechargeOrder | null>(null);
 const qrImage = ref('');
+const accountBalance = ref('');
 const quickAmounts = [10, 30, 50, 100];
 
 const selectedChannel = computed(() => channels.value.find((item) => item.id === rechargeForm.channelId));
@@ -51,12 +53,14 @@ async function loadFinanceData() {
   loading.value = true;
   error.value = '';
   try {
-    const [channelResult, settingsResult] = await Promise.all([
+    const [channelResult, settingsResult, dashboardResult] = await Promise.all([
       api<PaymentChannel[]>('/api/public/payment-channels'),
-      api<{ settings: PublicSettings }>('/api/public/settings').catch((): { settings: PublicSettings } => ({ settings: {} }))
+      api<{ settings: PublicSettings }>('/api/public/settings').catch((): { settings: PublicSettings } => ({ settings: {} })),
+      api<UserDashboard>('/api/user/me')
     ]);
     channels.value = channelResult;
     publicSettings.cardPurchaseUrl = settingsResult.settings.cardPurchaseUrl || '';
+    accountBalance.value = dashboardResult.customer.balance;
     if (!selectedMethod.value) selectPaymentMethod(paymentMethods.value.find((item) => item.channel));
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载财务数据失败';
@@ -152,18 +156,25 @@ onMounted(loadFinanceData);
 </script>
 
 <template>
-  <div class="page-heading">
+  <div class="user-page">
+  <div class="user-page-header">
     <div>
-      <h1 class="page-title">财务</h1>
-      <p class="page-subtitle">余额充值与卡密兑换</p>
+      <span class="user-page-kicker">ACCOUNT FINANCE</span>
+      <h2>账户财务</h2>
+      <p>通过已启用的支付通道充值，或使用管理员发放的卡密增加余额。</p>
     </div>
+    <div class="balance-summary"><span>当前余额</span><strong>{{ accountBalance || '--' }}<small> 元</small></strong></div>
   </div>
-  <p v-if="message" class="panel success-text">{{ message }}</p>
-  <p v-if="error" class="panel error-text">{{ error }}</p>
+  <p v-if="message" class="user-feedback success">{{ message }}</p>
+  <p v-if="error" class="user-feedback error">{{ error }}</p>
 
   <div class="finance-grid">
-    <section class="panel finance-form">
-      <h2>余额充值</h2>
+    <section class="user-section-card finance-form recharge-card">
+      <header class="business-card-head">
+        <span class="business-card-icon purple"><WalletCards :size="20" /></span>
+        <div><h3>余额充值</h3><p>选择支付方式与金额后创建真实充值订单。</p></div>
+      </header>
+      <div class="finance-field-label">支付方式</div>
       <div class="payment-method-grid">
         <button
           v-for="method in paymentMethods"
@@ -180,23 +191,25 @@ onMounted(loadFinanceData);
           <small>{{ method.channel ? '已启用' : '未启用' }}</small>
         </button>
       </div>
+      <div class="finance-field-label">充值金额</div>
       <div class="amount-shortcuts">
         <button v-for="amount in quickAmounts" :key="amount" type="button" :class="{ active: rechargeForm.amount === amount }" @click="setAmount(amount)">{{ amount }} 元</button>
       </div>
       <form @submit.prevent="createRechargeOrder">
-        <input v-model.number="rechargeForm.amount" type="number" min="0.01" step="0.01" placeholder="充值金额" />
-        <button :disabled="recharging || !selectedChannel || rechargeForm.amount <= 0">{{ recharging ? '创建中' : '去支付' }}</button>
+        <label class="finance-amount-input"><span>¥</span><input v-model.number="rechargeForm.amount" type="number" min="0.01" step="0.01" placeholder="充值金额" /></label>
+        <button :disabled="recharging || !selectedChannel || rechargeForm.amount <= 0"><CreditCard :size="16" />{{ recharging ? '创建中' : '去支付' }}</button>
       </form>
       <div v-if="selectedMethod" class="empty-hint">当前通道：{{ selectedMethod.label }}</div>
       <div v-if="!loading && !paymentMethods.length" class="empty-hint">管理员未启用在线支付方式</div>
-      <div v-if="lastOrder?.qrCode" class="qr-box">
+      <div v-if="lastOrder?.qrCode" class="qr-box payment-order-box">
+        <div class="payment-order-title"><QrCode :size="17" /><strong>扫码完成支付</strong></div>
         <img v-if="qrImage" :src="qrImage" alt="支付二维码" />
         <small v-if="lastOrder.order.expiresAt">有效至：{{ new Date(lastOrder.order.expiresAt).toLocaleString('zh-CN', { hour12: false }) }}</small>
         <span>{{ lastOrder.qrCode }}</span>
       </div>
     </section>
 
-    <section class="panel finance-form card-redeem-panel">
+    <section class="user-section-card finance-form card-redeem-panel">
       <div class="card-redeem-head">
         <div class="card-redeem-title">
           <span class="card-redeem-icon"><TicketCheck :size="20" /></span>
@@ -215,5 +228,6 @@ onMounted(loadFinanceData);
       </form>
       <div class="card-redeem-tip">请完整粘贴卡密，兑换成功后可在首页查看余额变化。</div>
     </section>
+  </div>
   </div>
 </template>

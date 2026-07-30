@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Copy, RefreshCw, RotateCcw, Search } from 'lucide-vue-next';
+import { AlertTriangle, CheckCircle2, Copy, ListChecks, RefreshCw, RotateCcw, Search, Split } from 'lucide-vue-next';
 import { api } from '../api';
 
 type XuiServer = { id: string; name: string; baseUrl: string };
@@ -178,7 +178,7 @@ onMounted(loadLogs);
 
 <template>
   <div class="operations-page sync-logs-page" :class="{ loading }">
-  <div class="page-head">
+  <div class="page-head operations-page-header">
     <div class="page-head-main">
       <h1 class="page-title">同步日志</h1>
       <p>查看管理后台对 3-x-ui 的同步、删除、流量读取等真实执行结果。</p>
@@ -189,14 +189,14 @@ onMounted(loadLogs);
   </div>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
-  <div class="metric-grid compact-metrics">
-    <div class="metric"><span>当前显示</span><strong>{{ logs.length }}</strong><small>最多 {{ filters.limit }} 条</small></div>
-    <div class="metric"><span>成功</span><strong>{{ successCount }}</strong><small>远端操作已完成</small></div>
-    <div class="metric"><span>部分成功</span><strong>{{ partialCount }}</strong><small>需要查看详情</small></div>
-    <div class="metric"><span>失败</span><strong>{{ failedCount }}</strong><small>优先排查这些记录</small></div>
+  <div class="metric-grid compact-metrics operations-stat-grid">
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-indigo"><ListChecks :size="19" /></span><div><span>当前显示</span><strong>{{ logs.length }}</strong><small>最多 {{ filters.limit }} 条</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-emerald"><CheckCircle2 :size="19" /></span><div><span>成功</span><strong>{{ successCount }}</strong><small>远端操作已完成</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-amber"><Split :size="19" /></span><div><span>部分成功</span><strong>{{ partialCount }}</strong><small>需要查看详情</small></div></div>
+    <div class="metric operations-stat-card"><span class="operations-stat-icon tone-rose"><AlertTriangle :size="19" /></span><div><span>失败</span><strong>{{ failedCount }}</strong><small>优先排查这些记录</small></div></div>
   </div>
 
-  <div class="panel list-panel">
+  <div class="panel list-panel operations-content-card sync-record-card">
     <div class="panel-toolbar">
       <strong>3-x-ui 操作记录</strong>
       <div class="status-segment" role="group" aria-label="状态筛选">

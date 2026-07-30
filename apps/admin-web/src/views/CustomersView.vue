@@ -82,6 +82,17 @@ type RenewalResult = {
   sync?: SyncDetail;
 };
 
+const customerAvatarPalettes = [
+  ['#6366f1', '#818cf8'],
+  ['#0ea5e9', '#38bdf8'],
+  ['#059669', '#34d399'],
+  ['#d97706', '#fbbf24'],
+  ['#db2777', '#f472b6'],
+  ['#7c3aed', '#a78bfa'],
+  ['#dc2626', '#f87171'],
+  ['#0891b2', '#22d3ee']
+] as const;
+
 const loading = ref(false);
 const savingCustomer = ref(false);
 const binding = ref(false);
@@ -616,10 +627,21 @@ function customerExpiryState(customer: Customer) {
   return { label: '服务有效', tone: 'success' };
 }
 
-function customerAvatarClass(customer: Customer) {
-  const tones = ['indigo', 'cyan', 'amber', 'emerald', 'slate', 'violet'];
-  const value = Array.from(customer.id || customer.loginUsername).reduce((total, char) => total + (char.codePointAt(0) || 0), 0);
-  return `tone-${tones[value % tones.length]}`;
+function customerInitial(customer: Customer) {
+  return Array.from(customer.name.trim() || customer.loginUsername.trim() || '用户')[0]?.toUpperCase() || '用';
+}
+
+function customerAvatarStyle(customer: Customer) {
+  const seed = customer.loginUsername.trim() || customer.id || customer.name.trim() || '用户';
+  let hash = 0;
+  for (const char of Array.from(seed)) {
+    hash = ((hash << 5) - hash + (char.codePointAt(0) || 0)) | 0;
+  }
+  const palette = customerAvatarPalettes[Math.abs(hash) % customerAvatarPalettes.length] || customerAvatarPalettes[0];
+  return {
+    '--customer-avatar-start': palette[0],
+    '--customer-avatar-end': palette[1]
+  };
 }
 
 function isExpiredNode(node: CustomerNode) {
@@ -722,7 +744,7 @@ onMounted(loadCustomers);
       <article v-for="customer in customers" :key="customer.id" class="customer-user-card">
         <header class="customer-card-header">
           <div class="customer-card-identity">
-            <span class="customer-card-avatar" :class="customerAvatarClass(customer)">{{ Array.from(customer.name.trim())[0] || Array.from(customer.loginUsername)[0] || '用' }}</span>
+            <span class="customer-card-avatar" :style="customerAvatarStyle(customer)">{{ customerInitial(customer) }}</span>
             <div>
               <strong>{{ customer.name }}</strong>
               <span>@{{ customer.loginUsername }}</span>
