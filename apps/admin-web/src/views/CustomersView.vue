@@ -105,7 +105,7 @@ const customerDialogVisible = ref(false);
 const bindDialogVisible = ref(false);
 const editNodeDialogVisible = ref(false);
 const balanceDialogVisible = ref(false);
-const customerNodeDrawerVisible = ref(false);
+const customerNodeDialogVisible = ref(false);
 const customerForm = reactive({ name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active' as 'active' | 'disabled', remark: '' });
 const bindForm = reactive({ customerId: '', serviceNodeId: '', xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
 const nodeEditForm = reactive({ customerId: '', customerNodeId: '', serviceNodeId: '', xuiEmail: '', expireAt: '', trafficLimitGb: undefined as number | undefined });
@@ -143,7 +143,7 @@ async function loadCustomers(resetPage = false) {
     if (selectedCustomerForNodes.value) {
       const refreshed = customerResult.items.find((item) => item.id === selectedCustomerForNodes.value?.id) || null;
       selectedCustomerForNodes.value = refreshed;
-      if (!refreshed) customerNodeDrawerVisible.value = false;
+      if (!refreshed) customerNodeDialogVisible.value = false;
     }
     serviceNodes.value = nodeResult;
     if (!bindForm.customerId && customerResult.items[0]) bindForm.customerId = customerResult.items[0].id;
@@ -471,9 +471,9 @@ function openBalanceDialog(customer?: Customer) {
   balanceDialogVisible.value = true;
 }
 
-function openCustomerNodesDrawer(customer: Customer) {
+function openCustomerNodesDialog(customer: Customer) {
   selectedCustomerForNodes.value = customer;
-  customerNodeDrawerVisible.value = true;
+  customerNodeDialogVisible.value = true;
 }
 
 function editCustomerNode(customer: Customer, node: CustomerNode) {
@@ -747,7 +747,7 @@ onMounted(loadCustomers);
         </div>
 
         <footer class="customer-card-actions">
-          <el-button type="primary" plain @click="openCustomerNodesDrawer(customer)"><Link2 :size="14" />节点详情</el-button>
+          <el-button type="primary" plain @click="openCustomerNodesDialog(customer)"><Link2 :size="14" />节点详情</el-button>
           <el-button class="customer-secondary-button" @click="editCustomer(customer)"><Edit3 :size="14" />编辑</el-button>
           <el-dropdown trigger="click" @command="(command: string) => handleCustomerCommand(customer, command)">
             <el-tooltip content="更多操作" placement="top">
@@ -782,17 +782,24 @@ onMounted(loadCustomers);
     </footer>
   </div>
 
-  <el-drawer v-model="customerNodeDrawerVisible" class="customer-dark-drawer" :title="selectedCustomerForNodes ? `${selectedCustomerForNodes.name} 的绑定节点` : '绑定节点'" size="min(820px, 92vw)" destroy-on-close>
+  <el-dialog
+    v-model="customerNodeDialogVisible"
+    class="customer-dark-dialog customer-node-dialog"
+    :title="selectedCustomerForNodes ? `${selectedCustomerForNodes.name} 的绑定节点` : '绑定节点'"
+    width="960px"
+    destroy-on-close
+    align-center
+  >
     <template v-if="selectedCustomerForNodes">
-      <div class="drawer-head-card">
+      <div class="customer-node-dialog-head">
         <div>
           <strong>{{ selectedCustomerForNodes.name }}</strong>
           <span>{{ selectedCustomerForNodes.loginUsername }} · 余额 {{ selectedCustomerForNodes.balance }}</span>
         </div>
-        <el-button size="small" type="primary" plain @click="openBindDialog(selectedCustomerForNodes)"><Link2 :size="15" />绑定节点</el-button>
+        <el-button type="primary" @click="openBindDialog(selectedCustomerForNodes)"><Link2 :size="15" />绑定节点</el-button>
       </div>
-      <div v-if="selectedCustomerForNodes.nodes?.length" class="drawer-node-list">
-        <article v-for="node in selectedCustomerForNodes.nodes" :key="node.id" class="drawer-node-card entity-card">
+      <div v-if="selectedCustomerForNodes.nodes?.length" class="customer-node-dialog-list">
+        <article v-for="node in selectedCustomerForNodes.nodes" :key="node.id" class="customer-node-dialog-card entity-card">
           <div class="entity-card-head">
             <div>
               <strong>{{ node.serviceNode?.name || node.xuiEmail }}</strong>
@@ -808,7 +815,7 @@ onMounted(loadCustomers);
             <div><span>流量</span><strong>{{ node.trafficLimitGb ?? '-' }} GB</strong></div>
             <div><span>同步</span><strong>{{ formatDate(node.lastSyncedAt) }}</strong></div>
           </div>
-          <div class="node-actions node-action-grid drawer-node-actions">
+          <div class="node-actions node-action-grid customer-node-dialog-actions">
             <div class="node-action-group renew-action">
               <span class="action-group-label">续费</span>
               <el-select v-model="renewMonths[node.id]" size="small" style="width: 82px">
@@ -817,18 +824,18 @@ onMounted(loadCustomers);
                 <el-option :value="6" label="6月" />
                 <el-option :value="12" label="12月" />
               </el-select>
-              <el-button size="small" :loading="renewingIds.has(node.id)" @click="renewNode(selectedCustomerForNodes, node)">续费</el-button>
+              <el-button size="small" type="primary" :loading="renewingIds.has(node.id)" @click="renewNode(selectedCustomerForNodes, node)">续费</el-button>
             </div>
             <div class="node-action-group remote-action">
               <span class="action-group-label">远端</span>
-              <el-button size="small" :loading="syncingIds.has(node.id)" @click="syncNode(selectedCustomerForNodes, node)"><RefreshCw :size="15" />同步</el-button>
-              <el-button size="small" :loading="trafficIds.has(node.id)" @click="showNodeTraffic(selectedCustomerForNodes, node)"><Activity :size="15" />流量</el-button>
-              <el-button size="small" :loading="resettingTrafficIds.has(node.id)" @click="resetNodeTraffic(selectedCustomerForNodes, node)"><RotateCcw :size="15" />重置</el-button>
+              <el-button size="small" type="primary" plain :loading="syncingIds.has(node.id)" @click="syncNode(selectedCustomerForNodes, node)"><RefreshCw :size="15" />同步</el-button>
+              <el-button size="small" class="customer-node-secondary-button" :loading="trafficIds.has(node.id)" @click="showNodeTraffic(selectedCustomerForNodes, node)"><Activity :size="15" />流量</el-button>
+              <el-button size="small" class="customer-node-secondary-button" :loading="resettingTrafficIds.has(node.id)" @click="resetNodeTraffic(selectedCustomerForNodes, node)"><RotateCcw :size="15" />重置</el-button>
             </div>
             <div class="node-action-group manage-action">
               <span class="action-group-label">本地绑定</span>
-              <el-button size="small" @click="editCustomerNode(selectedCustomerForNodes, node)"><Edit3 :size="15" />编辑</el-button>
-              <el-button size="small" @click="unbindNode(selectedCustomerForNodes, node)"><Unlink :size="15" />解绑</el-button>
+              <el-button size="small" class="customer-node-secondary-button" @click="editCustomerNode(selectedCustomerForNodes, node)"><Edit3 :size="15" />编辑</el-button>
+              <el-button size="small" class="customer-node-secondary-button" @click="unbindNode(selectedCustomerForNodes, node)"><Unlink :size="15" />解绑</el-button>
             </div>
             <div class="node-action-group danger-action">
               <span class="action-group-label">服务节点</span>
@@ -839,7 +846,10 @@ onMounted(loadCustomers);
       </div>
       <div v-else class="empty-panel">该用户还没有绑定节点</div>
     </template>
-  </el-drawer>
+    <template #footer>
+      <el-button class="customer-node-close-button" @click="customerNodeDialogVisible = false">关闭</el-button>
+    </template>
+  </el-dialog>
 
   <el-dialog v-model="customerDialogVisible" class="customer-dark-dialog" :title="editingCustomerId ? '编辑用户' : '新增用户'" width="720px" destroy-on-close>
     <div class="customer-dialog-intro"><UserRound :size="18" /><div><strong>{{ editingCustomerId ? '编辑账户资料' : '创建面板用户' }}</strong><span>填写真实登录资料、联系方式、余额和账户状态。</span></div></div>
