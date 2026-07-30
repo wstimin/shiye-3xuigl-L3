@@ -617,7 +617,7 @@ function customerExpiryState(customer: Customer) {
 }
 
 function customerAvatarClass(customer: Customer) {
-  const tones = ['indigo', 'cyan', 'emerald', 'amber', 'violet', 'rose'];
+  const tones = ['indigo', 'cyan', 'amber', 'emerald', 'slate', 'violet'];
   const value = Array.from(customer.id || customer.loginUsername).reduce((total, char) => total + (char.codePointAt(0) || 0), 0);
   return `tone-${tones[value % tones.length]}`;
 }

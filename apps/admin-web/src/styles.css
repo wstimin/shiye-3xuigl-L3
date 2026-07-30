@@ -16,7 +16,7 @@
   --danger: #ef4444;
   --shadow: 0 14px 34px rgb(88 28 135 / 8%);
 }
-body { margin: 0; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; background: var(--app-bg); color: var(--text); }
+body { margin: 0; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; background: #08090c; color: var(--text); }
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
@@ -615,13 +615,13 @@ input:-webkit-autofill:active {
 .customer-card-identity strong, .customer-card-identity span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customer-card-identity strong { color: var(--dashboard-text); font-size: 15px; }
 .customer-card-identity span { color: var(--dashboard-muted); font-size: 12px; }
-.customer-card-avatar { width: 44px; height: 44px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 8px; color: #fff; font-size: 16px; font-weight: 700; }
-.customer-card-avatar.tone-indigo { background: linear-gradient(135deg, #4f46e5, #818cf8); }
-.customer-card-avatar.tone-cyan { background: linear-gradient(135deg, #0284c7, #38bdf8); }
+.customer-card-avatar { width: 44px; height: 44px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 12px; color: #fff; font-size: 16px; font-weight: 600; }
+.customer-card-avatar.tone-indigo { background: linear-gradient(135deg, #6366f1, #818cf8); }
+.customer-card-avatar.tone-cyan { background: linear-gradient(135deg, #0ea5e9, #38bdf8); }
 .customer-card-avatar.tone-emerald { background: linear-gradient(135deg, #059669, #34d399); }
 .customer-card-avatar.tone-amber { background: linear-gradient(135deg, #d97706, #fbbf24); }
-.customer-card-avatar.tone-violet { background: linear-gradient(135deg, #7c3aed, #a78bfa); }
-.customer-card-avatar.tone-rose { background: linear-gradient(135deg, #e11d48, #fb7185); }
+.customer-card-avatar.tone-slate { background: linear-gradient(135deg, #64748b, #94a3b8); }
+.customer-card-avatar.tone-violet { background: linear-gradient(135deg, #a78bfa, #c4b5fd); }
 .customer-status-chip, .customer-expiry-chip { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; min-height: 25px; padding: 3px 9px; border-radius: 6px; font-size: 11px; font-weight: 600; }
 .customer-status-chip i, .customer-expiry-chip i { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
 .customer-status-chip.is-active, .customer-expiry-chip.is-success { background: rgb(16 185 129 / 12%); color: #6ee7b7; }
@@ -1626,4 +1626,217 @@ input:-webkit-autofill:active {
   .socks-card-actions { grid-template-columns: minmax(0, 1fr) 36px; }
   .socks-card-actions > .el-button:nth-child(2) { display: none; }
   .socks-dark-dialog .el-dialog__footer { flex-wrap: wrap; }
+}
+
+/* Element Plus poppers are teleported to body, so they need their own dark theme. */
+.el-popper.is-light,
+.el-select__popper,
+.el-dropdown__popper,
+.el-picker__popper,
+.el-cascader__dropdown {
+  --el-bg-color-overlay: #12141c;
+  --el-border-color-light: rgb(255 255 255 / 9%);
+  --el-text-color-primary: #e2e8f0;
+  --el-text-color-regular: #94a3b8;
+  --el-fill-color-light: rgb(99 102 241 / 12%);
+  border-color: rgb(255 255 255 / 9%) !important;
+  background: #12141c !important;
+  color: #cbd5e1;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 42%) !important;
+}
+.el-popper.is-light .el-popper__arrow::before {
+  border-color: rgb(255 255 255 / 9%) !important;
+  background: #12141c !important;
+}
+.el-select-dropdown,
+.el-dropdown-menu,
+.el-picker-panel,
+.el-date-picker,
+.el-time-panel,
+.el-cascader-panel {
+  border-color: rgb(255 255 255 / 9%);
+  background: #12141c;
+  color: #cbd5e1;
+}
+.el-select-dropdown__item,
+.el-dropdown-menu__item,
+.el-cascader-node { color: #94a3b8; }
+.el-select-dropdown__item.is-hovering,
+.el-select-dropdown__item:hover,
+.el-dropdown-menu__item:not(.is-disabled):focus,
+.el-dropdown-menu__item:not(.is-disabled):hover,
+.el-cascader-node:not(.is-disabled):focus,
+.el-cascader-node:not(.is-disabled):hover {
+  background: rgb(99 102 241 / 12%);
+  color: #c7d2fe;
+}
+.el-select-dropdown__item.is-selected,
+.el-cascader-node.in-active-path,
+.el-cascader-node.is-active,
+.el-cascader-node.is-selectable.in-checked-path {
+  color: #a5b4fc;
+  font-weight: 700;
+}
+.el-picker-panel__footer,
+.el-date-picker__header,
+.el-picker-panel__content,
+.el-time-panel__content,
+.el-time-panel__footer,
+.el-time-spinner,
+.el-date-table th {
+  border-color: rgb(255 255 255 / 7%);
+  background: #12141c;
+  color: #94a3b8;
+}
+.el-picker-panel .el-input__wrapper {
+  background: rgb(255 255 255 / 3%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 9%) inset;
+}
+.el-picker-panel .el-input__inner { color: #e2e8f0; }
+.el-time-spinner__item { color: #64748b; }
+.el-time-spinner__item:hover:not(.is-disabled):not(.is-active) {
+  background: rgb(99 102 241 / 10%);
+  color: #c7d2fe;
+}
+.el-time-spinner__item.is-active:not(.is-disabled) { color: #e0e7ff; }
+.el-time-spinner__item.is-disabled { color: #334155; }
+.el-date-picker__header-label,
+.el-picker-panel__icon-btn,
+.el-date-table td.available .el-date-table-cell__text { color: #cbd5e1; }
+.el-date-table td.available:hover .el-date-table-cell__text,
+.el-date-table td.today .el-date-table-cell__text { color: #a5b4fc; }
+.el-date-table td.current:not(.disabled) .el-date-table-cell__text {
+  background: #6366f1;
+  color: #fff;
+}
+.el-date-table td.next-month .el-date-table-cell__text,
+.el-date-table td.prev-month .el-date-table-cell__text { color: #475569; }
+
+/* Keep loading states on the same dark surface instead of flashing a white mask. */
+.overview-shell .el-loading-mask {
+  background: rgb(8 9 12 / 72%);
+  backdrop-filter: blur(2px);
+}
+.overview-shell .el-loading-spinner .path { stroke: #818cf8; }
+.overview-shell .el-loading-spinner .el-loading-text { color: #a5b4fc; }
+
+/* Final button pass for every dark management page and modal. */
+.overview-shell .el-button,
+.customer-dark-dialog .el-button,
+.customer-dark-message-box .el-button,
+.node-dark-dialog .el-button,
+.node-dark-message-box .el-button,
+.xui-dark-dialog .el-button,
+.xui-dark-message-box .el-button,
+.socks-dark-dialog .el-button,
+.socks-dark-message-box .el-button,
+.operations-dark-dialog .el-button,
+.operations-dark-message-box .el-button,
+.el-picker-panel .el-button {
+  --el-button-bg-color: rgb(255 255 255 / 3%);
+  --el-button-border-color: rgb(255 255 255 / 9%);
+  --el-button-text-color: #cbd5e1;
+  --el-button-hover-bg-color: rgb(255 255 255 / 7%);
+  --el-button-hover-border-color: rgb(255 255 255 / 15%);
+  --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: rgb(255 255 255 / 9%);
+  --el-button-active-border-color: rgb(255 255 255 / 18%);
+  --el-button-active-text-color: #fff;
+  border-radius: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.overview-shell .el-button > span,
+.customer-dark-dialog .el-button > span,
+.customer-dark-message-box .el-button > span,
+.node-dark-dialog .el-button > span,
+.node-dark-message-box .el-button > span,
+.xui-dark-dialog .el-button > span,
+.xui-dark-message-box .el-button > span,
+.socks-dark-dialog .el-button > span,
+.socks-dark-message-box .el-button > span,
+.operations-dark-dialog .el-button > span,
+.operations-dark-message-box .el-button > span,
+.el-picker-panel .el-button > span {
+  overflow: visible;
+  color: inherit;
+}
+.overview-shell .el-button--primary,
+.customer-dark-dialog .el-button--primary,
+.customer-dark-message-box .el-button--primary,
+.node-dark-dialog .el-button--primary,
+.node-dark-message-box .el-button--primary,
+.xui-dark-dialog .el-button--primary,
+.xui-dark-message-box .el-button--primary,
+.socks-dark-dialog .el-button--primary,
+.socks-dark-message-box .el-button--primary,
+.operations-dark-dialog .el-button--primary,
+.operations-dark-message-box .el-button--primary,
+.el-picker-panel .el-button--primary {
+  --el-button-bg-color: #6366f1;
+  --el-button-border-color: #6366f1;
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: #5558e3;
+  --el-button-hover-border-color: #5558e3;
+  --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: #4f46e5;
+  --el-button-active-border-color: #4f46e5;
+  --el-button-active-text-color: #fff;
+}
+.overview-shell .el-button--primary.is-plain,
+.customer-dark-dialog .el-button--primary.is-plain,
+.customer-dark-message-box .el-button--primary.is-plain,
+.node-dark-dialog .el-button--primary.is-plain,
+.node-dark-message-box .el-button--primary.is-plain,
+.xui-dark-dialog .el-button--primary.is-plain,
+.xui-dark-message-box .el-button--primary.is-plain,
+.socks-dark-dialog .el-button--primary.is-plain,
+.socks-dark-message-box .el-button--primary.is-plain,
+.operations-dark-dialog .el-button--primary.is-plain,
+.operations-dark-message-box .el-button--primary.is-plain,
+.el-picker-panel .el-button--primary.is-plain {
+  --el-button-bg-color: rgb(99 102 241 / 12%);
+  --el-button-border-color: rgb(99 102 241 / 28%);
+  --el-button-text-color: #a5b4fc;
+  --el-button-hover-bg-color: #6366f1;
+  --el-button-hover-border-color: #6366f1;
+  --el-button-hover-text-color: #fff;
+}
+.overview-shell .el-button--danger,
+.customer-dark-dialog .el-button--danger,
+.customer-dark-message-box .el-button--danger,
+.node-dark-dialog .el-button--danger,
+.node-dark-message-box .el-button--danger,
+.xui-dark-dialog .el-button--danger,
+.xui-dark-message-box .el-button--danger,
+.socks-dark-dialog .el-button--danger,
+.socks-dark-message-box .el-button--danger,
+.operations-dark-dialog .el-button--danger,
+.operations-dark-message-box .el-button--danger,
+.el-picker-panel .el-button--danger {
+  --el-button-bg-color: #ef4444;
+  --el-button-border-color: #ef4444;
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: #dc2626;
+  --el-button-hover-border-color: #dc2626;
+  --el-button-hover-text-color: #fff;
+}
+.overview-shell .el-button--danger.is-plain,
+.customer-dark-dialog .el-button--danger.is-plain,
+.customer-dark-message-box .el-button--danger.is-plain,
+.node-dark-dialog .el-button--danger.is-plain,
+.node-dark-message-box .el-button--danger.is-plain,
+.xui-dark-dialog .el-button--danger.is-plain,
+.xui-dark-message-box .el-button--danger.is-plain,
+.socks-dark-dialog .el-button--danger.is-plain,
+.socks-dark-message-box .el-button--danger.is-plain,
+.operations-dark-dialog .el-button--danger.is-plain,
+.operations-dark-message-box .el-button--danger.is-plain,
+.el-picker-panel .el-button--danger.is-plain {
+  --el-button-bg-color: rgb(248 113 113 / 7%);
+  --el-button-border-color: rgb(248 113 113 / 22%);
+  --el-button-text-color: #fca5a5;
+  --el-button-hover-bg-color: #ef4444;
+  --el-button-hover-border-color: #ef4444;
+  --el-button-hover-text-color: #fff;
 }

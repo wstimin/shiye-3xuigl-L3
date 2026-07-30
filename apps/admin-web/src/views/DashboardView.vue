@@ -167,7 +167,7 @@ async function runTrafficSync() {
 }
 
 async function disableExpiredNodes() {
-  await ElMessageBox.confirm('系统会把已到期且仍处于启用状态的用户节点同步停用到远端 3x-ui，远端同步成功后再更新本地状态。确认执行？', '停用过期节点', { type: 'warning' });
+  await ElMessageBox.confirm('系统会把已到期且仍处于启用状态的用户节点同步停用到远端 3x-ui，远端同步成功后再更新本地状态。确认执行？', '停用过期节点', { type: 'warning', customClass: 'operations-dark-message-box' });
   try {
     const result = await runDisableExpiredNodes();
     ElMessage.success(`执行完成：成功 ${result.success}，失败 ${result.failed}，总数 ${result.total}`);
