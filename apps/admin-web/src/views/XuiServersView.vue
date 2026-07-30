@@ -1,7 +1,27 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Activity, Edit3, Eye, Plus, RefreshCw, Search, Trash2, Users, Wifi } from 'lucide-vue-next';
+import {
+  Activity,
+  CheckCircle2,
+  CircleSlash2,
+  Clipboard,
+  CloudCog,
+  Edit3,
+  Eye,
+  FileKey2,
+  KeyRound,
+  MoreHorizontal,
+  Network,
+  Plus,
+  RefreshCw,
+  Search,
+  Server,
+  ShieldCheck,
+  Trash2,
+  Users,
+  Wifi
+} from 'lucide-vue-next';
 import { api } from '../api';
 
 type XuiServer = {
@@ -13,6 +33,7 @@ type XuiServer = {
   enabled: boolean;
   remark?: string | null;
   config?: {
+    shareHost?: string;
     tlsServerName?: string;
     tlsCertFile?: string;
     tlsKeyFile?: string;
@@ -25,8 +46,17 @@ type XuiServer = {
   hasToken?: boolean;
 };
 
-type SyncResult = { total: number; created: number; updated: number; skipped: number };
+type SyncResult = {
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  remoteSocksFound?: number;
+  remoteSocksImported?: number;
+};
+type SocksSyncResult = { remoteSocksFound: number; remoteSocksImported: number };
 type CertResult = { found: boolean; certFile: string; keyFile: string; message?: string; raw?: unknown };
+type ConnectionTest = { state: 'success' | 'error'; inboundCount?: number; message?: string };
 
 const servers = ref<XuiServer[]>([]);
 const loading = ref(false);
@@ -36,24 +66,57 @@ const testingCertForm = ref(false);
 const testingIds = ref<Set<string>>(new Set());
 const certIds = ref<Set<string>>(new Set());
 const syncingIds = ref<Set<string>>(new Set());
+const syncingSocksIds = ref<Set<string>>(new Set());
 const statusIds = ref<Set<string>>(new Set());
 const presenceIds = ref<Set<string>>(new Set());
 const togglingIds = ref<Set<string>>(new Set());
+const deletingIds = ref<Set<string>>(new Set());
 const revealingSecrets = ref(false);
+const connectionTests = ref<Record<string, ConnectionTest>>({});
 const error = ref('');
 const searchQuery = ref('');
+const selectedStatus = ref('');
+const selectedCredential = ref('');
 const editingId = ref('');
 const dialogVisible = ref(false);
-const form = reactive({ name: '', baseUrl: '', basePath: '', username: '', password: '', token: '', tlsServerName: '', tlsCertFile: '', tlsKeyFile: '', realityTarget: '', realityServerName: '', realityFingerprint: 'chrome', realitySpiderX: '/', enabled: true, remark: '' });
+const clearPassword = ref(false);
+const clearToken = ref(false);
+const form = reactive({
+  name: '',
+  baseUrl: '',
+  basePath: '',
+  shareHost: '',
+  username: '',
+  password: '',
+  token: '',
+  tlsServerName: '',
+  tlsCertFile: '',
+  tlsKeyFile: '',
+  realityTarget: '',
+  realityServerName: '',
+  realityFingerprint: 'chrome',
+  realitySpiderX: '/',
+  enabled: true,
+  remark: ''
+});
 
 const enabledServerCount = computed(() => servers.value.filter((server) => server.enabled).length);
+const passwordServerCount = computed(() => servers.value.filter((server) => server.hasPassword).length);
 const tokenServerCount = computed(() => servers.value.filter((server) => server.hasToken).length);
-const tlsServerCount = computed(() => servers.value.filter((server) => hasTlsConfig(server)).length);
-const realityAutoCount = computed(() => servers.value.filter((server) => !server.config?.realityTarget || !server.config?.realityServerName).length);
+const hasActiveFilters = computed(() => Boolean(searchQuery.value.trim() || selectedStatus.value || selectedCredential.value));
 const filteredServers = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase();
-  if (!keyword) return servers.value;
-  return servers.value.filter((server) => serverSearchText(server).includes(keyword));
+  return servers.value.filter((server) => {
+    if (keyword && !serverSearchText(server).includes(keyword)) return false;
+    if (selectedStatus.value === 'enabled' && !server.enabled) return false;
+    if (selectedStatus.value === 'disabled' && server.enabled) return false;
+    if (selectedStatus.value === 'tested-success' && connectionTests.value[server.id]?.state !== 'success') return false;
+    if (selectedStatus.value === 'tested-error' && connectionTests.value[server.id]?.state !== 'error') return false;
+    if (selectedCredential.value === 'token' && !server.hasToken) return false;
+    if (selectedCredential.value === 'password' && !server.hasPassword) return false;
+    if (selectedCredential.value === 'missing' && (server.hasToken || server.hasPassword)) return false;
+    return true;
+  });
 });
 
 async function loadServers() {
@@ -62,7 +125,7 @@ async function loadServers() {
   try {
     servers.value = await api<XuiServer[]>('/api/admin/xui-servers');
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载面板连接失败';
+    showError(err, '加载面板连接失败');
   } finally {
     loading.value = false;
   }
@@ -79,7 +142,7 @@ async function saveServer() {
     resetForm();
     await loadServers();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存面板连接失败';
+    showError(err, '保存面板连接失败');
   } finally {
     saving.value = false;
   }
@@ -90,27 +153,27 @@ async function testForm() {
   error.value = '';
   try {
     const result = await api<{ connected: boolean; inbounds: unknown }>('/api/admin/xui/test', { method: 'POST', body: cleanFormBody() });
-    const inbounds = Array.isArray(result.inbounds) ? result.inbounds.length : '-';
-    ElMessage.success(`连接成功，入站数量：${inbounds}`);
+    ElMessage.success(`连接成功，读取到 ${countXuiItems(result.inbounds)} 个入站`);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '测试连接失败';
+    showError(err, '测试连接失败');
   } finally {
     testingForm.value = false;
   }
 }
 
 async function testSaved(server: XuiServer) {
-  testingIds.value = new Set(testingIds.value).add(server.id);
+  testingIds.value = addPendingId(testingIds.value, server.id);
   error.value = '';
   try {
     const result = await api<{ inboundCount: number }>(`/api/admin/xui-servers/${server.id}/test`, { method: 'POST' });
-    ElMessage.success(`${server.name} 连接成功，入站数量：${result.inboundCount}`);
+    connectionTests.value = { ...connectionTests.value, [server.id]: { state: 'success', inboundCount: result.inboundCount } };
+    ElMessage.success(`${server.name} 连接成功，读取到 ${result.inboundCount} 个入站`);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '测试已保存面板连接失败';
+    const message = errorMessage(err, '测试已保存面板连接失败');
+    connectionTests.value = { ...connectionTests.value, [server.id]: { state: 'error', message } };
+    showError(err, '测试已保存面板连接失败');
   } finally {
-    const next = new Set(testingIds.value);
-    next.delete(server.id);
-    testingIds.value = next;
+    testingIds.value = removePendingId(testingIds.value, server.id);
   }
 }
 
@@ -121,24 +184,22 @@ async function testFormCerts() {
     const result = await api<CertResult>('/api/admin/xui/certs', { method: 'POST', body: cleanFormBody() });
     await showCertResult(result, '表单证书检测', true);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取面板证书失败';
+    showError(err, '读取面板证书失败');
   } finally {
     testingCertForm.value = false;
   }
 }
 
 async function testSavedCerts(server: XuiServer) {
-  certIds.value = new Set(certIds.value).add(server.id);
+  certIds.value = addPendingId(certIds.value, server.id);
   error.value = '';
   try {
     const result = await api<CertResult>(`/api/admin/xui-servers/${server.id}/certs`);
     await showCertResult(result, `${server.name} 证书检测`, false);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取已保存面板证书失败';
+    showError(err, '读取已保存面板证书失败');
   } finally {
-    const next = new Set(certIds.value);
-    next.delete(server.id);
-    certIds.value = next;
+    certIds.value = removePendingId(certIds.value, server.id);
   }
 }
 
@@ -147,83 +208,125 @@ async function showCertResult(result: CertResult, title: string, allowFill: bool
   const content = [
     result.message || (result.found ? '已读取到证书路径' : '没有读取到完整证书路径'),
     '',
-    `证书路径: ${result.certFile || '-'}`,
-    `私钥路径: ${result.keyFile || '-'}`,
+    `证书路径：${result.certFile || '-'}`,
+    `私钥路径：${result.keyFile || '-'}`,
     '',
-    '接口返回:',
+    '接口返回：',
     raw.length > 1200 ? `${raw.slice(0, 1200)}...` : raw
   ].join('\n');
   if (allowFill && result.found) {
-    await ElMessageBox.confirm(content, title, { type: 'success', confirmButtonText: '回填路径', cancelButtonText: '只查看' });
-    form.tlsCertFile = result.certFile;
-    form.tlsKeyFile = result.keyFile;
-    ElMessage.success('证书路径已回填');
+    try {
+      await ElMessageBox.confirm(content, title, {
+        type: 'success',
+        confirmButtonText: '回填路径',
+        cancelButtonText: '只查看',
+        customClass: 'xui-dark-message-box'
+      });
+      form.tlsCertFile = result.certFile;
+      form.tlsKeyFile = result.keyFile;
+      ElMessage.success('证书路径已回填');
+    } catch {
+      // The user chose to keep the detected paths unchanged.
+    }
     return;
   }
-  await ElMessageBox.alert(content, title, { type: result.found ? 'success' : 'warning' });
+  await ElMessageBox.alert(content, title, { type: result.found ? 'success' : 'warning', customClass: 'xui-dark-message-box' });
 }
 
 async function syncServer(server: XuiServer) {
-  await ElMessageBox.confirm(`确认从服务器“${server.name}”读取远端入站，并同步为本地服务节点？此操作不会同步远端用户。`, '同步远端节点', { type: 'warning' });
-  syncingIds.value = new Set(syncingIds.value).add(server.id);
+  try {
+    await ElMessageBox.confirm(
+      `确认从“${server.name}”读取远端入站，并同步为本地路由节点？此操作不会同步远端用户。`,
+      '同步远端节点',
+      { type: 'warning', customClass: 'xui-dark-message-box' }
+    );
+  } catch {
+    return;
+  }
+  syncingIds.value = addPendingId(syncingIds.value, server.id);
   error.value = '';
   try {
     const result = await api<SyncResult>(`/api/admin/xui-servers/${server.id}/sync`, { method: 'POST' });
-    ElMessage.success(`远端节点同步完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}，总数 ${result.total}`);
+    ElMessage.success(`同步完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}，总数 ${result.total}`);
+    await ElMessageBox.alert([
+      `远端入站总数：${result.total}`,
+      `新增本地节点：${result.created}`,
+      `更新本地节点：${result.updated}`,
+      `跳过：${result.skipped}`,
+      `发现远端 SOCKS：${result.remoteSocksFound ?? 0}`,
+      `导入或更新 SOCKS：${result.remoteSocksImported ?? 0}`
+    ].join('\n'), `${server.name} 同步结果`, { type: result.skipped ? 'warning' : 'success', customClass: 'xui-dark-message-box' });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '同步远端节点失败';
+    showError(err, '同步远端节点失败');
   } finally {
-    const next = new Set(syncingIds.value);
-    next.delete(server.id);
-    syncingIds.value = next;
+    syncingIds.value = removePendingId(syncingIds.value, server.id);
+  }
+}
+
+async function syncServerSocks(server: XuiServer) {
+  try {
+    await ElMessageBox.confirm(
+      `确认从“${server.name}”读取远端 Xray 配置并导入 SOCKS 出站？只会写入本地出站节点列表。`,
+      '导入远端 SOCKS',
+      { type: 'warning', customClass: 'xui-dark-message-box' }
+    );
+  } catch {
+    return;
+  }
+  syncingSocksIds.value = addPendingId(syncingSocksIds.value, server.id);
+  error.value = '';
+  try {
+    const result = await api<SocksSyncResult>(`/api/admin/xui-servers/${server.id}/sync-socks`, { method: 'POST' });
+    ElMessage.success(`SOCKS 导入完成：发现 ${result.remoteSocksFound}，导入或更新 ${result.remoteSocksImported}`);
+  } catch (err) {
+    showError(err, '导入远端 SOCKS 失败');
+  } finally {
+    syncingSocksIds.value = removePendingId(syncingSocksIds.value, server.id);
   }
 }
 
 async function showServerStatus(server: XuiServer) {
-  statusIds.value = new Set(statusIds.value).add(server.id);
+  statusIds.value = addPendingId(statusIds.value, server.id);
   error.value = '';
   try {
     const result = await api<{ status?: Record<string, unknown>; versions?: unknown[] }>(`/api/admin/xui-servers/${server.id}/status`);
-    const status = result.status || {};
-    const xray = (status.xray || {}) as Record<string, unknown>;
-    const mem = (status.mem || {}) as Record<string, unknown>;
-    const disk = (status.disk || {}) as Record<string, unknown>;
+    const status = objectValue(result.status);
+    const xray = objectValue(status.xray);
+    const mem = objectValue(status.mem);
+    const disk = objectValue(status.disk);
+    const versions = (result.versions || []).slice(0, 5).map(formatShortValue).filter(Boolean);
     await ElMessageBox.alert([
-      `Xray: ${xray.state || '-'} ${xray.version || ''}`.trim(),
-      `CPU: ${status.cpu ?? '-'}%`,
-      `Memory: ${formatBytes(Number(mem.current || 0))} / ${formatBytes(Number(mem.total || 0))}`,
-      `Disk: ${formatBytes(Number(disk.current || 0))} / ${formatBytes(Number(disk.total || 0))}`,
-      `Available versions: ${(result.versions || []).slice(0, 5).join(', ') || '-'}`
-    ].join('\n'), `${server.name} status`, { type: 'info' });
+      `Xray：${xray.state || status.xrayState || '-'} ${xray.version || status.xrayVersion || ''}`.trim(),
+      `CPU：${status.cpu ?? '-'}%`,
+      `内存：${formatBytes(Number(mem.current || 0))} / ${formatBytes(Number(mem.total || 0))}`,
+      `磁盘：${formatBytes(Number(disk.current || 0))} / ${formatBytes(Number(disk.total || 0))}`,
+      `可用版本：${versions.join(', ') || '-'}`
+    ].join('\n'), `${server.name} 运行状态`, { type: 'info', customClass: 'xui-dark-message-box' });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取面板连接状态失败';
+    showError(err, '读取面板连接状态失败');
   } finally {
-    const next = new Set(statusIds.value);
-    next.delete(server.id);
-    statusIds.value = next;
+    statusIds.value = removePendingId(statusIds.value, server.id);
   }
 }
 
 async function showClientPresence(server: XuiServer) {
-  presenceIds.value = new Set(presenceIds.value).add(server.id);
+  presenceIds.value = addPendingId(presenceIds.value, server.id);
   error.value = '';
   try {
     const result = await api<{ online?: unknown[]; lastOnline?: Record<string, unknown> }>(`/api/admin/xui-servers/${server.id}/client-presence`);
     const online = (result.online || []).map(String);
-    const lastOnline = Object.entries(result.lastOnline || {}).slice(0, 12).map(([email, time]) => `${email}: ${formatUnixTime(time)}`);
+    const lastOnline = Object.entries(result.lastOnline || {}).slice(0, 12).map(([email, time]) => `${email}：${formatUnixTime(time)}`);
     await ElMessageBox.alert([
-      `Online clients: ${online.length}`,
+      `在线客户端：${online.length}`,
       online.length ? online.slice(0, 20).join(', ') : '-',
       '',
-      'Last online:',
+      '最近在线：',
       lastOnline.length ? lastOnline.join('\n') : '-'
-    ].join('\n'), `${server.name} clients`, { type: 'info' });
+    ].join('\n'), `${server.name} 客户端状态`, { type: 'info', customClass: 'xui-dark-message-box' });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取客户端在线状态失败';
+    showError(err, '读取客户端在线状态失败');
   } finally {
-    const next = new Set(presenceIds.value);
-    next.delete(server.id);
-    presenceIds.value = next;
+    presenceIds.value = removePendingId(presenceIds.value, server.id);
   }
 }
 
@@ -234,10 +337,13 @@ function openDialog() {
 
 function editServer(server: XuiServer) {
   editingId.value = server.id;
+  clearPassword.value = false;
+  clearToken.value = false;
   Object.assign(form, {
     name: server.name,
     baseUrl: server.baseUrl,
     basePath: server.basePath || '',
+    shareHost: server.config?.shareHost || '',
     username: server.username || '',
     password: '',
     token: '',
@@ -262,54 +368,121 @@ async function revealServerSecrets() {
     const secrets = await api<{ password: string; token: string }>(`/api/admin/xui-servers/${editingId.value}/secrets`);
     form.password = secrets.password || '';
     form.token = secrets.token || '';
-    ElMessage.success('已读取保存的访问凭据');
+    clearPassword.value = false;
+    clearToken.value = false;
+    ElMessage.success('已读取保存的密码和 Token');
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取保存凭据失败';
-    ElMessage.error(error.value);
+    showError(err, '读取保存凭据失败');
   } finally {
     revealingSecrets.value = false;
   }
 }
 
 async function removeServer(server: XuiServer) {
-  await ElMessageBox.confirm(`确认删除面板连接“${server.name}”？有关联路由节点时请先处理节点。`, '删除确认', { type: 'warning' });
-  await api(`/api/admin/xui-servers/${server.id}`, { method: 'DELETE' });
-  ElMessage.success('面板连接已删除');
-  await loadServers();
-}
-
-async function toggleServerEnabled(server: XuiServer, enabled: boolean | string | number) {
-  const nextEnabled = Boolean(enabled);
-  const previous = server.enabled;
-  togglingIds.value = new Set(togglingIds.value).add(server.id);
+  try {
+    await ElMessageBox.confirm(
+      `确认删除面板连接“${server.name}”？存在关联路由节点时后端会拒绝删除，请先处理关联节点。`,
+      '删除面板连接',
+      { type: 'warning', customClass: 'xui-dark-message-box' }
+    );
+  } catch {
+    return;
+  }
+  deletingIds.value = addPendingId(deletingIds.value, server.id);
   error.value = '';
   try {
-    await api(`/api/admin/xui-servers/${server.id}`, { method: 'PATCH', body: { enabled: nextEnabled } });
-    server.enabled = nextEnabled;
-    ElMessage.success(nextEnabled ? '面板连接已启用' : '面板连接已停用');
+    await api(`/api/admin/xui-servers/${server.id}`, { method: 'DELETE' });
+    ElMessage.success('面板连接已删除');
+    await loadServers();
+  } catch (err) {
+    showError(err, '删除面板连接失败');
+  } finally {
+    deletingIds.value = removePendingId(deletingIds.value, server.id);
+  }
+}
+
+async function toggleServerEnabled(server: XuiServer, enabled = !server.enabled) {
+  const previous = server.enabled;
+  togglingIds.value = addPendingId(togglingIds.value, server.id);
+  error.value = '';
+  try {
+    await api(`/api/admin/xui-servers/${server.id}`, { method: 'PATCH', body: { enabled } });
+    server.enabled = enabled;
+    ElMessage.success(enabled ? '面板连接已启用' : '面板连接已停用');
   } catch (err) {
     server.enabled = previous;
-    error.value = err instanceof Error ? err.message : '更新面板连接状态失败';
-    ElMessage.error(error.value);
+    showError(err, '更新面板连接状态失败');
   } finally {
-    const next = new Set(togglingIds.value);
-    next.delete(server.id);
-    togglingIds.value = next;
+    togglingIds.value = removePendingId(togglingIds.value, server.id);
   }
+}
+
+function handleServerCommand(server: XuiServer, command: string) {
+  if (command === 'test') void testSaved(server);
+  if (command === 'status') void showServerStatus(server);
+  if (command === 'presence') void showClientPresence(server);
+  if (command === 'certs') void testSavedCerts(server);
+  if (command === 'sync-socks') void syncServerSocks(server);
+  if (command === 'toggle') void toggleServerEnabled(server);
+  if (command === 'delete') void removeServer(server);
+}
+
+async function copyServerAddress(server: XuiServer) {
+  const address = serverEndpoint(server);
+  try {
+    await navigator.clipboard.writeText(address);
+  } catch {
+    const input = document.createElement('textarea');
+    input.value = address;
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    input.remove();
+  }
+  ElMessage.success('面板地址已复制');
+}
+
+function resetFilters() {
+  searchQuery.value = '';
+  selectedStatus.value = '';
+  selectedCredential.value = '';
 }
 
 function resetForm() {
   editingId.value = '';
-  Object.assign(form, { name: '', baseUrl: '', basePath: '', username: '', password: '', token: '', tlsServerName: '', tlsCertFile: '', tlsKeyFile: '', realityTarget: '', realityServerName: '', realityFingerprint: 'chrome', realitySpiderX: '/', enabled: true, remark: '' });
+  clearPassword.value = false;
+  clearToken.value = false;
+  Object.assign(form, {
+    name: '',
+    baseUrl: '',
+    basePath: '',
+    shareHost: '',
+    username: '',
+    password: '',
+    token: '',
+    tlsServerName: '',
+    tlsCertFile: '',
+    tlsKeyFile: '',
+    realityTarget: '',
+    realityServerName: '',
+    realityFingerprint: 'chrome',
+    realitySpiderX: '/',
+    enabled: true,
+    remark: ''
+  });
 }
 
 function cleanFormBody() {
-  return {
-    ...form,
+  const body = {
+    name: form.name.trim(),
+    baseUrl: form.baseUrl.trim(),
     basePath: form.basePath.trim() || undefined,
     username: form.username.trim() || undefined,
-    password: form.password || undefined,
-    token: form.token || undefined,
+    password: clearPassword.value ? '' : form.password || undefined,
+    token: clearToken.value ? '' : form.token || undefined,
+    shareHost: form.shareHost.trim() || undefined,
     tlsServerName: form.tlsServerName.trim() || undefined,
     tlsCertFile: form.tlsCertFile.trim() || undefined,
     tlsKeyFile: form.tlsKeyFile.trim() || undefined,
@@ -317,12 +490,57 @@ function cleanFormBody() {
     realityServerName: form.realityServerName.trim() || undefined,
     realityFingerprint: form.realityFingerprint.trim() || undefined,
     realitySpiderX: form.realitySpiderX.trim() || undefined,
+    enabled: form.enabled,
     remark: form.remark.trim() || undefined
   };
+  return body;
+}
+
+function connectionStatus(server: XuiServer) {
+  if (syncingIds.value.has(server.id)) return { label: '同步中', className: 'is-syncing' };
+  if (!server.enabled) return { label: '已停用', className: 'is-disabled' };
+  const result = connectionTests.value[server.id];
+  if (result?.state === 'success') return { label: '本次测试正常', className: 'is-online' };
+  if (result?.state === 'error') return { label: '本次测试失败', className: 'is-error' };
+  return { label: '尚未测试', className: 'is-untested' };
+}
+
+function credentialLabel(server: XuiServer) {
+  if (server.hasToken && server.hasPassword) return 'Token + 账号密码';
+  if (server.hasToken) return 'API Token';
+  if (server.hasPassword) return '账号密码';
+  return '未保存凭据';
+}
+
+function serverEndpoint(server: XuiServer) {
+  return `${server.baseUrl.replace(/\/$/, '')}${server.basePath ? `/${server.basePath.replace(/^\/+|\/+$/g, '')}` : ''}`;
 }
 
 function hasTlsConfig(server: XuiServer) {
   return Boolean(server.config?.tlsCertFile && server.config?.tlsKeyFile);
+}
+
+function hasRealityCandidate(server: XuiServer) {
+  return Boolean(server.config?.realityTarget || server.config?.realityServerName);
+}
+
+function countXuiItems(value: unknown) {
+  if (Array.isArray(value)) return value.length;
+  const record = objectValue(value);
+  if (Array.isArray(record.obj)) return record.obj.length;
+  if (Array.isArray(record.data)) return record.data.length;
+  return 0;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function formatShortValue(value: unknown) {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  const record = objectValue(value);
+  return String(record.version || record.name || record.tag || '').trim();
 }
 
 function formatBytes(value: number) {
@@ -350,9 +568,9 @@ function serverSearchText(server: XuiServer) {
     server.basePath,
     server.username,
     server.enabled ? '启用' : '停用',
-    server.hasToken ? 'token' : '',
-    server.hasPassword ? '账号密码' : '',
+    credentialLabel(server),
     server.config?.tlsServerName,
+    server.config?.shareHost,
     server.config?.tlsCertFile,
     server.config?.realityTarget,
     server.config?.realityServerName,
@@ -360,131 +578,246 @@ function serverSearchText(server: XuiServer) {
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
+function addPendingId(source: Set<string>, id: string) {
+  return new Set(source).add(id);
+}
+
+function removePendingId(source: Set<string>, id: string) {
+  const next = new Set(source);
+  next.delete(id);
+  return next;
+}
+
+function errorMessage(err: unknown, fallback: string) {
+  return err instanceof Error ? err.message : fallback;
+}
+
+function showError(err: unknown, fallback: string) {
+  error.value = errorMessage(err, fallback);
+  ElMessage.error(error.value);
+}
+
 onMounted(loadServers);
 </script>
 
 <template>
-  <div class="page-head">
-    <div class="page-head-main">
-      <h1 class="page-title">面板连接</h1>
-      <p>维护 3x-ui 面板连接、证书路径和 Reality 自动创建节点所需配置。</p>
-    </div>
-    <div class="page-actions">
-      <el-button :loading="loading" @click="loadServers"><RefreshCw :size="15" />刷新</el-button>
-    </div>
-  </div>
-  <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
+  <section class="xui-management-page" :class="{ loading }">
+    <header class="xui-page-header">
+      <div>
+        <h1>面板连接</h1>
+        <p>维护真实 3x-ui 面板地址、访问凭据、分享地址、TLS 证书和 Reality 探测配置。</p>
+      </div>
+      <div class="xui-page-actions">
+        <el-button class="xui-secondary-button" :loading="loading" @click="loadServers"><RefreshCw :size="15" />刷新</el-button>
+        <el-button type="primary" @click="openDialog"><Plus :size="15" />添加面板</el-button>
+      </div>
+    </header>
 
-  <div class="metric-grid compact-metrics">
-    <div class="metric"><span>面板连接</span><strong>{{ servers.length }}</strong><small>启用 {{ enabledServerCount }}</small></div>
-    <div class="metric"><span>Token 凭据</span><strong>{{ tokenServerCount }}</strong><small>优先使用 API Token</small></div>
-    <div class="metric"><span>TLS 证书</span><strong>{{ tlsServerCount }}</strong><small>可自动创建 TLS 节点</small></div>
-    <div class="metric"><span>Reality 探测</span><strong>{{ realityAutoCount }}</strong><small>留空时由 3x-ui 自动扫描</small></div>
-  </div>
+    <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="xui-page-alert" />
 
-  <div class="panel list-panel">
-    <div class="panel-toolbar">
-      <strong>面板连接列表</strong>
-      <div class="table-toolbar-actions">
-        <el-button type="primary" @click="openDialog"><Plus :size="15" />添加面板连接</el-button>
+    <div class="xui-stat-grid">
+      <article class="xui-stat-card">
+        <span class="xui-stat-icon tone-indigo"><Server :size="18" /></span>
+        <div><small>面板连接</small><strong>{{ servers.length }}</strong><span>真实保存的 3x-ui 连接</span></div>
+      </article>
+      <article class="xui-stat-card">
+        <span class="xui-stat-icon tone-emerald"><CheckCircle2 :size="18" /></span>
+        <div><small>已启用</small><strong>{{ enabledServerCount }}</strong><span>{{ servers.length - enabledServerCount }} 个已停用</span></div>
+      </article>
+      <article class="xui-stat-card">
+        <span class="xui-stat-icon tone-cyan"><KeyRound :size="18" /></span>
+        <div><small>已保存密码</small><strong>{{ passwordServerCount }}</strong><span>账号密码登录凭据</span></div>
+      </article>
+      <article class="xui-stat-card">
+        <span class="xui-stat-icon tone-amber"><ShieldCheck :size="18" /></span>
+        <div><small>已保存 Token</small><strong>{{ tokenServerCount }}</strong><span>可直接用于 API 认证</span></div>
+      </article>
+    </div>
+
+    <div class="xui-filter-panel">
+      <div class="xui-search-field">
+        <Search :size="15" />
+        <el-input v-model="searchQuery" clearable placeholder="搜索面板名称、地址、账号、分享主机或备注" />
+      </div>
+      <el-select v-model="selectedStatus" clearable placeholder="全部状态" class="xui-filter-select">
+        <el-option label="已启用" value="enabled" />
+        <el-option label="已停用" value="disabled" />
+        <el-option label="本次测试正常" value="tested-success" />
+        <el-option label="本次测试失败" value="tested-error" />
+      </el-select>
+      <el-select v-model="selectedCredential" clearable placeholder="全部凭据" class="xui-filter-select">
+        <el-option label="已保存 Token" value="token" />
+        <el-option label="已保存密码" value="password" />
+        <el-option label="未保存凭据" value="missing" />
+      </el-select>
+      <el-button v-if="hasActiveFilters" class="xui-reset-filter" text @click="resetFilters">重置</el-button>
+    </div>
+
+    <div v-loading="loading" class="xui-panel-grid">
+      <article v-for="server in filteredServers" :key="server.id" class="xui-panel-card">
+        <header class="xui-panel-card-header">
+          <div class="xui-panel-identity">
+            <span class="xui-panel-icon"><Network :size="20" /></span>
+            <div>
+              <strong :title="server.name">{{ server.name }}</strong>
+              <span>3x-ui · {{ credentialLabel(server) }}</span>
+            </div>
+          </div>
+          <span class="xui-status-chip" :class="connectionStatus(server).className"><i></i>{{ connectionStatus(server).label }}</span>
+        </header>
+
+        <div class="xui-panel-address">
+          <Network :size="14" />
+          <div>
+            <small>面板接口地址</small>
+            <strong :title="serverEndpoint(server)">{{ serverEndpoint(server) }}</strong>
+          </div>
+          <el-tooltip content="复制面板接口地址" placement="top">
+            <button type="button" class="xui-copy-button" aria-label="复制面板接口地址" @click="copyServerAddress(server)"><Clipboard :size="14" /></button>
+          </el-tooltip>
+        </div>
+
+        <div class="xui-panel-meta">
+          <div><span>基础路径</span><strong>{{ server.basePath || '/' }}</strong></div>
+          <div><span>登录账号</span><strong :title="server.username || ''">{{ server.username || '-' }}</strong></div>
+          <div><span>TLS 证书</span><strong>{{ hasTlsConfig(server) ? '已配置' : '未配置' }}</strong></div>
+          <div><span>分享主机</span><strong :title="server.config?.shareHost || ''">{{ server.config?.shareHost || '使用面板域名' }}</strong></div>
+        </div>
+
+        <div class="xui-panel-tags">
+          <span v-if="server.hasToken" class="xui-panel-tag token">Token</span>
+          <span v-if="server.hasPassword" class="xui-panel-tag password">密码</span>
+          <span v-if="server.config?.tlsServerName" class="xui-panel-tag tls" :title="server.config.tlsServerName">TLS {{ server.config.tlsServerName }}</span>
+          <span class="xui-panel-tag reality">Reality {{ hasRealityCandidate(server) ? '候选已配置' : '自动探测' }}</span>
+          <span v-if="connectionTests[server.id]?.state === 'success'" class="xui-panel-tag inbound">入站 {{ connectionTests[server.id]?.inboundCount ?? 0 }}</span>
+        </div>
+
+        <p class="xui-panel-remark" :class="{ 'is-empty': !server.remark }">{{ server.remark || '暂无备注' }}</p>
+
+        <footer class="xui-panel-actions">
+          <el-button type="primary" plain @click="editServer(server)"><Edit3 :size="14" />编辑</el-button>
+          <el-button
+            class="xui-sync-button"
+            :loading="syncingIds.has(server.id)"
+            :disabled="!server.enabled"
+            @click="syncServer(server)"
+          ><RefreshCw :size="14" />同步节点</el-button>
+          <el-dropdown trigger="click" @command="(command: string) => handleServerCommand(server, command)">
+            <el-button class="xui-more-button" aria-label="更多面板操作"><MoreHorizontal :size="16" /></el-button>
+            <template #dropdown>
+              <el-dropdown-menu class="xui-action-menu">
+                <el-dropdown-item command="test" :disabled="testingIds.has(server.id)"><Wifi :size="14" />测试连接</el-dropdown-item>
+                <el-dropdown-item command="status" :disabled="statusIds.has(server.id)"><Activity :size="14" />查看面板状态</el-dropdown-item>
+                <el-dropdown-item command="presence" :disabled="presenceIds.has(server.id)"><Users :size="14" />查看在线客户端</el-dropdown-item>
+                <el-dropdown-item command="certs" :disabled="certIds.has(server.id)"><FileKey2 :size="14" />读取证书状态</el-dropdown-item>
+                <el-dropdown-item command="sync-socks" :disabled="!server.enabled || syncingSocksIds.has(server.id)"><RefreshCw :size="14" />导入 SOCKS 出站</el-dropdown-item>
+                <el-dropdown-item command="toggle" :disabled="togglingIds.has(server.id)">
+                  <CircleSlash2 v-if="server.enabled" :size="14" />
+                  <CheckCircle2 v-else :size="14" />
+                  {{ server.enabled ? '停用连接' : '启用连接' }}
+                </el-dropdown-item>
+                <el-dropdown-item command="delete" divided :disabled="deletingIds.has(server.id)"><Trash2 :size="14" />删除连接</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </footer>
+      </article>
+
+      <div v-if="!filteredServers.length && !loading" class="xui-empty-state">
+        <CloudCog :size="28" />
+        <strong>{{ servers.length ? '没有符合筛选条件的面板连接' : '暂无面板连接' }}</strong>
+        <span>{{ servers.length ? '调整筛选条件后再查看' : '使用右上角按钮添加真实 3x-ui 面板连接' }}</span>
       </div>
     </div>
-    <div class="filter-bar">
-      <el-input v-model="searchQuery" clearable placeholder="搜索名称、地址、账号、证书、Reality" style="max-width: 380px">
-        <template #prefix><Search :size="15" /></template>
-      </el-input>
-      <span class="filter-summary">显示 {{ filteredServers.length }} / {{ servers.length }}</span>
-    </div>
-    <div v-loading="loading" class="entity-card-grid server-card-grid">
-      <article v-for="server in filteredServers" :key="server.id" class="entity-card server-card">
-        <div class="entity-card-head">
-          <div>
-            <strong>{{ server.name }}</strong>
-            <span>{{ server.baseUrl }}{{ server.basePath || '' }}</span>
-          </div>
-          <div class="tag-stack">
-            <el-switch v-model="server.enabled" size="small" :loading="togglingIds.has(server.id)" @change="(value: boolean | string | number) => toggleServerEnabled(server, value)" />
-            <el-tag v-if="server.hasToken" size="small" type="success">Token</el-tag>
-            <el-tag v-else-if="server.hasPassword" size="small">账号密码</el-tag>
-            <el-tag v-else size="small" type="warning">未配置</el-tag>
-          </div>
-        </div>
-        <div class="entity-card-stats">
-          <div><span>路径</span><strong>{{ server.basePath || '/' }}</strong></div>
-          <div><span>TLS</span><strong>{{ hasTlsConfig(server) ? '已配置' : '未配置' }}</strong></div>
-          <div><span>Reality</span><strong>{{ server.config?.realityTarget ? '候选' : '自动探测' }}</strong></div>
-        </div>
-        <div class="entity-card-meta">
-          <span>{{ server.config?.tlsServerName || server.config?.realityServerName || '暂无域名配置' }}</span>
-          <span v-if="server.remark">{{ server.remark }}</span>
-        </div>
-        <div class="entity-card-actions split-card-actions">
-          <div class="row-action-group remote-action">
-            <span class="action-group-label">远端读取</span>
-            <el-button size="small" :loading="testingIds.has(server.id)" @click="testSaved(server)"><Wifi :size="15" />测试</el-button>
-            <el-button size="small" :loading="certIds.has(server.id)" @click="testSavedCerts(server)"><Activity :size="15" />证书</el-button>
-            <el-button size="small" :loading="statusIds.has(server.id)" @click="showServerStatus(server)"><Activity :size="15" />状态</el-button>
-            <el-button size="small" :loading="presenceIds.has(server.id)" @click="showClientPresence(server)"><Users :size="15" />在线</el-button>
-            <el-button size="small" :loading="syncingIds.has(server.id)" :disabled="!server.enabled" @click="syncServer(server)"><RefreshCw :size="15" />同步</el-button>
-          </div>
-          <div class="row-action-group manage-action">
-            <span class="action-group-label">管理</span>
-            <el-button size="small" @click="editServer(server)"><Edit3 :size="15" />编辑</el-button>
-            <el-button size="small" type="danger" plain @click="removeServer(server)"><Trash2 :size="15" />删除</el-button>
-          </div>
-        </div>
-      </article>
-      <div v-if="!filteredServers.length && !loading" class="empty-panel entity-empty">暂无面板连接</div>
-    </div>
-  </div>
 
-  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑面板连接' : '添加面板连接'" width="min(900px, 94vw)" destroy-on-close>
-    <el-form :model="form" label-width="96px" class="sectioned-dialog-form">
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>连接信息</strong><span>3x-ui 面板地址、路径和启用状态</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
+    <footer class="xui-list-footer">显示 {{ filteredServers.length }} / {{ servers.length }} 个真实面板连接</footer>
+  </section>
+
+  <el-dialog
+    v-model="dialogVisible"
+    :title="editingId ? '编辑面板连接' : '添加面板连接'"
+    width="min(940px, 94vw)"
+    class="xui-dark-dialog"
+    destroy-on-close
+  >
+    <div class="xui-dialog-intro">
+      <Server :size="18" />
+      <div>
+        <strong>{{ editingId ? '更新已保存的 3x-ui 连接配置' : '接入新的 3x-ui 面板' }}</strong>
+        <span>连接测试、证书读取、状态查询和同步操作都会直接使用这里保存的真实地址与凭据。</span>
+      </div>
+    </div>
+
+    <el-form :model="form" label-position="top" class="xui-dialog-form">
+      <section class="xui-dialog-section">
+        <header><strong>基础连接</strong><span>面板名称、完整 URL、Web 基础路径和启用状态</span></header>
+        <div class="xui-dialog-grid">
+          <el-form-item label="面板名称"><el-input v-model="form.name" maxlength="100" placeholder="输入面板名称" /></el-form-item>
           <el-form-item label="面板地址"><el-input v-model="form.baseUrl" placeholder="https://xui.example.com" /></el-form-item>
-          <el-form-item label="面板路径"><el-input v-model="form.basePath" placeholder="根路径留空" /></el-form-item>
-          <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
+          <el-form-item label="基础路径"><el-input v-model="form.basePath" maxlength="120" placeholder="根路径留空，例如 /panel" /></el-form-item>
+          <el-form-item label="启用连接" class="xui-switch-item"><el-switch v-model="form.enabled" /></el-form-item>
         </div>
       </section>
 
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>访问凭据</strong><span>优先使用 API Token；账号密码用于面板登录接口</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="账号"><el-input v-model="form.username" /></el-form-item>
-          <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password placeholder="编辑时留空不修改" /></el-form-item>
-          <el-form-item label="API Token" class="form-item-full"><el-input v-model="form.token" type="password" show-password placeholder="编辑时留空不修改" /></el-form-item>
-          <el-form-item v-if="editingId" label="已保存" class="form-item-full"><el-button :loading="revealingSecrets" @click="revealServerSecrets"><Eye :size="15" />读取已保存密码/Token</el-button></el-form-item>
+      <section class="xui-dialog-section">
+        <header><strong>访问凭据</strong><span>可保存用户名和密码，也可保存 API Token；编辑时留空会保留原值</span></header>
+        <div class="xui-dialog-grid">
+          <el-form-item label="用户名"><el-input v-model="form.username" maxlength="100" placeholder="3x-ui 登录账号" /></el-form-item>
+          <el-form-item label="密码">
+            <el-input v-model="form.password" type="password" show-password maxlength="256" :disabled="clearPassword" placeholder="编辑时留空不修改" />
+            <el-checkbox v-if="editingId" v-model="clearPassword" class="xui-clear-secret">清除已保存密码</el-checkbox>
+          </el-form-item>
+          <el-form-item label="API Token" class="xui-dialog-full">
+            <el-input v-model="form.token" type="password" show-password maxlength="2048" :disabled="clearToken" placeholder="编辑时留空不修改" />
+            <el-checkbox v-if="editingId" v-model="clearToken" class="xui-clear-secret">清除已保存 Token</el-checkbox>
+          </el-form-item>
+          <el-form-item v-if="editingId" label="已保存凭据" class="xui-dialog-full">
+            <el-button class="xui-secondary-button" :loading="revealingSecrets" @click="revealServerSecrets"><Eye :size="15" />读取已保存密码和 Token</el-button>
+          </el-form-item>
         </div>
       </section>
 
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>TLS 证书</strong><span>自动创建 TLS 节点时使用，路径需要是远端服务器上的真实文件</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="TLS 域名"><el-input v-model="form.tlsServerName" placeholder="例如 panel.example.com" /></el-form-item>
-          <el-form-item label="证书路径"><el-input v-model="form.tlsCertFile" placeholder="例如 /root/cert/fullchain.pem" /></el-form-item>
-          <el-form-item label="私钥路径"><el-input v-model="form.tlsKeyFile" placeholder="例如 /root/cert/privkey.pem" /></el-form-item>
-          <el-form-item label="证书检测" class="form-item-full"><el-button :loading="testingCertForm" :disabled="!form.baseUrl" @click="testFormCerts"><Activity :size="15" />读取 3x-ui 证书</el-button></el-form-item>
+      <section class="xui-dialog-section">
+        <header><strong>分享链接</strong><span>分享主机用于生成真实客户端链接；留空时使用面板地址中的主机名</span></header>
+        <div class="xui-dialog-grid">
+          <el-form-item label="分享主机"><el-input v-model="form.shareHost" maxlength="255" placeholder="代理入口域名或 IP" /></el-form-item>
+          <el-form-item label="TLS Server Name"><el-input v-model="form.tlsServerName" maxlength="255" placeholder="例如 node.example.com" /></el-form-item>
         </div>
       </section>
 
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>Reality 探测</strong><span>目标和 SNI 可留空，创建节点时优先调用 3x-ui 自动扫描</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="目标候选"><el-input v-model="form.realityTarget" placeholder="可留空；扫描失败时才尝试，例如 example.com:443" /></el-form-item>
-          <el-form-item label="SNI 候选"><el-input v-model="form.realityServerName" placeholder="可留空；优先使用扫描结果" /></el-form-item>
-          <el-form-item label="指纹"><el-input v-model="form.realityFingerprint" placeholder="chrome" /></el-form-item>
-          <el-form-item label="SpiderX"><el-input v-model="form.realitySpiderX" placeholder="/" /></el-form-item>
-          <el-form-item label="备注" class="form-item-full"><el-input v-model="form.remark" /></el-form-item>
+      <section class="xui-dialog-section">
+        <header><strong>TLS 证书</strong><span>填写远端服务器上的真实证书文件与私钥文件路径</span></header>
+        <div class="xui-dialog-grid">
+          <el-form-item label="证书文件"><el-input v-model="form.tlsCertFile" maxlength="500" placeholder="例如 /root/cert/fullchain.pem" /></el-form-item>
+          <el-form-item label="私钥文件"><el-input v-model="form.tlsKeyFile" maxlength="500" placeholder="例如 /root/cert/privkey.pem" /></el-form-item>
+          <el-form-item label="从面板读取" class="xui-dialog-full">
+            <el-button class="xui-secondary-button" :loading="testingCertForm" :disabled="!form.name || !form.baseUrl" @click="testFormCerts"><FileKey2 :size="15" />读取 3x-ui 证书配置</el-button>
+          </el-form-item>
+        </div>
+      </section>
+
+      <section class="xui-dialog-section">
+        <header><strong>Reality 探测</strong><span>目标与 Server Name 可留空，创建 Reality 节点时会优先调用 3x-ui 自动扫描</span></header>
+        <div class="xui-dialog-grid">
+          <el-form-item label="目标候选"><el-input v-model="form.realityTarget" maxlength="255" placeholder="例如 example.com:443" /></el-form-item>
+          <el-form-item label="Server Name 候选"><el-input v-model="form.realityServerName" maxlength="255" placeholder="例如 example.com" /></el-form-item>
+          <el-form-item label="浏览器指纹"><el-input v-model="form.realityFingerprint" maxlength="40" placeholder="chrome" /></el-form-item>
+          <el-form-item label="SpiderX"><el-input v-model="form.realitySpiderX" maxlength="120" placeholder="/" /></el-form-item>
+        </div>
+      </section>
+
+      <section class="xui-dialog-section xui-dialog-section-last">
+        <header><strong>备注</strong><span>记录连接用途、机房或维护信息</span></header>
+        <div class="xui-dialog-grid">
+          <el-form-item label="备注" class="xui-dialog-full"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="500" placeholder="输入面板连接备注" /></el-form-item>
         </div>
       </section>
     </el-form>
+
     <template #footer>
-      <el-button :loading="testingForm" :disabled="!form.baseUrl" @click="testForm"><Wifi :size="15" />测试连接</el-button>
-      <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!form.name || !form.baseUrl" @click="saveServer">保存</el-button>
+      <el-button class="xui-secondary-button" :loading="testingForm" :disabled="!form.name || !form.baseUrl" @click="testForm"><Wifi :size="15" />测试连接</el-button>
+      <el-button class="xui-secondary-button" @click="dialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!form.name.trim() || !form.baseUrl.trim()" @click="saveServer">{{ editingId ? '保存修改' : '添加面板' }}</el-button>
     </template>
   </el-dialog>
 </template>

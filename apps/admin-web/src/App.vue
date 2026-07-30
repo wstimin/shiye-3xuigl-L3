@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue';
-import { ArrowRight, ClipboardList, CreditCard, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards } from 'lucide-vue-next';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { useRoute } from 'vue-router';
+import { ArrowRight, CircleAlert, ClipboardList, CreditCard, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards } from 'lucide-vue-next';
 import { api } from './api';
 
 type SessionUser = { role: string; username: string };
@@ -43,6 +44,24 @@ const loginError = ref('');
 const user = ref<SessionUser | null>(null);
 const branding = reactive<Branding>({ brandName: fallbackBrandName, logoDataUrl: '' });
 const loginForm = reactive({ username: '', password: '' });
+const route = useRoute();
+const isDashboardRoute = computed(() => route.path === '/');
+const darkAdminRoutes = new Set(['/', '/customers', '/nodes', '/xui-servers', '/socks-nodes', '/sync-logs', '/diagnostics', '/finance', '/cards', '/payments', '/settings']);
+const isDarkAdminRoute = computed(() => darkAdminRoutes.has(route.path));
+const currentRouteLabel = computed(() => {
+  if (route.path === '/') return '数据概览';
+  if (route.path === '/customers') return '用户管理';
+  if (route.path === '/nodes') return '路由节点';
+  if (route.path === '/xui-servers') return '\u9762\u677f\u8fde\u63a5';
+  if (route.path === '/socks-nodes') return '\u51fa\u7ad9\u8282\u70b9';
+  if (route.path === '/sync-logs') return '\u540c\u6b65\u65e5\u5fd7';
+  if (route.path === '/diagnostics') return '\u5065\u5eb7\u8bca\u65ad';
+  if (route.path === '/finance') return '\u8d22\u52a1\u8bb0\u5f55';
+  if (route.path === '/cards') return '\u5361\u5bc6\u7ba1\u7406';
+  if (route.path === '/payments') return '\u652f\u4ed8\u8bbe\u7f6e';
+  if (route.path === '/settings') return '\u7cfb\u7edf\u8bbe\u7f6e';
+  return '';
+});
 
 async function loadBranding() {
   try {
@@ -139,35 +158,86 @@ onUnmounted(() => {
 <template>
   <div v-if="checking" class="boot-screen">正在检查登录状态</div>
 
-  <div v-else-if="!user" class="login-screen">
-    <form class="login-panel refined-login" autocomplete="off" @submit.prevent="login">
-      <div class="login-brand-row">
-        <div class="login-brand">
-          <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
-          <span v-else>{{ branding.brandName.slice(0, 1) }}</span>
+  <div v-else-if="!user" class="login-screen admin-login-screen">
+    <div class="login-layout">
+      <section class="login-intro" aria-labelledby="admin-login-title">
+        <div class="intro-brand-row">
+          <div class="intro-brand-mark">
+            <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
+            <span v-else>{{ branding.brandName.slice(0, 1) }}</span>
+          </div>
+          <div class="intro-brand-copy">
+            <strong>{{ branding.brandName }}</strong>
+            <span><i></i>运维控制台运行中</span>
+          </div>
         </div>
-        <div>
-          <h1>{{ branding.brandName }}</h1>
-          <p>管理员登录</p>
+
+        <div class="intro-content">
+          <p class="intro-kicker">XUI MANAGEMENT CONSOLE</p>
+          <h1 id="admin-login-title">统一管理 XUI 节点与用户服务</h1>
+          <p class="intro-description">集中维护面板连接、入站用户和节点配置，完成创建、删除、同步、流量状态检查与运行诊断。</p>
+          <div class="login-feature-list">
+            <div class="login-feature-item">
+              <span class="feature-icon"><Network :size="18" /></span>
+              <div><strong>面板与节点</strong><span>维护 XUI 面板连接、路由节点与出站配置</span></div>
+            </div>
+            <div class="login-feature-item">
+              <span class="feature-icon"><Users :size="18" /></span>
+              <div><strong>用户与入站</strong><span>创建、删除用户并管理入站及服务配置</span></div>
+            </div>
+            <div class="login-feature-item">
+              <span class="feature-icon"><HeartPulse :size="18" /></span>
+              <div><strong>同步与诊断</strong><span>同步节点数据，查看流量状态和执行日志</span></div>
+            </div>
+          </div>
         </div>
-      </div>
-      <el-alert v-if="loginError" :title="loginError" type="error" show-icon :closable="false" />
-      <label class="login-field">
-        <UserRound :size="17" />
-        <input v-model="loginForm.username" name="shiye-admin-account" placeholder="账号" autocomplete="off" />
-      </label>
-      <label class="login-field">
-        <LockKeyhole :size="17" />
-        <input v-model="loginForm.password" name="shiye-admin-passcode" type="password" placeholder="密码" autocomplete="new-password" />
-      </label>
-      <button class="login-submit" :disabled="loggingIn || !loginForm.username || !loginForm.password">
-        <span>{{ loggingIn ? '登录中' : '登录' }}</span>
-        <ArrowRight :size="17" />
-      </button>
-    </form>
+      </section>
+
+      <main class="login-area">
+        <form class="login-panel refined-login" autocomplete="on" @submit.prevent="login">
+          <div class="login-card-brand">
+            <div class="login-brand">
+              <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
+              <span v-else>{{ branding.brandName.slice(0, 1) }}</span>
+            </div>
+            <div><strong>{{ branding.brandName }}</strong><span>管理端</span></div>
+          </div>
+
+          <div class="login-heading">
+            <h2>登录管理端</h2>
+            <p>请输入管理员账号和密码继续</p>
+          </div>
+
+          <div v-if="loginError" class="login-error" role="alert">
+            <CircleAlert :size="17" />
+            <span>{{ loginError }}</span>
+          </div>
+
+          <label class="login-form-group">
+            <span>管理员账号</span>
+            <span class="login-field">
+              <UserRound :size="18" />
+              <input v-model="loginForm.username" name="shiye-admin-account" placeholder="请输入管理员账号" autocomplete="username" />
+            </span>
+          </label>
+          <label class="login-form-group">
+            <span>密码</span>
+            <span class="login-field">
+              <LockKeyhole :size="18" />
+              <input v-model="loginForm.password" name="shiye-admin-passcode" type="password" placeholder="请输入密码" autocomplete="current-password" />
+            </span>
+          </label>
+          <button class="login-submit" :disabled="loggingIn || !loginForm.username || !loginForm.password">
+            <span>{{ loggingIn ? '正在验证' : '登录控制台' }}</span>
+            <ArrowRight :size="18" />
+          </button>
+          <div class="login-security-note"><ShieldCheck :size="15" />管理员身份验证</div>
+        </form>
+      </main>
+    </div>
   </div>
 
-  <el-container v-else class="shell">
+  <el-container v-else class="shell" :class="{ 'overview-shell': isDarkAdminRoute }">
     <el-aside width="220px" class="sidebar">
       <div class="brand">
         <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
@@ -184,17 +254,24 @@ onUnmounted(() => {
         </section>
       </nav>
       <div class="sidebar-footer">
-        <div class="sidebar-user">
-          <span>当前账号</span>
-          <strong>{{ user.username }}</strong>
+        <div class="sidebar-user-card">
+          <span class="sidebar-user-avatar">{{ user.username.slice(0, 1).toUpperCase() }}</span>
+          <div class="sidebar-user">
+            <strong>{{ user.username }}</strong>
+            <span>超级管理员</span>
+          </div>
         </div>
         <el-button text class="logout-button" @click="logout"><LogOut :size="16" />退出登录</el-button>
       </div>
     </el-aside>
-    <el-container>
+    <el-container class="admin-workspace">
       <el-header class="topbar">
-        <span>管理后台</span>
-        <el-tag size="small" type="success">{{ user.username }}</el-tag>
+        <div class="topbar-heading">
+          <strong>管理后台</strong>
+          <span v-if="currentRouteLabel">/ <b>{{ currentRouteLabel }}</b></span>
+        </div>
+        <div v-if="isDarkAdminRoute" class="topbar-user-badge"><i></i>{{ user.username }}</div>
+        <el-tag v-else size="small" type="success">{{ user.username }}</el-tag>
       </el-header>
       <el-main>
         <router-view />

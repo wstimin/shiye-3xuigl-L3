@@ -142,6 +142,7 @@ onMounted(loadSettings);
 </script>
 
 <template>
+  <div class="operations-page settings-page" :class="{ loading }">
   <h1 class="page-title">系统设置</h1>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
@@ -171,8 +172,8 @@ onMounted(loadSettings);
     <div class="panel">
       <div class="panel-toolbar"><strong>账号安全</strong></div>
       <el-form :model="passwordForm" label-width="88px" autocomplete="off">
-        <el-form-item label="当前密码"><el-input v-model="passwordForm.currentPassword" name="shiye-current-passcode" type="password" show-password autocomplete="new-password" /></el-form-item>
-        <el-form-item label="新密码"><el-input v-model="passwordForm.newPassword" name="shiye-next-passcode" type="password" show-password autocomplete="new-password" minlength="8" /></el-form-item>
+        <el-form-item label="当前密码"><el-input v-model="passwordForm.currentPassword" name="shiye-current-passcode" type="password" show-password autocomplete="new-password" maxlength="256" /></el-form-item>
+        <el-form-item label="新密码"><el-input v-model="passwordForm.newPassword" name="shiye-next-passcode" type="password" show-password autocomplete="new-password" minlength="8" maxlength="256" /></el-form-item>
         <el-form-item><el-button type="primary" :loading="changingPassword" :disabled="!passwordForm.currentPassword || passwordForm.newPassword.length < 8" @click="changePassword">修改密码</el-button></el-form-item>
       </el-form>
     </div>
@@ -180,7 +181,7 @@ onMounted(loadSettings);
     <div class="panel">
       <div class="panel-toolbar"><strong>业务设置</strong></div>
       <el-form :model="businessForm" label-width="112px" v-loading="loading">
-        <el-form-item label="卡密购买地址"><el-input v-model="businessForm.cardPurchaseUrl" placeholder="https://example.com/buy" /></el-form-item>
+        <el-form-item label="卡密购买地址"><el-input v-model="businessForm.cardPurchaseUrl" type="url" placeholder="https://example.com/buy" /></el-form-item>
         <el-form-item><el-button type="primary" :loading="savingBusiness" @click="saveBusiness">保存业务设置</el-button></el-form-item>
       </el-form>
     </div>
@@ -197,5 +198,6 @@ onMounted(loadSettings);
         <el-form-item><el-button type="primary" :loading="savingRuntime" @click="saveRuntime">保存管理路径</el-button></el-form-item>
       </el-form>
     </div>
+  </div>
   </div>
 </template>

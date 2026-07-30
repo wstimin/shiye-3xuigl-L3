@@ -29,6 +29,7 @@ data/*.db
 Thumbs.db
 
 *.zip
+.release/
 tu/
 图片/
 

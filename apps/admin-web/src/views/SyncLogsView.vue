@@ -177,6 +177,7 @@ onMounted(loadLogs);
 </script>
 
 <template>
+  <div class="operations-page sync-logs-page" :class="{ loading }">
   <div class="page-head">
     <div class="page-head-main">
       <h1 class="page-title">同步日志</h1>
@@ -233,7 +234,7 @@ onMounted(loadLogs);
     </el-table>
   </div>
 
-  <el-dialog v-model="detailDialogVisible" title="同步日志详情" width="min(760px, 92vw)" destroy-on-close>
+  <el-dialog v-model="detailDialogVisible" title="同步日志详情" width="min(760px, 92vw)" class="operations-dark-dialog" destroy-on-close>
     <div v-if="selectedLog" class="log-detail-dialog">
       <div class="log-detail-meta">
         <span>{{ formatDate(selectedLog.createdAt) }}</span>
@@ -249,4 +250,5 @@ onMounted(loadLogs);
       <el-button type="primary" @click="copyDetail()"><Copy :size="15" />复制详情</el-button>
     </template>
   </el-dialog>
+  </div>
 </template>

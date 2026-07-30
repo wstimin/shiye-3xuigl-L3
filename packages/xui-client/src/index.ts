@@ -26,6 +26,7 @@ export class XuiClientError extends Error {
 export class XuiClient {
   private readonly fetchImpl: typeof fetch;
   private sessionCookie = '';
+  private csrfToken = '';
 
   constructor(private readonly options: XuiClientOptions) {
     this.fetchImpl = options.fetchImpl || fetch;
@@ -36,6 +37,7 @@ export class XuiClient {
       'content-type': 'application/json',
       ...this.authHeaders(),
       ...this.cookieHeaders(),
+      ...this.csrfHeaders(),
       ...options.headers
     };
 
@@ -57,6 +59,7 @@ export class XuiClient {
       'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
       ...this.authHeaders(),
       ...this.cookieHeaders(),
+      ...this.csrfHeaders(),
       ...options.headers
     };
 
@@ -73,8 +76,15 @@ export class XuiClient {
     return payload as T;
   }
 
-  login(body: { username: string; password: string }) {
-    return this.request('/login', { method: 'POST', body });
+  async login(body: { username: string; password: string }) {
+    await this.refreshCsrfToken(false);
+    const response = await this.formRequest('/login', {
+      method: 'POST',
+      headers: this.csrfHeaders(),
+      body
+    });
+    await this.refreshCsrfToken(true);
+    return response;
   }
 
   listInbounds() {
@@ -93,6 +103,10 @@ export class XuiClient {
     return this.request('/panel/api/server/getWebCertFiles');
   }
 
+  getPanelSettings() {
+    return this.sessionRequest('/panel/setting/all', { method: 'POST' });
+  }
+
   getNewX25519Cert() {
     return this.request('/panel/api/server/getNewX25519Cert');
   }
@@ -106,11 +120,11 @@ export class XuiClient {
   }
 
   addInbound(body: unknown) {
-    return this.request('/panel/api/inbounds/add', { method: 'POST', body });
+    return this.formRequest('/panel/api/inbounds/add', { method: 'POST', body: this.formBody(body) });
   }
 
   updateInbound(id: number, body: unknown) {
-    return this.request(`/panel/api/inbounds/update/${encodeURIComponent(String(id))}`, { method: 'POST', body });
+    return this.formRequest(`/panel/api/inbounds/update/${encodeURIComponent(String(id))}`, { method: 'POST', body: this.formBody(body) });
   }
 
   deleteInbound(id: number) {
@@ -118,44 +132,79 @@ export class XuiClient {
   }
 
   setInboundEnable(id: number, enable: boolean) {
-    return this.request(`/panel/api/inbounds/setEnable/${encodeURIComponent(String(id))}`, { method: 'POST', body: { enable } });
+    return this.formRequest(`/panel/api/inbounds/setEnable/${encodeURIComponent(String(id))}`, { method: 'POST', body: { enable } });
   }
 
   resetInboundTraffic(id: number) {
-    return this.request(`/panel/api/inbounds/${encodeURIComponent(String(id))}/resetTraffic`, { method: 'POST' });
+    return this.request(`/panel/api/inbounds/resetTraffic/${encodeURIComponent(String(id))}`, { method: 'POST' });
   }
 
-  addClient(body: unknown) {
-    return this.request('/panel/api/clients/add', { method: 'POST', body });
+  addClient(inboundId: number, client: unknown) {
+    const body = this.clientMutationBody(inboundId, client);
+    return this.withLegacyFallback(
+      () => this.formRequest('/panel/api/inbounds/addClient', { method: 'POST', body }),
+      () => this.request('/panel/api/clients/add', { method: 'POST', body: { client, inboundIds: [inboundId] } })
+    );
   }
 
-  updateClient(email: string, body: unknown) {
-    return this.request(`/panel/api/clients/update/${encodeURIComponent(email)}`, { method: 'POST', body });
+  updateClient(inboundId: number, clientId: string, client: unknown) {
+    const body = this.clientMutationBody(inboundId, client);
+    const email = this.clientEmail(client) || clientId;
+    return this.withLegacyFallback(
+      () => this.formRequest(`/panel/api/inbounds/updateClient/${encodeURIComponent(clientId)}`, { method: 'POST', body }),
+      () => this.request(`/panel/api/clients/update/${encodeURIComponent(email)}`, { method: 'POST', body: client })
+    );
   }
 
-  deleteClient(email: string, keepTraffic = false) {
-    const query = keepTraffic ? '?keepTraffic=1' : '';
-    return this.request(`/panel/api/clients/del/${encodeURIComponent(email)}${query}`, { method: 'POST' });
+  deleteClient(inboundId: number, email: string, clientId?: string, keepTraffic = false) {
+    const endpoint = clientId
+      ? `/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/delClient/${encodeURIComponent(clientId)}`
+      : `/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/delClientByEmail/${encodeURIComponent(email)}`;
+    const legacyQuery = keepTraffic ? '?keepTraffic=1' : '';
+    return this.withLegacyFallback(
+      () => this.request(endpoint, { method: 'POST' }),
+      () => this.request(`/panel/api/clients/del/${encodeURIComponent(email)}${legacyQuery}`, { method: 'POST' })
+    );
   }
 
   getClient(email: string) {
-    return this.request(`/panel/api/clients/get/${encodeURIComponent(email)}`);
+    return this.getClientTraffic(email);
   }
 
-  resetTraffic(email: string) {
-    return this.request(`/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`, { method: 'POST' });
+  resetClientTraffic(inboundId: number, email: string) {
+    return this.withLegacyFallback(
+      () => this.request(`/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/resetClientTraffic/${encodeURIComponent(email)}`, { method: 'POST' }),
+      () => this.request(`/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`, { method: 'POST' })
+    );
+  }
+
+  resetTraffic(inboundId: number, email: string) {
+    return this.resetClientTraffic(inboundId, email);
+  }
+
+  getClientTraffic(email: string) {
+    return this.withLegacyFallback(
+      () => this.request(`/panel/api/inbounds/getClientTraffics/${encodeURIComponent(email)}`),
+      () => this.request(`/panel/api/clients/traffic/${encodeURIComponent(email)}`)
+    );
   }
 
   clientTraffic(email: string) {
-    return this.request(`/panel/api/clients/traffic/${encodeURIComponent(email)}`);
+    return this.getClientTraffic(email);
   }
 
   clientsLastOnline() {
-    return this.request('/panel/api/clients/lastOnline', { method: 'POST' });
+    return this.withLegacyFallback(
+      () => this.request('/panel/api/inbounds/lastOnline', { method: 'POST' }),
+      () => this.request('/panel/api/clients/lastOnline', { method: 'POST' })
+    );
   }
 
   onlineClients() {
-    return this.request('/panel/api/clients/onlines', { method: 'POST' });
+    return this.withLegacyFallback(
+      () => this.request('/panel/api/inbounds/onlines', { method: 'POST' }),
+      () => this.request('/panel/api/clients/onlines', { method: 'POST' })
+    );
   }
 
   clientLinks(email: string) {
@@ -167,7 +216,7 @@ export class XuiClient {
   }
 
   getXrayConfig() {
-    return this.request('/panel/api/xray/', { method: 'POST' });
+    return this.sessionRequest('/panel/xray/', { method: 'POST' });
   }
 
   listOutboundSubscriptions() {
@@ -179,7 +228,7 @@ export class XuiClient {
   }
 
   updateXrayConfig(body: { xraySetting: string; outboundTestUrl?: string }) {
-    return this.formRequest('/panel/api/xray/update', { method: 'POST', body });
+    return this.sessionFormRequest('/panel/xray/update', { method: 'POST', body });
   }
 
   restartXrayService() {
@@ -203,6 +252,52 @@ export class XuiClient {
   private authHeaders(): Record<string, string> {
     if (this.options.auth?.kind === 'token') return { Authorization: `Bearer ${this.options.auth.token}` };
     return {};
+  }
+
+  private async sessionRequest<T>(endpoint: string, options: XuiRequestOptions = {}): Promise<T> {
+    this.assertSessionAuth(endpoint);
+    await this.ensureCsrfToken();
+    try {
+      return await this.request<T>(endpoint, { ...options, headers: { ...this.csrfHeaders(), ...options.headers } });
+    } catch (error) {
+      if (!(error instanceof XuiClientError) || error.status !== 403) throw error;
+      await this.refreshCsrfToken(true);
+      return this.request<T>(endpoint, { ...options, headers: { ...this.csrfHeaders(), ...options.headers } });
+    }
+  }
+
+  private async sessionFormRequest<T>(endpoint: string, options: XuiFormRequestOptions = {}): Promise<T> {
+    this.assertSessionAuth(endpoint);
+    await this.ensureCsrfToken();
+    try {
+      return await this.formRequest<T>(endpoint, { ...options, headers: { ...this.csrfHeaders(), ...options.headers } });
+    } catch (error) {
+      if (!(error instanceof XuiClientError) || error.status !== 403) throw error;
+      await this.refreshCsrfToken(true);
+      return this.formRequest<T>(endpoint, { ...options, headers: { ...this.csrfHeaders(), ...options.headers } });
+    }
+  }
+
+  private async ensureCsrfToken() {
+    if (!this.csrfToken) await this.refreshCsrfToken(true);
+  }
+
+  private async refreshCsrfToken(authenticated: boolean) {
+    const endpoint = authenticated ? '/panel/csrf-token' : '/csrf-token';
+    const payload = await this.request<unknown>(endpoint);
+    const token = this.extractCsrfToken(payload);
+    if (!token) throw new XuiClientError(`3x-ui did not return a CSRF token from ${endpoint}`, undefined, payload);
+    this.csrfToken = token;
+  }
+
+  private csrfHeaders(): Record<string, string> {
+    return this.csrfToken ? { 'X-CSRF-Token': this.csrfToken } : {};
+  }
+
+  private assertSessionAuth(endpoint: string) {
+    if (!this.sessionCookie) {
+      throw new XuiClientError(`${endpoint} requires 3x-ui username/password session authentication; API token authentication only covers /panel/api endpoints`);
+    }
   }
 
   private cookieHeaders(): Record<string, string> {
@@ -232,9 +327,45 @@ export class XuiClient {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(body)) {
       if (value === undefined) continue;
-      params.append(key, value === null ? '' : String(value));
+      params.append(key, value === null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value));
     }
     return params.toString();
+  }
+
+  private formBody(body: unknown): Record<string, unknown> {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new XuiClientError('3x-ui form request body must be an object');
+    }
+    return body as Record<string, unknown>;
+  }
+
+  private clientMutationBody(inboundId: number, client: unknown): Record<string, unknown> {
+    return { id: inboundId, settings: JSON.stringify({ clients: [client] }) };
+  }
+
+  private clientEmail(client: unknown) {
+    if (!client || typeof client !== 'object' || Array.isArray(client)) return '';
+    const email = (client as Record<string, unknown>).email;
+    return typeof email === 'string' ? email : '';
+  }
+
+  private async withLegacyFallback<T>(primary: () => Promise<T>, legacy: () => Promise<T>): Promise<T> {
+    try {
+      return await primary();
+    } catch (error) {
+      if (!(error instanceof XuiClientError) || (error.status !== 404 && error.status !== 405)) throw error;
+      return legacy();
+    }
+  }
+
+  private extractCsrfToken(payload: unknown) {
+    if (typeof payload === 'string') return payload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
+    const record = payload as Record<string, unknown>;
+    for (const key of ['obj', 'data', 'token', 'csrfToken']) {
+      if (typeof record[key] === 'string' && record[key]) return record[key] as string;
+    }
+    return '';
   }
 
   private readSetCookieHeaders(headers: Headers): string[] {

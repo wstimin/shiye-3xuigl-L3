@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -49,7 +49,6 @@ export class JobsService {
     if (this.disableExpiredRunning) return;
     const settings = await this.jobSettings();
     if (!settings.disableExpiredEnabled) return;
-    this.disableExpiredRunning = true;
     try {
       const result = await this.disableExpiredNodes('schedule');
       if (result.total > 0) {
@@ -57,8 +56,6 @@ export class JobsService {
       }
     } catch (error) {
       this.logger.error(`Expired node disable job failed: ${this.errorMessage(error)}`);
-    } finally {
-      this.disableExpiredRunning = false;
     }
   }
 
@@ -67,7 +64,6 @@ export class JobsService {
     if (this.disableTrafficExceededRunning) return;
     const settings = await this.jobSettings();
     if (!settings.trafficSyncEnabled) return;
-    this.disableTrafficExceededRunning = true;
     try {
       const result = await this.disableTrafficExceededNodes('schedule');
       if (result.disabled > 0 || result.failed > 0) {
@@ -75,8 +71,6 @@ export class JobsService {
       }
     } catch (error) {
       this.logger.error(`Traffic limit disable job failed: ${this.errorMessage(error)}`);
-    } finally {
-      this.disableTrafficExceededRunning = false;
     }
   }
 
@@ -116,6 +110,16 @@ export class JobsService {
   }
 
   async disableExpiredNodes(trigger = 'manual') {
+    if (this.disableExpiredRunning) throw new ConflictException('过期节点停用任务正在执行，请稍后再试');
+    this.disableExpiredRunning = true;
+    try {
+      return await this.performDisableExpiredNodes(trigger);
+    } finally {
+      this.disableExpiredRunning = false;
+    }
+  }
+
+  private async performDisableExpiredNodes(trigger: string) {
     const now = new Date();
     const expiredNodes = await this.prisma.customerNode.findMany({
       where: {
@@ -170,6 +174,16 @@ export class JobsService {
   }
 
   async disableTrafficExceededNodes(trigger = 'manual') {
+    if (this.disableTrafficExceededRunning) throw new ConflictException('远端流量同步任务正在执行，请稍后再试');
+    this.disableTrafficExceededRunning = true;
+    try {
+      return await this.performDisableTrafficExceededNodes(trigger);
+    } finally {
+      this.disableTrafficExceededRunning = false;
+    }
+  }
+
+  private async performDisableTrafficExceededNodes(trigger: string) {
     const checkedAt = new Date();
     const activeNodes = await this.prisma.customerNode.findMany({
       where: {

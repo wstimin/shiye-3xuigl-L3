@@ -1,7 +1,30 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Edit3, Gauge, Plus, RefreshCw, RotateCcw, Search, Trash2, UploadCloud } from 'lucide-vue-next';
+import {
+  CheckCircle2,
+  CircleSlash2,
+  Clipboard,
+  CloudCog,
+  Edit3,
+  Gauge,
+  Layers3,
+  LockKeyhole,
+  MoreHorizontal,
+  Network,
+  Plus,
+  RadioTower,
+  RefreshCw,
+  RotateCcw,
+  Router,
+  Search,
+  Server,
+  ShieldCheck,
+  Trash2,
+  UploadCloud,
+  Waypoints,
+  Zap
+} from 'lucide-vue-next';
 import { api } from '../api';
 
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
@@ -65,6 +88,8 @@ type TrafficSyncResult = {
   failed: number;
   results?: TrafficSyncItem[];
 };
+type RegionDefinition = { value: string; label: string; keywords: string[]; codes?: string[] };
+
 const protocolOptions = [
   { label: 'VLESS', value: 'vless' },
   { label: 'VMess', value: 'vmess' },
@@ -73,9 +98,22 @@ const protocolOptions = [
   { label: 'Hysteria', value: 'hysteria' }
 ];
 const encryptionOptions = [
-  { label: 'none', value: 'none' },
+  { label: '无加密', value: 'none' },
   { label: 'TLS', value: 'tls' },
   { label: 'Reality', value: 'reality' }
+];
+const regionDefinitions: RegionDefinition[] = [
+  { value: 'hong-kong', label: '香港', keywords: ['香港', 'hong kong', 'hongkong'], codes: ['hk'] },
+  { value: 'japan', label: '日本', keywords: ['日本', '东京', '大阪', 'japan', 'tokyo', 'osaka'], codes: ['jp'] },
+  { value: 'singapore', label: '新加坡', keywords: ['新加坡', 'singapore'], codes: ['sg'] },
+  { value: 'taiwan', label: '台湾', keywords: ['台湾', '台北', 'taiwan', 'taipei'], codes: ['tw'] },
+  { value: 'united-states', label: '美国', keywords: ['美国', '洛杉矶', '西雅图', '纽约', 'united states', 'los angeles', 'seattle', 'new york'], codes: ['us', 'usa'] },
+  { value: 'united-kingdom', label: '英国', keywords: ['英国', '伦敦', 'united kingdom', 'london'], codes: ['uk', 'gb'] },
+  { value: 'germany', label: '德国', keywords: ['德国', '法兰克福', 'germany', 'frankfurt'], codes: ['de'] },
+  { value: 'canada', label: '加拿大', keywords: ['加拿大', '多伦多', '温哥华', 'canada', 'toronto', 'vancouver'], codes: ['ca'] },
+  { value: 'korea', label: '韩国', keywords: ['韩国', '首尔', 'korea', 'seoul'], codes: ['kr'] },
+  { value: 'australia', label: '澳大利亚', keywords: ['澳大利亚', '澳洲', '悉尼', 'australia', 'sydney'], codes: ['au'] },
+  { value: 'netherlands', label: '荷兰', keywords: ['荷兰', '阿姆斯特丹', 'netherlands', 'amsterdam'], codes: ['nl'] }
 ];
 
 const servers = ref<XuiServer[]>([]);
@@ -87,8 +125,13 @@ const syncingConfigIds = ref<Set<string>>(new Set());
 const syncingTrafficLimitIds = ref<Set<string>>(new Set());
 const resettingTrafficIds = ref<Set<string>>(new Set());
 const togglingIds = ref<Set<string>>(new Set());
+const deletingIds = ref<Set<string>>(new Set());
 const error = ref('');
 const searchQuery = ref('');
+const selectedServerId = ref('');
+const selectedStatus = ref('');
+const selectedProtocol = ref('');
+const selectedRegion = ref('');
 const editingId = ref('');
 const dialogVisible = ref(false);
 const form = reactive({
@@ -109,14 +152,28 @@ const form = reactive({
 
 const enabledSocksNodes = computed(() => socksNodes.value.filter((item) => item.enabled));
 const enabledNodeCount = computed(() => nodes.value.filter((item) => item.enabled).length);
-const remoteManagedNodeCount = computed(() => nodes.value.filter((item) => item.config?.remoteManaged).length);
 const socksRelayNodeCount = computed(() => nodes.value.filter((item) => item.config?.socksRelayEnabled).length);
 const inboundReadyNodeCount = computed(() => nodes.value.filter((item) => item.inboundId).length);
+const availableRegions = computed(() => regionDefinitions.filter((region) => nodes.value.some((node) => nodeRegion(node)?.value === region.value)));
+const availableProtocols = computed(() => {
+  const values = new Set(nodes.value.map((node) => node.protocol));
+  return protocolOptions.filter((item) => values.has(item.value));
+});
 const filteredNodes = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase();
-  if (!keyword) return nodes.value;
-  return nodes.value.filter((node) => nodeSearchText(node).includes(keyword));
+  return nodes.value.filter((node) => {
+    if (keyword && !nodeSearchText(node).includes(keyword)) return false;
+    if (selectedServerId.value && node.serverId !== selectedServerId.value) return false;
+    if (selectedStatus.value === 'enabled' && !node.enabled) return false;
+    if (selectedStatus.value === 'disabled' && node.enabled) return false;
+    if (selectedProtocol.value && node.protocol !== selectedProtocol.value) return false;
+    if (selectedRegion.value && nodeRegion(node)?.value !== selectedRegion.value) return false;
+    return true;
+  });
 });
+const hasActiveFilters = computed(() => Boolean(
+  searchQuery.value.trim() || selectedServerId.value || selectedStatus.value || selectedProtocol.value || selectedRegion.value
+));
 
 async function loadNodes() {
   loading.value = true;
@@ -144,7 +201,7 @@ async function saveNode() {
   try {
     const path = editingId.value ? `/api/admin/service-nodes/${editingId.value}` : '/api/admin/service-nodes';
     await api(path, { method: editingId.value ? 'PATCH' : 'POST', body: form });
-    ElMessage.success(editingId.value ? '路由节点已更新' : '路由节点已添加');
+    ElMessage.success(editingId.value ? '路由节点已更新' : '路由节点已创建');
     dialogVisible.value = false;
     resetForm();
     await loadNodes();
@@ -156,8 +213,16 @@ async function saveNode() {
 }
 
 async function syncRemoteConfig(node: ServiceNode) {
-  await ElMessageBox.confirm(`确认把“${node.name}”的出站中转配置写入远端 Xray？系统只会管理本项目标记的出站和路由。`, '同步出站确认', { type: 'warning' });
-  syncingConfigIds.value = new Set(syncingConfigIds.value).add(node.id);
+  try {
+    await ElMessageBox.confirm(
+      `确认把「${node.name}」的出站中转配置写入远端 Xray？系统只会管理本项目标记的出站和路由。`,
+      '同步出站配置',
+      { type: 'warning', customClass: 'node-dark-message-box' }
+    );
+  } catch {
+    return;
+  }
+  syncingConfigIds.value = addPendingId(syncingConfigIds.value, node.id);
   error.value = '';
   try {
     const result = await api<RemoteConfigSyncResult>(`/api/admin/service-nodes/${node.id}/sync-config`, { method: 'POST' });
@@ -166,19 +231,17 @@ async function syncRemoteConfig(node: ServiceNode) {
   } catch (err) {
     error.value = err instanceof Error ? err.message : '同步远端配置失败';
   } finally {
-    const next = new Set(syncingConfigIds.value);
-    next.delete(node.id);
-    syncingConfigIds.value = next;
+    syncingConfigIds.value = removePendingId(syncingConfigIds.value, node.id);
   }
 }
 
 async function syncTrafficLimit(node: ServiceNode) {
-  syncingTrafficLimitIds.value = new Set(syncingTrafficLimitIds.value).add(node.id);
+  syncingTrafficLimitIds.value = addPendingId(syncingTrafficLimitIds.value, node.id);
   error.value = '';
   try {
     const result = await api<TrafficSyncResult>(`/api/admin/service-nodes/${node.id}/sync-traffic-limit`, { method: 'POST' });
     if (result.failed > 0) {
-      ElMessage.warning(`流量额度已部分同步：成功 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`);
+      ElMessage.warning(`流量额度部分同步：成功 ${result.updated}，跳过 ${result.skipped}，失败 ${result.failed}`);
     } else {
       ElMessage.success(`流量额度已同步：成功 ${result.updated}，跳过 ${result.skipped}`);
     }
@@ -187,15 +250,21 @@ async function syncTrafficLimit(node: ServiceNode) {
   } catch (err) {
     error.value = err instanceof Error ? err.message : '同步流量额度失败';
   } finally {
-    const next = new Set(syncingTrafficLimitIds.value);
-    next.delete(node.id);
-    syncingTrafficLimitIds.value = next;
+    syncingTrafficLimitIds.value = removePendingId(syncingTrafficLimitIds.value, node.id);
   }
 }
 
 async function resetRemoteTraffic(node: ServiceNode) {
-  await ElMessageBox.confirm(`确认重置「${node.name}」远端入站流量统计？此操作不会清空每个客户端的流量。`, '重置流量确认', { type: 'warning' });
-  resettingTrafficIds.value = new Set(resettingTrafficIds.value).add(node.id);
+  try {
+    await ElMessageBox.confirm(
+      `确认重置「${node.name}」远端入站的流量统计？此操作不会清空每个客户端的流量。`,
+      '重置远端流量',
+      { type: 'warning', customClass: 'node-dark-message-box' }
+    );
+  } catch {
+    return;
+  }
+  resettingTrafficIds.value = addPendingId(resettingTrafficIds.value, node.id);
   error.value = '';
   try {
     await api(`/api/admin/service-nodes/${node.id}/reset-traffic`, { method: 'POST' });
@@ -203,9 +272,7 @@ async function resetRemoteTraffic(node: ServiceNode) {
   } catch (err) {
     error.value = err instanceof Error ? err.message : '重置远端流量失败';
   } finally {
-    const next = new Set(resettingTrafficIds.value);
-    next.delete(node.id);
-    resettingTrafficIds.value = next;
+    resettingTrafficIds.value = removePendingId(resettingTrafficIds.value, node.id);
   }
 }
 
@@ -236,31 +303,69 @@ function editNode(node: ServiceNode) {
 }
 
 async function removeNode(node: ServiceNode) {
-  await ElMessageBox.confirm(`确认删除路由节点“${node.name}”？系统会先删除该节点下远端 3x-ui 客户端，并清理本项目写入的出站路由配置。`, '删除确认', { type: 'warning' });
-  const result = await api<DeleteServiceNodeResult>(`/api/admin/service-nodes/${node.id}`, { method: 'DELETE' });
-  ElMessage.success('路由节点已删除');
-  await showDeleteResult(result);
-  await loadNodes();
-}
-
-async function toggleNodeEnabled(node: ServiceNode, enabled: boolean | string | number) {
-  const nextEnabled = Boolean(enabled);
-  const previous = node.enabled;
-  togglingIds.value = new Set(togglingIds.value).add(node.id);
+  try {
+    await ElMessageBox.confirm(
+      `确认删除路由节点「${node.name}」？系统会清理本项目写入的远端出站路由，并在该入站由本系统创建时删除远端入站。`,
+      '删除路由节点',
+      { type: 'warning', customClass: 'node-dark-message-box' }
+    );
+  } catch {
+    return;
+  }
+  deletingIds.value = addPendingId(deletingIds.value, node.id);
   error.value = '';
   try {
-    await api(`/api/admin/service-nodes/${node.id}`, { method: 'PATCH', body: { enabled: nextEnabled } });
-    node.enabled = nextEnabled;
-    ElMessage.success(nextEnabled ? '路由节点已启用' : '路由节点已停用');
+    const result = await api<DeleteServiceNodeResult>(`/api/admin/service-nodes/${node.id}`, { method: 'DELETE' });
+    ElMessage.success('路由节点已删除');
+    await showDeleteResult(result);
+    await loadNodes();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '删除路由节点失败';
+  } finally {
+    deletingIds.value = removePendingId(deletingIds.value, node.id);
+  }
+}
+
+async function toggleNodeEnabled(node: ServiceNode, enabled = !node.enabled) {
+  const previous = node.enabled;
+  togglingIds.value = addPendingId(togglingIds.value, node.id);
+  error.value = '';
+  try {
+    await api(`/api/admin/service-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
+    node.enabled = enabled;
+    ElMessage.success(enabled ? '路由节点已启用' : '路由节点已停用');
   } catch (err) {
     node.enabled = previous;
     error.value = err instanceof Error ? err.message : '更新路由节点状态失败';
     ElMessage.error(error.value);
   } finally {
-    const next = new Set(togglingIds.value);
-    next.delete(node.id);
-    togglingIds.value = next;
+    togglingIds.value = removePendingId(togglingIds.value, node.id);
   }
+}
+
+function handleNodeCommand(node: ServiceNode, command: string) {
+  if (command === 'traffic-limit') void syncTrafficLimit(node);
+  if (command === 'reset-traffic') void resetRemoteTraffic(node);
+  if (command === 'toggle') void toggleNodeEnabled(node);
+  if (command === 'delete') void removeNode(node);
+}
+
+async function copyPanelAddress(node: ServiceNode) {
+  const address = node.server?.baseUrl;
+  if (!address) return;
+  try {
+    await navigator.clipboard.writeText(address);
+  } catch {
+    const input = document.createElement('textarea');
+    input.value = address;
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    input.remove();
+  }
+  ElMessage.success('面板地址已复制');
 }
 
 async function showDeleteResult(result: DeleteServiceNodeResult) {
@@ -269,8 +374,8 @@ async function showDeleteResult(result: DeleteServiceNodeResult) {
     cleanupStatusLine('远端出站/路由配置', result.remoteConfigCleanup),
     cleanupStatusLine('远端入站', result.remoteInboundCleanup),
     cleanupStatusLine('远端客户端', remoteClient),
-    result.deleted ? '本地路由节点和绑定：已清理' : '本地路由节点和绑定：未清理'
-  ].join('\n'), '删除结果', { type: 'success' });
+    result.deleted ? '本地路由节点和用户绑定：已清理' : '本地路由节点和用户绑定：未清理'
+  ].join('\n'), '删除结果', { type: 'success', customClass: 'node-dark-message-box' });
 }
 
 function cleanupStatusLine(label: string, result?: CleanupResult) {
@@ -291,7 +396,10 @@ async function showRemoteConfigResult(result: RemoteConfigSyncResult) {
     `入站 Tag：${result.inboundTag || '-'}`,
     `出站 Tag：${result.outboundTag || '-'}`,
     `出站节点：${result.socks ? `${result.socks.host || '-'}:${result.socks.port || '-'}` : '未启用或已清理'}`
-  ].join('\n'), '出站同步结果', { type: result.synced ? 'success' : 'warning' });
+  ].join('\n'), '出站同步结果', {
+    type: result.synced ? 'success' : 'warning',
+    customClass: 'node-dark-message-box'
+  });
 }
 
 async function showTrafficSyncResult(result: TrafficSyncResult) {
@@ -307,7 +415,18 @@ async function showTrafficSyncResult(result: TrafficSyncResult) {
   });
   if (items.length) lines.push('', ...items);
   if ((result.results || []).length > items.length) lines.push(`还有 ${(result.results || []).length - items.length} 条结果未显示`);
-  await ElMessageBox.alert(lines.join('\n'), '流量同步结果', { type: result.failed > 0 ? 'warning' : 'success' });
+  await ElMessageBox.alert(lines.join('\n'), '流量同步结果', {
+    type: result.failed > 0 ? 'warning' : 'success',
+    customClass: 'node-dark-message-box'
+  });
+}
+
+function resetFilters() {
+  searchQuery.value = '';
+  selectedServerId.value = '';
+  selectedStatus.value = '';
+  selectedProtocol.value = '';
+  selectedRegion.value = '';
 }
 
 function resetForm() {
@@ -338,128 +457,241 @@ function remoteModeLabel(node: ServiceNode) {
   return node.config?.remoteManaged ? '自动创建' : '绑定已有';
 }
 
+function protocolLabel(protocol: string) {
+  return protocolOptions.find((item) => item.value === protocol)?.label || protocol.toUpperCase();
+}
+
+function protocolIcon(protocol: string) {
+  if (protocol === 'vless') return ShieldCheck;
+  if (protocol === 'vmess') return RadioTower;
+  if (protocol === 'trojan') return LockKeyhole;
+  if (protocol === 'shadowsocks') return Layers3;
+  if (protocol === 'hysteria') return Zap;
+  return Router;
+}
+
+function nodeRegion(node: ServiceNode) {
+  const text = [node.name, node.remark, node.server?.name, node.server?.baseUrl].filter(Boolean).join(' ').toLowerCase();
+  return regionDefinitions.find((region) => {
+    if (region.keywords.some((keyword) => text.includes(keyword.toLowerCase()))) return true;
+    return (region.codes || []).some((code) => new RegExp(`(^|[^a-z0-9])${escapeRegExp(code)}([^a-z0-9]|$)`, 'i').test(text));
+  });
+}
+
 function nodeSearchText(node: ServiceNode) {
   return [
     node.name,
     node.server?.name,
+    node.server?.baseUrl,
     node.protocol,
+    protocolLabel(node.protocol),
     node.config?.encryption,
-    node.config?.remoteManaged ? '自动创建' : '绑定已有',
+    remoteModeLabel(node),
     node.inboundId,
+    node.config?.remoteInboundPort,
     node.priceMonthly,
     node.trafficLimitGb,
     node.remark,
+    nodeRegion(node)?.label,
     socksLabel(node.config?.socksNodeId)
   ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function addPendingId(source: Set<string>, id: string) {
+  return new Set(source).add(id);
+}
+
+function removePendingId(source: Set<string>, id: string) {
+  const next = new Set(source);
+  next.delete(id);
+  return next;
 }
 
 onMounted(loadNodes);
 </script>
 
 <template>
-  <div class="page-head">
-    <div class="page-head-main">
-      <h1 class="page-title">路由节点</h1>
-      <p>管理本地可售节点、远端入站、传输安全和出站中转配置。</p>
-    </div>
-    <div class="page-actions">
-      <el-button :loading="loading" @click="loadNodes"><RefreshCw :size="15" />刷新</el-button>
-    </div>
-  </div>
-  <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
+  <section class="node-management-page" :class="{ loading }">
+    <header class="node-page-header">
+      <div>
+        <h1>路由节点</h1>
+        <p>管理服务节点、远端 3x-ui 入站、传输安全和 SOCKS 出站中转配置。</p>
+      </div>
+      <div class="node-page-actions">
+        <el-button class="node-secondary-button" :loading="loading" @click="loadNodes"><RefreshCw :size="15" />刷新</el-button>
+        <el-button type="primary" @click="openDialog"><Plus :size="15" />创建节点</el-button>
+      </div>
+    </header>
 
-  <div class="metric-grid compact-metrics">
-    <div class="metric"><span>路由节点</span><strong>{{ nodes.length }}</strong><small>启用 {{ enabledNodeCount }}</small></div>
-    <div class="metric"><span>远端入站</span><strong>{{ inboundReadyNodeCount }}</strong><small>已有入站 ID</small></div>
-    <div class="metric"><span>自动创建</span><strong>{{ remoteManagedNodeCount }}</strong><small>由本系统管理远端</small></div>
-    <div class="metric"><span>出站中转</span><strong>{{ socksRelayNodeCount }}</strong><small>启用 SOCKS 出站</small></div>
-  </div>
+    <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="node-page-alert" />
 
-  <div class="panel list-panel">
-    <div class="panel-toolbar">
-      <strong>路由节点列表</strong>
-      <div class="table-toolbar-actions">
-        <el-button type="primary" @click="openDialog"><Plus :size="15" />添加路由节点</el-button>
+    <div class="node-stat-grid">
+      <article class="node-stat-card">
+        <span class="node-stat-icon tone-indigo"><Router :size="18" /></span>
+        <div><small>节点总数</small><strong>{{ nodes.length }}</strong><span>全部路由节点</span></div>
+      </article>
+      <article class="node-stat-card">
+        <span class="node-stat-icon tone-emerald"><CheckCircle2 :size="18" /></span>
+        <div><small>已启用</small><strong>{{ enabledNodeCount }}</strong><span>{{ nodes.length - enabledNodeCount }} 个已停用</span></div>
+      </article>
+      <article class="node-stat-card">
+        <span class="node-stat-icon tone-cyan"><Server :size="18" /></span>
+        <div><small>远端入站</small><strong>{{ inboundReadyNodeCount }}</strong><span>已有远端入站 ID</span></div>
+      </article>
+      <article class="node-stat-card">
+        <span class="node-stat-icon tone-amber"><Waypoints :size="18" /></span>
+        <div><small>出站中转</small><strong>{{ socksRelayNodeCount }}</strong><span>已启用 SOCKS 中转</span></div>
+      </article>
+    </div>
+
+    <div class="node-filter-panel">
+      <div class="node-search-field">
+        <Search :size="15" />
+        <el-input v-model="searchQuery" clearable placeholder="搜索节点名称、面板连接、地址或备注" />
+      </div>
+      <el-select v-model="selectedServerId" clearable placeholder="全部面板连接" class="node-filter-select node-server-filter">
+        <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id" />
+      </el-select>
+      <el-select v-model="selectedStatus" clearable placeholder="全部状态" class="node-filter-select">
+        <el-option label="已启用" value="enabled" />
+        <el-option label="已停用" value="disabled" />
+      </el-select>
+      <el-select v-model="selectedProtocol" clearable placeholder="全部协议" class="node-filter-select">
+        <el-option v-for="item in availableProtocols" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
+      <el-select v-model="selectedRegion" clearable placeholder="识别地区" class="node-filter-select">
+        <el-option v-for="region in availableRegions" :key="region.value" :label="region.label" :value="region.value" />
+      </el-select>
+      <el-button v-if="hasActiveFilters" class="node-reset-filter" text @click="resetFilters">重置</el-button>
+    </div>
+
+    <div v-loading="loading" class="node-card-grid">
+      <article v-for="node in filteredNodes" :key="node.id" class="route-node-card">
+        <header class="route-node-card-header">
+          <div class="route-node-identity">
+            <span class="route-node-icon" :class="`protocol-${node.protocol}`">
+              <component :is="protocolIcon(node.protocol)" :size="20" />
+            </span>
+            <div>
+              <strong :title="node.name">{{ node.name }}</strong>
+              <span>{{ protocolLabel(node.protocol) }} · {{ node.config?.encryption || 'none' }}</span>
+            </div>
+          </div>
+          <span class="node-status-chip" :class="node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.enabled ? '已启用' : '已停用' }}</span>
+        </header>
+
+        <div class="route-node-address" :class="{ 'is-missing': !node.server?.baseUrl }">
+          <Network :size="14" />
+          <div>
+            <small>面板地址</small>
+            <strong :title="node.server?.baseUrl || ''">{{ node.server?.baseUrl || '未返回面板地址' }}</strong>
+          </div>
+          <el-tooltip v-if="node.server?.baseUrl" content="复制面板地址" placement="top">
+            <button type="button" class="node-copy-button" aria-label="复制面板地址" @click="copyPanelAddress(node)"><Clipboard :size="14" /></button>
+          </el-tooltip>
+        </div>
+
+        <div class="route-node-meta">
+          <div><span>面板连接</span><strong :title="node.server?.name || ''">{{ node.server?.name || '-' }}</strong></div>
+          <div><span>入站 ID</span><strong>{{ node.inboundId ?? '-' }}</strong></div>
+          <div><span>月价格</span><strong>¥ {{ node.priceMonthly }}</strong></div>
+          <div><span>流量额度</span><strong>{{ node.trafficLimitGb }} GB</strong></div>
+        </div>
+
+        <div class="route-node-tags">
+          <span v-if="nodeRegion(node)" class="route-node-tag region">{{ nodeRegion(node)?.label }}</span>
+          <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
+          <span class="route-node-tag">{{ remoteModeLabel(node) }}</span>
+          <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
+          <span v-if="node.config?.socksRelayEnabled" class="route-node-tag relay" :title="socksLabel(node.config.socksNodeId)">SOCKS 中转</span>
+        </div>
+
+        <p class="route-node-remark" :class="{ 'is-empty': !node.remark }">{{ node.remark || '暂无备注' }}</p>
+
+        <footer class="route-node-actions">
+          <el-button type="primary" plain @click="editNode(node)"><Edit3 :size="14" />编辑</el-button>
+          <el-button
+            class="node-sync-button"
+            :loading="syncingConfigIds.has(node.id)"
+            :disabled="!node.inboundId"
+            @click="syncRemoteConfig(node)"
+          ><UploadCloud :size="14" />同步出站</el-button>
+          <el-dropdown trigger="click" @command="(command: string) => handleNodeCommand(node, command)">
+            <el-button class="node-more-button" aria-label="更多节点操作"><MoreHorizontal :size="16" /></el-button>
+            <template #dropdown>
+              <el-dropdown-menu class="node-action-menu">
+                <el-dropdown-item command="traffic-limit" :disabled="!node.inboundId || syncingTrafficLimitIds.has(node.id)"><Gauge :size="14" />同步流量额度</el-dropdown-item>
+                <el-dropdown-item command="reset-traffic" :disabled="!node.inboundId || resettingTrafficIds.has(node.id)"><RotateCcw :size="14" />重置远端流量</el-dropdown-item>
+                <el-dropdown-item command="toggle" :disabled="togglingIds.has(node.id)">
+                  <CircleSlash2 v-if="node.enabled" :size="14" />
+                  <CheckCircle2 v-else :size="14" />
+                  {{ node.enabled ? '停用节点' : '启用节点' }}
+                </el-dropdown-item>
+                <el-dropdown-item command="delete" divided :disabled="deletingIds.has(node.id)"><Trash2 :size="14" />删除节点</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </footer>
+      </article>
+
+      <div v-if="!filteredNodes.length && !loading" class="node-empty-state">
+        <CloudCog :size="28" />
+        <strong>{{ nodes.length ? '没有符合筛选条件的节点' : '暂无路由节点' }}</strong>
+        <span>{{ nodes.length ? '调整筛选条件后再查看' : '使用右上角创建节点接入真实面板连接' }}</span>
       </div>
     </div>
-    <div class="filter-bar">
-      <el-input v-model="searchQuery" clearable placeholder="搜索节点、面板连接、入站 ID、协议、安全类型" style="max-width: 380px">
-        <template #prefix><Search :size="15" /></template>
-      </el-input>
-      <span class="filter-summary">显示 {{ filteredNodes.length }} / {{ nodes.length }}</span>
-    </div>
-    <div v-loading="loading" class="entity-card-grid node-card-grid">
-      <article v-for="node in filteredNodes" :key="node.id" class="entity-card node-card">
-        <div class="entity-card-head">
-          <div>
-            <strong>{{ node.name }}</strong>
-            <span>{{ node.server?.name || '-' }} · 入站 ID {{ node.inboundId ?? '-' }}</span>
-          </div>
-          <div class="tag-stack">
-            <el-switch v-model="node.enabled" size="small" :loading="togglingIds.has(node.id)" @change="(value: boolean | string | number) => toggleNodeEnabled(node, value)" />
-            <el-tag size="small" :type="node.config?.remoteManaged ? 'success' : 'info'">{{ remoteModeLabel(node) }}</el-tag>
-          </div>
-        </div>
-        <div class="entity-card-stats">
-          <div><span>协议</span><strong>{{ node.protocol }}</strong></div>
-          <div><span>安全</span><strong>{{ node.config?.encryption || 'none' }}</strong></div>
-          <div><span>月价格</span><strong>{{ node.priceMonthly }}</strong></div>
-          <div><span>流量</span><strong>{{ node.trafficLimitGb }} GB</strong></div>
-        </div>
-        <div class="entity-card-meta">
-          <span>出站中转：{{ node.config?.socksRelayEnabled ? socksLabel(node.config.socksNodeId) : '未启用' }}</span>
-          <span v-if="node.remark">{{ node.remark }}</span>
-        </div>
-        <div class="entity-card-actions split-card-actions">
-          <div class="row-action-group remote-action">
-            <span class="action-group-label">远端同步</span>
-            <el-button size="small" :loading="syncingConfigIds.has(node.id)" :disabled="!node.inboundId" @click="syncRemoteConfig(node)"><UploadCloud :size="15" />出站</el-button>
-            <el-button size="small" :loading="syncingTrafficLimitIds.has(node.id)" :disabled="!node.inboundId" @click="syncTrafficLimit(node)"><Gauge :size="15" />流量额度</el-button>
-            <el-button size="small" :loading="resettingTrafficIds.has(node.id)" :disabled="!node.inboundId" @click="resetRemoteTraffic(node)"><RotateCcw :size="15" />重置流量</el-button>
-          </div>
-          <div class="row-action-group manage-action">
-            <span class="action-group-label">管理</span>
-            <el-button size="small" @click="editNode(node)"><Edit3 :size="15" />编辑</el-button>
-            <el-button size="small" type="danger" plain @click="removeNode(node)"><Trash2 :size="15" />删除</el-button>
-          </div>
-        </div>
-      </article>
-      <div v-if="!filteredNodes.length && !loading" class="empty-panel entity-empty">暂无路由节点</div>
-    </div>
-  </div>
 
-  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑路由节点' : '添加路由节点'" width="min(920px, 94vw)" destroy-on-close>
-    <el-form :model="form" label-width="112px" class="sectioned-dialog-form">
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>基础信息</strong><span>节点名称、所属面板连接和启用状态</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="节点名称"><el-input v-model="form.name" /></el-form-item>
+    <footer class="node-list-footer">显示 {{ filteredNodes.length }} / {{ nodes.length }} 个真实节点</footer>
+  </section>
+
+  <el-dialog
+    v-model="dialogVisible"
+    :title="editingId ? '编辑路由节点' : '创建路由节点'"
+    width="min(920px, 94vw)"
+    class="node-dark-dialog"
+    destroy-on-close
+  >
+    <div class="node-dialog-intro">
+      <Router :size="18" />
+      <div>
+        <strong>{{ editingId ? '更新节点与远端入站配置' : '创建节点并接入远端 3x-ui 入站' }}</strong>
+        <span>保存时会按所选模式创建或校验真实入站，并同步必要的远端配置。</span>
+      </div>
+    </div>
+
+    <el-form :model="form" label-position="top" class="node-dialog-form">
+      <section class="node-dialog-section">
+        <header><strong>基础信息</strong><span>节点名称、所属面板连接和启用状态</span></header>
+        <div class="node-dialog-grid">
+          <el-form-item label="节点名称"><el-input v-model="form.name" maxlength="100" placeholder="输入节点名称" /></el-form-item>
           <el-form-item label="面板连接">
-            <el-select v-model="form.serverId" placeholder="选择服务器" style="width: 100%">
+            <el-select v-model="form.serverId" placeholder="选择面板连接" style="width: 100%">
               <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="启用节点"><el-switch v-model="form.enabled" /></el-form-item>
+          <el-form-item label="启用节点" class="node-switch-item"><el-switch v-model="form.enabled" /></el-form-item>
         </div>
       </section>
 
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>远端入站</strong><span>自动创建会让远端返回入站 ID；绑定已有需要填写远端入站 ID</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="远端入站">
+      <section class="node-dialog-section">
+        <header><strong>远端入站</strong><span>自动创建新入站，或绑定并校验已有入站 ID</span></header>
+        <div class="node-dialog-grid">
+          <el-form-item label="入站模式">
             <el-segmented v-model="form.remoteMode" :options="[{ label: '自动创建', value: 'create' }, { label: '绑定已有', value: 'bind' }]" />
           </el-form-item>
-          <el-form-item v-if="form.remoteMode === 'bind'" label="入站 ID"><el-input-number v-model="form.inboundId" :min="1" style="width: 100%" /></el-form-item>
-          <el-form-item v-else label="端口">
-            <el-input-number v-model="form.inboundPort" :min="1" :max="65535" placeholder="自动分配" style="width: 100%" />
-          </el-form-item>
+          <el-form-item v-if="form.remoteMode === 'bind'" label="入站 ID"><el-input-number v-model="form.inboundId" :min="1" placeholder="输入远端入站 ID" style="width: 100%" /></el-form-item>
+          <el-form-item v-else label="指定端口"><el-input-number v-model="form.inboundPort" :min="1" :max="65535" placeholder="留空自动分配" style="width: 100%" /></el-form-item>
         </div>
       </section>
 
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>节点协议</strong><span>选择节点类型和 TLS/Reality 等传输安全</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="节点类型">
+      <section class="node-dialog-section">
+        <header><strong>协议与安全</strong><span>选择可生成用户分享链接的服务协议与传输安全类型</span></header>
+        <div class="node-dialog-grid">
+          <el-form-item label="节点协议">
             <el-select v-model="form.protocol" style="width: 100%">
               <el-option v-for="item in protocolOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
@@ -472,10 +704,10 @@ onMounted(loadNodes);
         </div>
       </section>
 
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>出站中转</strong><span>启用后可把该入站流量转发到已配置的出站节点</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="启用出站"><el-switch v-model="form.socksRelayEnabled" /></el-form-item>
+      <section class="node-dialog-section">
+        <header><strong>SOCKS 出站中转</strong><span>启用后将该入站流量转发到已配置且启用的出站节点</span></header>
+        <div class="node-dialog-grid">
+          <el-form-item label="启用中转" class="node-switch-item"><el-switch v-model="form.socksRelayEnabled" /></el-form-item>
           <el-form-item label="出站节点">
             <el-select v-model="form.socksNodeId" :disabled="!form.socksRelayEnabled" placeholder="选择出站节点" style="width: 100%">
               <el-option v-for="node in enabledSocksNodes" :key="node.id" :label="`${node.name} (${node.host}:${node.port})`" :value="node.id" />
@@ -484,18 +716,24 @@ onMounted(loadNodes);
         </div>
       </section>
 
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>计费与备注</strong><span>用户端展示价格，流量额度会同步到远端已有客户端</span></div>
-        <div class="dialog-form-grid">
+      <section class="node-dialog-section node-dialog-section-last">
+        <header><strong>计费与备注</strong><span>月价格用于面板展示，流量额度可同步到远端已有客户端</span></header>
+        <div class="node-dialog-grid">
           <el-form-item label="月价格"><el-input-number v-model="form.priceMonthly" :min="0" :precision="2" style="width: 100%" /></el-form-item>
-          <el-form-item label="流量 GB"><el-input-number v-model="form.trafficLimitGb" :min="0" :precision="2" style="width: 100%" /></el-form-item>
-          <el-form-item label="备注" class="form-item-full"><el-input v-model="form.remark" /></el-form-item>
+          <el-form-item label="流量额度 (GB)"><el-input-number v-model="form.trafficLimitGb" :min="0" :precision="2" style="width: 100%" /></el-form-item>
+          <el-form-item label="备注" class="node-dialog-full"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="500" placeholder="输入节点备注" /></el-form-item>
         </div>
       </section>
     </el-form>
+
     <template #footer>
-      <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!form.name || !form.serverId || (form.remoteMode === 'bind' && !form.inboundId) || (form.socksRelayEnabled && !form.socksNodeId)" @click="saveNode">保存</el-button>
+      <el-button class="node-secondary-button" @click="dialogVisible = false">取消</el-button>
+      <el-button
+        type="primary"
+        :loading="saving"
+        :disabled="!form.name || !form.serverId || (form.remoteMode === 'bind' && !form.inboundId) || (form.socksRelayEnabled && !form.socksNodeId)"
+        @click="saveNode"
+      >{{ editingId ? '保存修改' : '创建节点' }}</el-button>
     </template>
   </el-dialog>
 </template>

@@ -219,7 +219,7 @@ async function revealChannelSecrets() {
 }
 
 async function removeChannel(channel: PaymentChannel) {
-  await ElMessageBox.confirm(`确认删除支付方式“${channel.name}”？`, '删除确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除支付方式“${channel.name}”？`, '删除确认', { type: 'warning', customClass: 'operations-dark-message-box' });
   await api(`/api/admin/payment-channels/${channel.id}`, { method: 'DELETE' });
   ElMessage.success('支付方式已删除');
   if (editingChannelId.value === channel.id) resetChannelForm();
@@ -304,6 +304,7 @@ onMounted(loadChannels);
 </script>
 
 <template>
+  <div class="operations-page payments-page" :class="{ loading }">
   <h1 class="page-title">支付设置</h1>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
@@ -362,7 +363,7 @@ onMounted(loadChannels);
     </div>
   </div>
 
-  <el-dialog v-model="channelDialogVisible" :title="editingChannelId ? '编辑支付方式' : `新增${providerName(channelForm.provider)}`" width="860px" destroy-on-close>
+  <el-dialog v-model="channelDialogVisible" :title="editingChannelId ? '编辑支付方式' : `新增${providerName(channelForm.provider)}`" width="860px" class="operations-dark-dialog" destroy-on-close>
     <el-form :model="channelForm" label-width="108px" class="payment-dialog-form">
       <el-form-item label="支付方式">
         <el-input :model-value="providerName(channelForm.provider)" readonly />
@@ -375,23 +376,23 @@ onMounted(loadChannels);
           <el-checkbox-button v-for="item in epayTypeOptions" :key="item.value" :label="item.value">{{ item.label }}</el-checkbox-button>
         </el-checkbox-group>
       </el-form-item>
-      <el-form-item label="显示名称"><el-input v-model="channelForm.name" /></el-form-item>
-      <el-form-item label="接口地址"><el-input v-model="channelForm.url" placeholder="支付宝/微信可保留默认地址；易支付和 BEpusdt 请填写你的接口地址" /></el-form-item>
-      <el-form-item v-if="channelForm.provider === 'epay'" label="商户号"><el-input v-model="channelForm.pid" /></el-form-item>
-      <el-form-item v-if="channelForm.provider === 'alipay' || channelForm.provider === 'wechat'" label="AppID"><el-input v-model="channelForm.appId" /></el-form-item>
-      <el-form-item v-if="channelForm.provider === 'wechat'" label="商户号"><el-input v-model="channelForm.mchId" /></el-form-item>
-      <el-form-item v-if="channelForm.provider === 'alipay' || channelForm.provider === 'wechat'" label="商品名称"><el-input v-model="channelForm.productName" /></el-form-item>
-      <el-form-item v-if="channelForm.provider === 'alipay'" label="应用私钥"><el-input v-model="channelForm.privateKey" type="textarea" :rows="4" placeholder="编辑时留空表示不修改已保存私钥" /></el-form-item>
-      <el-form-item v-if="channelForm.provider === 'alipay'" label="支付宝公钥"><el-input v-model="channelForm.publicKey" type="textarea" :rows="4" placeholder="编辑时留空表示不修改已保存公钥" /></el-form-item>
+      <el-form-item label="显示名称"><el-input v-model="channelForm.name" maxlength="120" /></el-form-item>
+      <el-form-item label="接口地址"><el-input v-model="channelForm.url" type="url" placeholder="支付宝/微信可保留默认地址；易支付和 BEpusdt 请填写你的接口地址" /></el-form-item>
+      <el-form-item v-if="channelForm.provider === 'epay'" label="商户号"><el-input v-model="channelForm.pid" maxlength="120" /></el-form-item>
+      <el-form-item v-if="channelForm.provider === 'alipay' || channelForm.provider === 'wechat'" label="AppID"><el-input v-model="channelForm.appId" maxlength="120" /></el-form-item>
+      <el-form-item v-if="channelForm.provider === 'wechat'" label="商户号"><el-input v-model="channelForm.mchId" maxlength="120" /></el-form-item>
+      <el-form-item v-if="channelForm.provider === 'alipay' || channelForm.provider === 'wechat'" label="商品名称"><el-input v-model="channelForm.productName" maxlength="120" /></el-form-item>
+      <el-form-item v-if="channelForm.provider === 'alipay'" label="应用私钥"><el-input v-model="channelForm.privateKey" type="textarea" :rows="4" maxlength="12000" placeholder="编辑时留空表示不修改已保存私钥" /></el-form-item>
+      <el-form-item v-if="channelForm.provider === 'alipay'" label="支付宝公钥"><el-input v-model="channelForm.publicKey" type="textarea" :rows="4" maxlength="12000" placeholder="编辑时留空表示不修改已保存公钥" /></el-form-item>
       <el-form-item v-if="channelForm.provider === 'epay' || channelForm.provider === 'bepusdt' || channelForm.provider === 'wechat'" :label="secretLabel">
-        <el-input v-if="channelForm.provider === 'epay'" v-model="channelForm.key" type="password" show-password placeholder="编辑时留空表示不修改已保存密钥" />
-        <el-input v-else-if="channelForm.provider === 'bepusdt'" v-model="channelForm.token" type="password" show-password placeholder="编辑时留空表示不修改已保存 Token" />
-        <el-input v-else v-model="channelForm.apiKey" type="password" show-password placeholder="编辑时留空表示不修改已保存 V2 API 密钥" />
+        <el-input v-if="channelForm.provider === 'epay'" v-model="channelForm.key" type="password" show-password maxlength="2048" placeholder="编辑时留空表示不修改已保存密钥" />
+        <el-input v-else-if="channelForm.provider === 'bepusdt'" v-model="channelForm.token" type="password" show-password maxlength="2048" placeholder="编辑时留空表示不修改已保存 Token" />
+        <el-input v-else v-model="channelForm.apiKey" type="password" show-password maxlength="2048" placeholder="编辑时留空表示不修改已保存 V2 API 密钥" />
       </el-form-item>
       <el-form-item v-if="editingChannelId" label="已保存密钥"><el-button :loading="revealingChannelSecrets" @click="revealChannelSecrets"><Eye :size="15" />读取已保存密钥</el-button></el-form-item>
       <el-form-item label="系统回调"><el-input :model-value="callbackUrl" readonly /></el-form-item>
-      <el-form-item label="自定义回调"><el-input v-model="channelForm.notifyUrl" placeholder="通常留空，系统使用当前域名生成" /></el-form-item>
-      <el-form-item label="返回地址"><el-input v-model="channelForm.returnUrl" placeholder="通常留空，系统使用用户支付结果页" /></el-form-item>
+      <el-form-item label="自定义回调"><el-input v-model="channelForm.notifyUrl" type="url" placeholder="通常留空，系统使用当前域名生成" /></el-form-item>
+      <el-form-item label="返回地址"><el-input v-model="channelForm.returnUrl" type="url" placeholder="通常留空，系统使用用户支付结果页" /></el-form-item>
       <el-form-item label="排序"><el-input-number v-model="channelForm.sortOrder" :min="0" :max="9999" style="width: 100%" /></el-form-item>
       <el-form-item label="启用"><el-switch v-model="channelForm.enabled" /></el-form-item>
     </el-form>
@@ -400,4 +401,5 @@ onMounted(loadChannels);
       <el-button type="primary" :loading="savingChannel" :disabled="!channelForm.name" @click="saveChannel">保存</el-button>
     </template>
   </el-dialog>
+  </div>
 </template>

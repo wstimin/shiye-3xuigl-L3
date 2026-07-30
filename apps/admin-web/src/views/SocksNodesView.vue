@@ -1,7 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Edit3, Eye, Plus, RefreshCw, Search, Trash2 } from 'lucide-vue-next';
+import {
+  CheckCircle2,
+  CircleSlash2,
+  Clipboard,
+  CloudCog,
+  Download,
+  Edit3,
+  Eye,
+  KeyRound,
+  Link2,
+  Network,
+  Plus,
+  RefreshCw,
+  Search,
+  Server,
+  ShieldCheck,
+  Trash2
+} from 'lucide-vue-next';
 import { api } from '../api';
 
 type SocksNode = {
@@ -28,22 +45,39 @@ const saving = ref(false);
 const syncingRemote = ref(false);
 const revealingSecret = ref(false);
 const togglingIds = ref<Set<string>>(new Set());
+const deletingIds = ref<Set<string>>(new Set());
 const error = ref('');
 const searchQuery = ref('');
+const selectedStatus = ref('');
+const selectedSource = ref('');
+const selectedAuth = ref('');
 const syncServerId = ref('');
 const editingId = ref('');
 const dialogVisible = ref(false);
+const clearPassword = ref(false);
 const form = reactive({ name: '', host: '', port: 1080, username: '', password: '', enabled: true, remark: '' });
 
 const enabledNodeCount = computed(() => nodes.value.filter((node) => node.enabled).length);
-const authedNodeCount = computed(() => nodes.value.filter((node) => node.username || node.hasPassword).length);
-const importedNodeCount = computed(() => nodes.value.filter((node) => node.sourceServerId || node.remoteOutboundTag).length);
+const authedNodeCount = computed(() => nodes.value.filter(hasAuthentication).length);
+const importedNodeCount = computed(() => nodes.value.filter(isImportedNode).length);
 const usedNodeCount = computed(() => nodes.value.filter((node) => usageCount(node.id) > 0).length);
 const enabledServers = computed(() => servers.value.filter((server) => server.enabled));
+const hasActiveFilters = computed(() => Boolean(searchQuery.value.trim() || selectedStatus.value || selectedSource.value || selectedAuth.value));
 const filteredNodes = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase();
-  if (!keyword) return nodes.value;
-  return nodes.value.filter((node) => socksSearchText(node).includes(keyword));
+  return nodes.value.filter((node) => {
+    const references = usageCount(node.id);
+    if (keyword && !socksSearchText(node).includes(keyword)) return false;
+    if (selectedStatus.value === 'enabled' && !node.enabled) return false;
+    if (selectedStatus.value === 'disabled' && node.enabled) return false;
+    if (selectedStatus.value === 'used' && references === 0) return false;
+    if (selectedStatus.value === 'unused' && references > 0) return false;
+    if (selectedSource.value === 'imported' && !isImportedNode(node)) return false;
+    if (selectedSource.value === 'manual' && isImportedNode(node)) return false;
+    if (selectedAuth.value === 'authenticated' && !hasAuthentication(node)) return false;
+    if (selectedAuth.value === 'anonymous' && hasAuthentication(node)) return false;
+    return true;
+  });
 });
 
 async function loadNodes() {
@@ -58,10 +92,11 @@ async function loadNodes() {
     nodes.value = socksResult;
     serviceNodes.value = serviceResult;
     servers.value = serverResult;
+    if (syncServerId.value && !enabledServers.value.some((server) => server.id === syncServerId.value)) syncServerId.value = '';
     const firstEnabledServer = enabledServers.value[0];
     if (!syncServerId.value && firstEnabledServer) syncServerId.value = firstEnabledServer.id;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载出站节点失败';
+    showError(err, '加载出站节点失败');
   } finally {
     loading.value = false;
   }
@@ -78,7 +113,7 @@ async function saveNode() {
     resetForm();
     await loadNodes();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存出站节点失败';
+    showError(err, '保存出站节点失败');
   } finally {
     saving.value = false;
   }
@@ -86,20 +121,27 @@ async function saveNode() {
 
 async function syncRemoteSocks() {
   if (!syncServerId.value) {
-    ElMessage.warning('请先选择要导入的 3x-ui 服务器');
+    ElMessage.warning('请先选择要导入的 3x-ui 面板');
     return;
   }
   const server = servers.value.find((item) => item.id === syncServerId.value);
-  await ElMessageBox.confirm(`确认从“${server?.name || '选中的服务器'}”导入远端 SOCKS 出站节点？此操作只写入本地出站列表，不会新建远端规则。`, '导入远端 SOCKS', { type: 'warning' });
+  try {
+    await ElMessageBox.confirm(
+      `确认从“${server?.name || '选中的面板'}”读取并导入远端 SOCKS 出站？此操作只同步真实 SOCKS 出站到本地列表，不会创建远端规则。`,
+      '导入远端 SOCKS',
+      { type: 'warning', customClass: 'socks-dark-message-box' }
+    );
+  } catch {
+    return;
+  }
   syncingRemote.value = true;
   error.value = '';
   try {
     const result = await api<SocksSyncResult>(`/api/admin/xui-servers/${syncServerId.value}/sync-socks`, { method: 'POST' });
-    ElMessage.success(`远端 SOCKS 导入完成：发现 ${result.remoteSocksFound}，导入/更新 ${result.remoteSocksImported}`);
+    ElMessage.success(`远端 SOCKS 导入完成：发现 ${result.remoteSocksFound}，导入或更新 ${result.remoteSocksImported}`);
     await loadNodes();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '导入远端 SOCKS 失败';
-    ElMessage.error(error.value);
+    showError(err, '导入远端 SOCKS 失败');
   } finally {
     syncingRemote.value = false;
   }
@@ -112,6 +154,7 @@ function openDialog() {
 
 function editNode(node: SocksNode) {
   editingId.value = node.id;
+  clearPassword.value = false;
   Object.assign(form, {
     name: node.name,
     host: node.host,
@@ -131,53 +174,95 @@ async function revealNodeSecret() {
   try {
     const secrets = await api<{ password: string }>(`/api/admin/socks-nodes/${editingId.value}/secrets`);
     form.password = secrets.password || '';
+    clearPassword.value = false;
     ElMessage.success(secrets.password ? '已读取保存的出站密码' : '该出站节点没有保存密码');
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取保存密码失败';
-    ElMessage.error(error.value);
+    showError(err, '读取保存密码失败');
   } finally {
     revealingSecret.value = false;
   }
 }
 
 async function removeNode(node: SocksNode) {
-  const remoteHint = node.sourceServerId && node.remoteOutboundTag ? '该节点为导入节点，删除时会同步删除远端对应 SOCKS 出站和引用规则。' : '该节点为手动创建节点，只会删除本地记录。';
-  await ElMessageBox.confirm(`确认删除出站节点“${node.name}”？${remoteHint} 正在被路由节点使用时，后端会拒绝删除。`, '删除确认', { type: 'warning' });
-  await api(`/api/admin/socks-nodes/${node.id}`, { method: 'DELETE' });
-  ElMessage.success('出站节点已删除');
-  await loadNodes();
-}
-
-async function toggleNodeEnabled(node: SocksNode, enabled: boolean | string | number) {
-  const nextEnabled = Boolean(enabled);
-  const previous = node.enabled;
-  togglingIds.value = new Set(togglingIds.value).add(node.id);
+  const remoteHint = isImportedNode(node)
+    ? '该节点来自远端，删除时会同步删除远端对应 SOCKS 出站和引用规则。'
+    : '该节点由本地创建，只会删除本地记录。';
+  try {
+    await ElMessageBox.confirm(
+      `确认删除出站节点“${node.name}”？${remoteHint} 正在被路由节点使用时，后端会拒绝删除。`,
+      '删除出站节点',
+      { type: 'warning', customClass: 'socks-dark-message-box' }
+    );
+  } catch {
+    return;
+  }
+  deletingIds.value = addPendingId(deletingIds.value, node.id);
   error.value = '';
   try {
-    await api(`/api/admin/socks-nodes/${node.id}`, { method: 'PATCH', body: { enabled: nextEnabled } });
-    node.enabled = nextEnabled;
-    ElMessage.success(nextEnabled ? '出站节点已启用' : '出站节点已停用');
+    await api(`/api/admin/socks-nodes/${node.id}`, { method: 'DELETE' });
+    ElMessage.success('出站节点已删除');
+    await loadNodes();
+  } catch (err) {
+    showError(err, '删除出站节点失败');
+  } finally {
+    deletingIds.value = removePendingId(deletingIds.value, node.id);
+  }
+}
+
+async function toggleNodeEnabled(node: SocksNode, enabled = !node.enabled) {
+  const previous = node.enabled;
+  togglingIds.value = addPendingId(togglingIds.value, node.id);
+  error.value = '';
+  try {
+    await api(`/api/admin/socks-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
+    node.enabled = enabled;
+    ElMessage.success(enabled ? '出站节点已启用' : '出站节点已停用');
   } catch (err) {
     node.enabled = previous;
-    error.value = err instanceof Error ? err.message : '更新出站节点状态失败';
-    ElMessage.error(error.value);
+    showError(err, '更新出站节点状态失败');
   } finally {
-    const next = new Set(togglingIds.value);
-    next.delete(node.id);
-    togglingIds.value = next;
+    togglingIds.value = removePendingId(togglingIds.value, node.id);
   }
+}
+
+async function copyEndpoint(node: SocksNode) {
+  const endpoint = `${node.host}:${node.port}`;
+  try {
+    await navigator.clipboard.writeText(endpoint);
+  } catch {
+    const input = document.createElement('textarea');
+    input.value = endpoint;
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    input.remove();
+  }
+  ElMessage.success('SOCKS 地址已复制');
+}
+
+function resetFilters() {
+  searchQuery.value = '';
+  selectedStatus.value = '';
+  selectedSource.value = '';
+  selectedAuth.value = '';
 }
 
 function resetForm() {
   editingId.value = '';
+  clearPassword.value = false;
   Object.assign(form, { name: '', host: '', port: 1080, username: '', password: '', enabled: true, remark: '' });
 }
 
 function cleanFormBody() {
   return {
-    ...form,
+    name: form.name.trim(),
+    host: form.host.trim(),
+    port: form.port,
     username: form.username.trim() || undefined,
-    password: form.password || undefined,
+    password: clearPassword.value ? '' : form.password || undefined,
+    enabled: form.enabled,
     remark: form.remark.trim() || undefined
   };
 }
@@ -191,107 +276,236 @@ function serverName(id?: string | null) {
   return servers.value.find((server) => server.id === id)?.name || id;
 }
 
+function isImportedNode(node: SocksNode) {
+  return Boolean(node.sourceServerId || node.remoteOutboundTag);
+}
+
+function hasAuthentication(node: SocksNode) {
+  return Boolean(node.username || node.hasPassword);
+}
+
 function socksSearchText(node: SocksNode) {
-  return [node.name, node.host, node.port, node.username, node.enabled ? '启用' : '停用', node.remark, node.remoteOutboundTag, serverName(node.sourceServerId), usageCount(node.id)].filter(Boolean).join(' ').toLowerCase();
+  return [
+    node.name,
+    node.host,
+    node.port,
+    node.username,
+    node.enabled ? '启用' : '停用',
+    hasAuthentication(node) ? '认证' : '无认证',
+    isImportedNode(node) ? '远端导入' : '本地创建',
+    node.remark,
+    node.remoteOutboundTag,
+    serverName(node.sourceServerId),
+    usageCount(node.id)
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function addPendingId(source: Set<string>, id: string) {
+  return new Set(source).add(id);
+}
+
+function removePendingId(source: Set<string>, id: string) {
+  const next = new Set(source);
+  next.delete(id);
+  return next;
+}
+
+function showError(err: unknown, fallback: string) {
+  error.value = err instanceof Error ? err.message : fallback;
+  ElMessage.error(error.value);
 }
 
 onMounted(loadNodes);
 </script>
 
 <template>
-  <div class="page-head">
-    <div class="page-head-main">
-      <h1 class="page-title">出站节点</h1>
-      <p>维护 SOCKS 出站中转节点；路由节点启用出站后会引用这里的配置。</p>
+  <section class="socks-management-page" :class="{ loading }">
+    <header class="socks-page-header">
+      <div>
+        <h1>出站节点</h1>
+        <p>维护真实 SOCKS 出站连接；路由节点启用出站中转后会引用这里的地址与认证信息。</p>
+      </div>
+      <div class="socks-page-actions">
+        <el-select v-model="syncServerId" placeholder="选择来源面板" class="socks-server-select">
+          <el-option v-for="server in enabledServers" :key="server.id" :label="server.name" :value="server.id" />
+        </el-select>
+        <el-button class="socks-secondary-button" :loading="syncingRemote" :disabled="!syncServerId" @click="syncRemoteSocks"><Download :size="15" />导入远端 SOCKS</el-button>
+        <el-button class="socks-secondary-button" :loading="loading" @click="loadNodes"><RefreshCw :size="15" />刷新</el-button>
+        <el-button type="primary" @click="openDialog"><Plus :size="15" />添加出站</el-button>
+      </div>
+    </header>
+
+    <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="socks-page-alert" />
+
+    <div class="socks-stat-grid">
+      <article class="socks-stat-card">
+        <span class="socks-stat-icon tone-indigo"><ShieldCheck :size="18" /></span>
+        <div><small>出站总数</small><strong>{{ nodes.length }}</strong><span>真实保存的 SOCKS 节点</span></div>
+      </article>
+      <article class="socks-stat-card">
+        <span class="socks-stat-icon tone-emerald"><CheckCircle2 :size="18" /></span>
+        <div><small>已启用</small><strong>{{ enabledNodeCount }}</strong><span>{{ nodes.length - enabledNodeCount }} 个已停用</span></div>
+      </article>
+      <article class="socks-stat-card">
+        <span class="socks-stat-icon tone-cyan"><KeyRound :size="18" /></span>
+        <div><small>认证节点</small><strong>{{ authedNodeCount }}</strong><span>保存账号或密码</span></div>
+      </article>
+      <article class="socks-stat-card">
+        <span class="socks-stat-icon tone-amber"><Link2 :size="18" /></span>
+        <div><small>正在引用</small><strong>{{ usedNodeCount }}</strong><span>{{ importedNodeCount }} 个来自远端导入</span></div>
+      </article>
     </div>
-    <div class="page-actions">
-      <el-select v-model="syncServerId" placeholder="选择服务器" style="width: 220px">
-        <el-option v-for="server in enabledServers" :key="server.id" :label="server.name" :value="server.id" />
+
+    <div class="socks-filter-panel">
+      <div class="socks-search-field">
+        <Search :size="15" />
+        <el-input v-model="searchQuery" clearable placeholder="搜索名称、地址、端口、账号、来源面板或备注" />
+      </div>
+      <el-select v-model="selectedStatus" clearable placeholder="全部状态" class="socks-filter-select">
+        <el-option label="已启用" value="enabled" />
+        <el-option label="已停用" value="disabled" />
+        <el-option label="正在引用" value="used" />
+        <el-option label="未被引用" value="unused" />
       </el-select>
-      <el-button type="primary" :loading="syncingRemote" :disabled="!syncServerId" @click="syncRemoteSocks"><RefreshCw :size="15" />从远端导入</el-button>
-      <el-button :loading="loading" @click="loadNodes"><RefreshCw :size="15" />刷新</el-button>
+      <el-select v-model="selectedSource" clearable placeholder="全部来源" class="socks-filter-select">
+        <el-option label="远端导入" value="imported" />
+        <el-option label="本地创建" value="manual" />
+      </el-select>
+      <el-select v-model="selectedAuth" clearable placeholder="全部认证" class="socks-filter-select">
+        <el-option label="配置认证" value="authenticated" />
+        <el-option label="无认证" value="anonymous" />
+      </el-select>
+      <el-button v-if="hasActiveFilters" class="socks-reset-filter" text @click="resetFilters">重置</el-button>
     </div>
-  </div>
-  <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
 
-  <div class="metric-grid compact-metrics">
-    <div class="metric"><span>导入节点</span><strong>{{ importedNodeCount }}</strong><small>来自远端 SOCKS 出站</small></div>
-    <div class="metric"><span>出站节点</span><strong>{{ nodes.length }}</strong><small>启用 {{ enabledNodeCount }}</small></div>
-    <div class="metric"><span>认证节点</span><strong>{{ authedNodeCount }}</strong><small>配置账号或密码</small></div>
-    <div class="metric"><span>被引用</span><strong>{{ usedNodeCount }}</strong><small>正在被路由节点使用</small></div>
-    <div class="metric"><span>默认端口</span><strong>1080</strong><small>新增时可调整</small></div>
-  </div>
+    <div v-loading="loading" class="socks-card-grid">
+      <article v-for="node in filteredNodes" :key="node.id" class="socks-outbound-card">
+        <header class="socks-card-header">
+          <div class="socks-card-identity">
+            <span class="socks-card-icon"><Network :size="20" /></span>
+            <div>
+              <strong :title="node.name">{{ node.name }}</strong>
+              <span>SOCKS 出站 · {{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
+            </div>
+          </div>
+          <span class="socks-status-chip" :class="node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.enabled ? '已启用' : '已停用' }}</span>
+        </header>
 
-  <div class="panel list-panel">
-    <div class="panel-toolbar">
-      <strong>出站节点列表</strong>
-      <div class="table-toolbar-actions">
-        <el-button type="primary" @click="openDialog"><Plus :size="15" />添加出站节点</el-button>
+        <div class="socks-endpoint">
+          <Server :size="14" />
+          <div>
+            <small>SOCKS 连接地址</small>
+            <strong :title="`${node.host}:${node.port}`">{{ node.host }}:{{ node.port }}</strong>
+          </div>
+          <el-tooltip content="复制 SOCKS 地址" placement="top">
+            <button type="button" class="socks-copy-button" aria-label="复制 SOCKS 地址" @click="copyEndpoint(node)"><Clipboard :size="14" /></button>
+          </el-tooltip>
+        </div>
+
+        <div class="socks-card-meta">
+          <div><span>认证方式</span><strong>{{ hasAuthentication(node) ? '账号或密码' : '无认证' }}</strong></div>
+          <div><span>登录账号</span><strong :title="node.username || ''">{{ node.username || '-' }}</strong></div>
+          <div><span>路由引用</span><strong>{{ usageCount(node.id) }} 个节点</strong></div>
+        </div>
+
+        <div class="socks-card-tags">
+          <span class="socks-card-tag protocol">SOCKS</span>
+          <span class="socks-card-tag" :class="isImportedNode(node) ? 'imported' : 'manual'">{{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
+          <span v-if="node.hasPassword" class="socks-card-tag password">已保存密码</span>
+          <span v-if="node.remoteOutboundTag" class="socks-card-tag outbound" :title="node.remoteOutboundTag">{{ node.remoteOutboundTag }}</span>
+        </div>
+
+        <div v-if="isImportedNode(node)" class="socks-source-line">
+          <Download :size="13" />
+          <span>来源：{{ serverName(node.sourceServerId) || '远端面板' }}</span>
+        </div>
+        <p class="socks-card-remark" :class="{ 'is-empty': !node.remark }">{{ node.remark || '暂无备注' }}</p>
+
+        <footer class="socks-card-actions">
+          <el-button type="primary" plain @click="editNode(node)"><Edit3 :size="14" />编辑</el-button>
+          <el-button class="socks-toggle-button" :loading="togglingIds.has(node.id)" @click="toggleNodeEnabled(node)">
+            <CircleSlash2 v-if="node.enabled" :size="14" />
+            <CheckCircle2 v-else :size="14" />
+            {{ node.enabled ? '停用' : '启用' }}
+          </el-button>
+          <el-tooltip content="删除出站节点" placement="top">
+            <el-button class="socks-delete-button" :loading="deletingIds.has(node.id)" aria-label="删除出站节点" @click="removeNode(node)"><Trash2 :size="15" /></el-button>
+          </el-tooltip>
+        </footer>
+      </article>
+
+      <div v-if="!filteredNodes.length && !loading" class="socks-empty-state">
+        <CloudCog :size="28" />
+        <strong>{{ nodes.length ? '没有符合筛选条件的出站节点' : '暂无出站节点' }}</strong>
+        <span>{{ nodes.length ? '调整筛选条件后再查看' : '使用右上角按钮添加真实 SOCKS 出站，或从已启用面板导入' }}</span>
       </div>
     </div>
-    <div class="filter-bar">
-      <el-input v-model="searchQuery" clearable placeholder="搜索名称、地址、端口、账号、备注" style="max-width: 360px">
-        <template #prefix><Search :size="15" /></template>
-      </el-input>
-      <span class="filter-summary">显示 {{ filteredNodes.length }} / {{ nodes.length }}</span>
-    </div>
-    <div v-loading="loading" class="entity-card-grid socks-card-grid">
-      <article v-for="node in filteredNodes" :key="node.id" class="entity-card socks-card">
-        <div class="entity-card-head">
-          <div>
-            <strong>{{ node.name }}</strong>
-            <span>{{ node.host }}:{{ node.port }}</span>
-          </div>
-          <div class="tag-stack">
-            <el-switch v-model="node.enabled" size="small" :loading="togglingIds.has(node.id)" @change="(value: boolean | string | number) => toggleNodeEnabled(node, value)" />
-            <el-tag size="small" :type="node.sourceServerId || node.remoteOutboundTag ? 'warning' : 'info'">{{ node.sourceServerId || node.remoteOutboundTag ? '导入' : '创建' }}</el-tag>
-            <el-tag v-if="node.username || node.hasPassword" size="small" type="success">账号密码</el-tag>
-            <el-tag v-else size="small" type="info">无认证</el-tag>
-          </div>
-        </div>
-        <div class="entity-card-stats">
-          <div><span>地址</span><strong>{{ node.host }}</strong></div>
-          <div><span>端口</span><strong>{{ node.port }}</strong></div>
-          <div><span>引用</span><strong>{{ usageCount(node.id) }} 个</strong></div>
-        </div>
-        <div class="entity-card-meta">
-          <span v-if="node.sourceServerId || node.remoteOutboundTag">来源：{{ serverName(node.sourceServerId) || '远端' }}<template v-if="node.remoteOutboundTag"> / {{ node.remoteOutboundTag }}</template></span>
-          <span>{{ node.remark || '暂无备注' }}</span>
-        </div>
-        <div class="entity-card-actions">
-          <el-button size="small" @click="editNode(node)"><Edit3 :size="15" />编辑</el-button>
-          <el-button size="small" type="danger" plain @click="removeNode(node)"><Trash2 :size="15" />删除</el-button>
-        </div>
-      </article>
-      <div v-if="!filteredNodes.length && !loading" class="empty-panel entity-empty">暂无出站节点</div>
-    </div>
-  </div>
 
-  <el-dialog v-model="dialogVisible" :title="editingId ? '编辑出站节点' : '添加出站节点'" width="720px" destroy-on-close>
-    <el-form :model="form" label-width="92px" class="sectioned-dialog-form">
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>出站连接</strong><span>这里保存 SOCKS 地址，路由节点启用出站中转后会写入远端 Xray。</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
-          <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
-          <el-form-item label="地址"><el-input v-model="form.host" placeholder="127.0.0.1 或域名" /></el-form-item>
-          <el-form-item label="端口"><el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" /></el-form-item>
+    <footer class="socks-list-footer">显示 {{ filteredNodes.length }} / {{ nodes.length }} 个真实 SOCKS 出站</footer>
+  </section>
+
+  <el-dialog
+    v-model="dialogVisible"
+    :title="editingId ? '编辑 SOCKS 出站' : '添加 SOCKS 出站'"
+    width="min(680px, 94vw)"
+    class="socks-dark-dialog"
+    destroy-on-close
+  >
+    <div class="socks-dialog-intro">
+      <ShieldCheck :size="18" />
+      <div>
+        <strong>{{ editingId ? '更新已保存的 SOCKS 出站配置' : '添加真实 SOCKS 出站连接' }}</strong>
+        <span>这里只保存当前系统实际支持的 SOCKS 地址与认证信息，路由节点引用后会同步写入对应远端 Xray。</span>
+      </div>
+    </div>
+
+    <el-form :model="form" label-position="top" class="socks-dialog-form">
+      <section class="socks-dialog-section">
+        <header><strong>基本信息</strong><span>设置节点名称和启用状态</span></header>
+        <div class="socks-dialog-grid">
+          <el-form-item label="节点名称"><el-input v-model="form.name" maxlength="120" placeholder="例如 HK-SOCKS-01" /></el-form-item>
+          <el-form-item label="启用此出站" class="socks-switch-item">
+            <div class="socks-switch-row">
+              <span>停用时不能被新的路由节点选择</span>
+              <el-switch v-model="form.enabled" />
+            </div>
+          </el-form-item>
         </div>
       </section>
 
-      <section class="dialog-form-section">
-        <div class="dialog-section-head"><strong>认证与备注</strong><span>无账号密码时留空；编辑时密码留空表示不修改。</span></div>
-        <div class="dialog-form-grid">
-          <el-form-item label="账号"><el-input v-model="form.username" /></el-form-item>
-          <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password placeholder="编辑时留空不修改" /></el-form-item>
-          <el-form-item v-if="editingId" label="已保存" class="form-item-full"><el-button :loading="revealingSecret" @click="revealNodeSecret"><Eye :size="15" />读取已保存密码</el-button></el-form-item>
-          <el-form-item label="备注" class="form-item-full"><el-input v-model="form.remark" /></el-form-item>
+      <section class="socks-dialog-section">
+        <header><strong>SOCKS 连接</strong><span>填写真实服务器地址和端口，协议固定为 SOCKS</span></header>
+        <div class="socks-dialog-grid">
+          <el-form-item label="服务器地址"><el-input v-model="form.host" maxlength="255" placeholder="域名或 IP 地址" /></el-form-item>
+          <el-form-item label="端口"><el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 100%" /></el-form-item>
+        </div>
+      </section>
+
+      <section class="socks-dialog-section">
+        <header><strong>访问认证</strong><span>无认证时留空；编辑时密码留空会保留原值</span></header>
+        <div class="socks-dialog-grid">
+          <el-form-item label="用户名"><el-input v-model="form.username" maxlength="120" placeholder="可选 SOCKS 用户名" /></el-form-item>
+          <el-form-item label="密码">
+            <el-input v-model="form.password" type="password" show-password maxlength="256" :disabled="clearPassword" placeholder="编辑时留空不修改" />
+            <el-checkbox v-if="editingId" v-model="clearPassword" class="socks-clear-secret">清除已保存密码</el-checkbox>
+          </el-form-item>
+          <el-form-item v-if="editingId" label="已保存凭据" class="socks-dialog-full">
+            <el-button class="socks-secondary-button" :loading="revealingSecret" @click="revealNodeSecret"><Eye :size="15" />读取已保存密码</el-button>
+          </el-form-item>
+        </div>
+      </section>
+
+      <section class="socks-dialog-section">
+        <header><strong>备注</strong><span>记录线路、机房、用途或维护信息</span></header>
+        <div class="socks-dialog-grid">
+          <el-form-item label="备注" class="socks-dialog-full"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="500" placeholder="输入出站节点备注" /></el-form-item>
         </div>
       </section>
     </el-form>
+
     <template #footer>
-      <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!form.name || !form.host || !form.port" @click="saveNode">保存</el-button>
+      <el-button class="socks-secondary-button" @click="dialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!form.name.trim() || !form.host.trim() || !form.port" @click="saveNode">{{ editingId ? '保存修改' : '添加出站' }}</el-button>
     </template>
   </el-dialog>
 </template>

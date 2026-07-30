@@ -140,7 +140,7 @@ function editTemplate(template: CardTemplate) {
 }
 
 async function removeTemplate(template: CardTemplate) {
-  await ElMessageBox.confirm(`确认删除模板「${template.name}」？已经生成的批次和卡密会保留。`, '删除确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除模板「${template.name}」？已经生成的批次和卡密会保留。`, '删除确认', { type: 'warning', customClass: 'operations-dark-message-box' });
   await api(`/api/admin/card-templates/${template.id}`, { method: 'DELETE' });
   ElMessage.success('模板已删除');
   if (editingTemplateId.value === template.id) resetTemplateForm();
@@ -149,7 +149,7 @@ async function removeTemplate(template: CardTemplate) {
 }
 
 async function removeUnusedTemplateCards(template: CardTemplate) {
-  await ElMessageBox.confirm(`确认删除模板「${template.name}」下所有未使用卡密？已使用卡密和兑换记录会保留。`, '删除未使用卡密', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除模板「${template.name}」下所有未使用卡密？已使用卡密和兑换记录会保留。`, '删除未使用卡密', { type: 'warning', customClass: 'operations-dark-message-box' });
   deletingUnusedTemplateIds.value = new Set(deletingUnusedTemplateIds.value).add(template.id);
   error.value = '';
   try {
@@ -166,21 +166,21 @@ async function removeUnusedTemplateCards(template: CardTemplate) {
 }
 
 async function removeBatch(batch: CardBatch) {
-  await ElMessageBox.confirm(`确认删除批次「${batch.name}」及其未使用卡密？如果批次内已有使用记录，系统会拒绝删除。`, '删除确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除批次「${batch.name}」及其未使用卡密？如果批次内已有使用记录，系统会拒绝删除。`, '删除确认', { type: 'warning', customClass: 'operations-dark-message-box' });
   await api(`/api/admin/card-batches/${batch.id}`, { method: 'DELETE' });
   ElMessage.success('批次已删除');
   await loadCards();
 }
 
 async function removeCard(card: Card) {
-  await ElMessageBox.confirm(`确认删除卡密 ${card.codePreview}？已使用卡密不能删除。`, '删除确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除卡密 ${card.codePreview}？已使用卡密不能删除。`, '删除确认', { type: 'warning', customClass: 'operations-dark-message-box' });
   await api(`/api/admin/cards/${card.id}`, { method: 'DELETE' });
   ElMessage.success('卡密已删除');
   await loadCards();
 }
 
 async function removeUsedCards() {
-  await ElMessageBox.confirm('确认清除所有已使用卡密记录？用户余额不会回退，余额流水会保留。', '清除已使用记录', { type: 'warning' });
+  await ElMessageBox.confirm('确认清除所有已使用卡密记录？用户余额不会回退，余额流水会保留。', '清除已使用记录', { type: 'warning', customClass: 'operations-dark-message-box' });
   clearingUsed.value = true;
   error.value = '';
   try {
@@ -195,7 +195,7 @@ async function removeUsedCards() {
 }
 
 async function removeUsedBatchCards(batch: CardBatch) {
-  await ElMessageBox.confirm(`确认清除批次「${batch.name}」里的已使用卡密记录？用户余额不会回退，余额流水会保留。`, '清除批次已使用记录', { type: 'warning' });
+  await ElMessageBox.confirm(`确认清除批次「${batch.name}」里的已使用卡密记录？用户余额不会回退，余额流水会保留。`, '清除批次已使用记录', { type: 'warning', customClass: 'operations-dark-message-box' });
   clearingUsedBatchIds.value = new Set(clearingUsedBatchIds.value).add(batch.id);
   error.value = '';
   try {
@@ -349,6 +349,7 @@ onMounted(loadCards);
 </script>
 
 <template>
+  <div class="operations-page cards-page" :class="{ loading }">
   <div class="page-head">
     <div class="page-head-main">
       <h1 class="page-title">卡密管理</h1>
@@ -487,17 +488,17 @@ onMounted(loadCards);
     </el-collapse>
   </div>
 
-  <el-dialog v-model="templateDialogVisible" :title="editingTemplateId ? '编辑卡密模板' : '新增卡密模板'" width="680px" destroy-on-close>
+  <el-dialog v-model="templateDialogVisible" :title="editingTemplateId ? '编辑卡密模板' : '新增卡密模板'" width="680px" class="operations-dark-dialog" destroy-on-close>
     <el-form :model="templateForm" label-width="82px" class="sectioned-dialog-form">
       <section class="dialog-form-section">
         <div class="dialog-section-head"><strong>模板规则</strong><span>模板只保存默认金额、数量和前缀，生成时会在该模板下追加新批次。</span></div>
         <div class="dialog-form-grid">
-          <el-form-item label="模板名称"><el-input v-model="templateForm.name" /></el-form-item>
+          <el-form-item label="模板名称"><el-input v-model="templateForm.name" maxlength="120" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="templateForm.enabled" /></el-form-item>
           <el-form-item label="金额"><el-input-number v-model="templateForm.amount" :min="0.01" :precision="2" style="width: 100%" /></el-form-item>
           <el-form-item label="数量"><el-input-number v-model="templateForm.quantity" :min="1" :max="500" style="width: 100%" /></el-form-item>
           <el-form-item label="前缀"><el-input v-model="templateForm.prefix" maxlength="16" placeholder="可留空" /></el-form-item>
-          <el-form-item label="备注"><el-input v-model="templateForm.remark" /></el-form-item>
+          <el-form-item label="备注"><el-input v-model="templateForm.remark" maxlength="500" /></el-form-item>
         </div>
       </section>
     </el-form>
@@ -507,7 +508,7 @@ onMounted(loadCards);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="generateDialogVisible" title="生成卡密" width="680px" destroy-on-close>
+  <el-dialog v-model="generateDialogVisible" title="生成卡密" width="680px" class="operations-dark-dialog" destroy-on-close>
     <el-form :model="generateForm" label-width="82px" class="sectioned-dialog-form">
       <section class="dialog-form-section">
         <div class="dialog-section-head"><strong>生成批次</strong><span>选择模板后会锁定金额、数量和前缀，生成结果会持久保存在模板批次里。</span></div>
@@ -517,7 +518,7 @@ onMounted(loadCards);
               <el-option v-for="item in enabledTemplates" :key="item.id" :label="`${item.name} / ${item.amount} 元 / ${item.quantity} 张`" :value="item.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="批次名称" class="form-item-full"><el-input v-model="generateForm.name" /></el-form-item>
+          <el-form-item label="批次名称" class="form-item-full"><el-input v-model="generateForm.name" maxlength="120" /></el-form-item>
           <el-form-item label="金额"><el-input-number v-model="generateForm.amount" :disabled="Boolean(selectedTemplate)" :min="0.01" :precision="2" style="width: 100%" /></el-form-item>
           <el-form-item label="数量"><el-input-number v-model="generateForm.quantity" :disabled="Boolean(selectedTemplate)" :min="1" :max="500" style="width: 100%" /></el-form-item>
           <el-form-item label="前缀"><el-input v-model="generateForm.prefix" :disabled="Boolean(selectedTemplate)" maxlength="16" /></el-form-item>
@@ -537,4 +538,5 @@ onMounted(loadCards);
       <el-button type="primary" :loading="generating" :disabled="!generateForm.name" @click="generateCards">生成</el-button>
     </template>
   </el-dialog>
+  </div>
 </template>

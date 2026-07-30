@@ -22,6 +22,7 @@ type ServiceNodeConfig = {
 };
 
 type XuiServerConfig = {
+  shareHost?: string;
   tlsServerName?: string;
   tlsCertFile?: string;
   tlsKeyFile?: string;
@@ -31,7 +32,7 @@ type XuiServerConfig = {
   realitySpiderX?: string;
 };
 
-const SHARE_LINK_PROTOCOLS = new Set(['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria']);
+const SHARE_LINK_PROTOCOLS = new Set(['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria', 'hysteria2']);
 
 @Injectable()
 export class NodesService {
@@ -686,6 +687,7 @@ export class NodesService {
   private serverConfig(input: Partial<z.infer<typeof xuiServerUpsertSchema>>, current: XuiServerConfig = {}): XuiServerConfig {
     return {
       ...current,
+      shareHost: input.shareHost === undefined ? current.shareHost || '' : input.shareHost || '',
       tlsServerName: input.tlsServerName === undefined ? current.tlsServerName || '' : input.tlsServerName || '',
       tlsCertFile: input.tlsCertFile === undefined ? current.tlsCertFile || '' : input.tlsCertFile || '',
       tlsKeyFile: input.tlsKeyFile === undefined ? current.tlsKeyFile || '' : input.tlsKeyFile || '',
@@ -719,6 +721,7 @@ function stringValue(value: unknown) {
 function serverConfigFrom(value: unknown): XuiServerConfig {
   const config = jsonObject(jsonObject(value).config || value);
   return {
+    shareHost: String(config.shareHost || '').trim(),
     tlsServerName: String(config.tlsServerName || '').trim(),
     tlsCertFile: String(config.tlsCertFile || '').trim(),
     tlsKeyFile: String(config.tlsKeyFile || '').trim(),

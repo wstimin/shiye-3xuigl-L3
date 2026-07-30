@@ -31,6 +31,7 @@ export const xuiServerUpsertSchema = z.object({
   username: z.string().trim().min(1).max(100).optional(),
   password: z.string().max(256).optional(),
   token: z.string().max(2048).optional(),
+  shareHost: z.string().trim().max(255).optional().or(z.literal('')),
   tlsServerName: z.string().trim().max(255).optional().or(z.literal('')),
   tlsCertFile: z.string().trim().max(500).optional().or(z.literal('')),
   tlsKeyFile: z.string().trim().max(500).optional().or(z.literal('')),

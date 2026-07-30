@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Activity, Edit3, KeyRound, Link2, Plus, RefreshCw, RotateCcw, Search, ServerOff, Trash2, Unlink, Wallet } from 'lucide-vue-next';
+import { Activity, Ban, CalendarClock, CircleCheckBig, Edit3, KeyRound, Link2, MoreHorizontal, Plus, RefreshCw, RotateCcw, Search, ServerOff, Trash2, Unlink, UserRound, Users, Wallet } from 'lucide-vue-next';
 import { api } from '../api';
 
 type CustomerNode = {
@@ -118,6 +118,7 @@ const activeCustomerCount = computed(() => customers.value.filter((item) => item
 const boundNodeCount = computed(() => customers.value.reduce((total, item) => total + (item.nodes?.length || 0), 0));
 const activeBoundNodeCount = computed(() => customers.value.reduce((total, item) => total + (item.nodes?.filter((node) => node.status === 'active').length || 0), 0));
 const expiredBoundNodeCount = computed(() => customers.value.reduce((total, item) => total + (item.nodes?.filter((node) => isExpiredNode(node)).length || 0), 0));
+const expiringBoundNodeCount = computed(() => customers.value.reduce((total, item) => total + (item.nodes?.filter((node) => isExpiringNode(node)).length || 0), 0));
 const customerRangeText = computed(() => {
   if (!customerTotal.value) return '0 / 0';
   const start = (customerPage.page - 1) * customerPage.pageSize + 1;
@@ -253,7 +254,14 @@ async function adjustBalance() {
   adjustingBalance.value = true;
   error.value = '';
   try {
-    await api(`/api/admin/customers/${balanceForm.customerId}/balance-adjustments`, { method: 'POST', body: balanceForm });
+    await api(`/api/admin/customers/${balanceForm.customerId}/balance-adjustments`, {
+      method: 'POST',
+      body: {
+        mode: balanceForm.mode,
+        amount: balanceForm.amount,
+        remark: balanceForm.remark || undefined
+      }
+    });
     ElMessage.success('余额已调整');
     balanceDialogVisible.value = false;
     Object.assign(balanceForm, { mode: 'add', amount: 0, remark: '' });
@@ -314,7 +322,7 @@ async function showNodeTraffic(customer: Customer, node: CustomerNode) {
       `Total: ${formatBytes(Number(traffic.total || 0))}`,
       `Expiry: ${formatRemoteExpiry(traffic.expiryTime)}`,
       `Last online: ${formatRemoteLastOnline(traffic.lastOnline)}`
-    ].join('\n'), '3x-ui client traffic', { type: 'info' });
+    ].join('\n'), '3x-ui 客户端流量', { type: 'info', customClass: 'customer-dark-message-box' });
   } catch (err) {
     error.value = err instanceof Error ? err.message : '读取远端流量失败';
   } finally {
@@ -325,7 +333,7 @@ async function showNodeTraffic(customer: Customer, node: CustomerNode) {
 }
 
 async function resetNodeTraffic(customer: Customer, node: CustomerNode) {
-  await ElMessageBox.confirm(`确认重置「${node.serviceNode?.name || node.xuiEmail}」这个远端客户端的流量？`, '重置客户端流量', { type: 'warning' });
+  await ElMessageBox.confirm(`确认重置「${node.serviceNode?.name || node.xuiEmail}」这个远端客户端的流量？`, '重置客户端流量', { type: 'warning', customClass: 'customer-dark-message-box' });
   resettingTrafficIds.value = new Set(resettingTrafficIds.value).add(node.id);
   error.value = '';
   try {
@@ -342,7 +350,7 @@ async function resetNodeTraffic(customer: Customer, node: CustomerNode) {
 }
 
 async function unbindNode(customer: Customer, node: CustomerNode) {
-  await ElMessageBox.confirm(`确认解绑「${node.serviceNode?.name || node.xuiEmail}」？`, '解绑确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认解绑「${node.serviceNode?.name || node.xuiEmail}」？解绑只移除本地关系，不删除远端客户端。`, '解绑确认', { type: 'warning', customClass: 'customer-dark-message-box' });
   await api(`/api/admin/customers/${customer.id}/nodes/${node.id}`, { method: 'DELETE' });
   ElMessage.success('节点已解绑');
   await loadCustomers();
@@ -353,7 +361,7 @@ async function deleteBoundServiceNode(customer: Customer, node: CustomerNode) {
     ElMessage.error('该绑定缺少服务节点信息，无法删除服务节点');
     return;
   }
-  await ElMessageBox.confirm(`确认删除服务节点「${node.serviceNode.name}」？系统会同步删除该服务节点、本地所有用户绑定以及远端 3x-ui 入站/客户端。`, '删除服务节点', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除服务节点「${node.serviceNode.name}」？系统会同步删除该服务节点、本地所有用户绑定以及远端 3x-ui 入站/客户端。`, '删除服务节点', { type: 'warning', customClass: 'customer-dark-message-box' });
   deletingServiceNodeIds.value = new Set(deletingServiceNodeIds.value).add(node.id);
   error.value = '';
   try {
@@ -377,7 +385,7 @@ async function revealEditingCustomerPassword() {
   try {
     const result = await api<{ loginPassword: string }>(`/api/admin/customers/${editingCustomerId.value}/secrets`);
     if (!result.loginPassword) {
-      await ElMessageBox.alert('该用户没有可读取的已保存密码。历史用户如果只保存了哈希，需要管理员重置密码，或用户下次自行修改密码后才可读取。', '读取密码', { type: 'warning' });
+      await ElMessageBox.alert('该用户没有可读取的已保存密码。历史用户如果只保存了哈希，需要管理员重置密码，或用户下次自行修改密码后才可读取。', '读取密码', { type: 'warning', customClass: 'customer-dark-message-box' });
       return;
     }
     customerForm.loginPassword = result.loginPassword;
@@ -399,7 +407,7 @@ async function showDeleteResult(result: DeleteServiceNodeResult) {
     cleanupStatusLine('远端入站', result.remoteInboundCleanup),
     cleanupStatusLine('远端客户端', remoteClient),
     result.deleted ? '本地路由节点和绑定：已清理' : '本地路由节点和绑定：未清理'
-  ].join('\n'), '删除结果', { type: 'success' });
+  ].join('\n'), '删除结果', { type: 'success', customClass: 'customer-dark-message-box' });
 }
 
 function cleanupStatusLine(label: string, result?: CleanupResult) {
@@ -432,7 +440,7 @@ async function showCustomerSyncResult(result: CustomerNodeSyncResult | undefined
   }
   await ElMessageBox.alert([
     ...lines
-  ].join('\n'), title, { type: result.synced ? 'success' : 'warning' });
+  ].join('\n'), title, { type: result.synced ? 'success' : 'warning', customClass: 'customer-dark-message-box' });
 }
 
 function formatRemoteConfigStatus(result: RemoteConfigSyncResult | null | undefined) {
@@ -496,11 +504,18 @@ function editCustomer(customer: Customer) {
 }
 
 async function removeCustomer(customer: Customer) {
-  await ElMessageBox.confirm(`确认删除用户「${customer.name}」？系统只会删除面板用户和本地绑定，不会删除路由节点或远端 3x-ui 入站/客户端。`, '删除确认', { type: 'warning' });
+  await ElMessageBox.confirm(`确认删除用户「${customer.name}」？系统只会删除面板用户和本地绑定，不会删除路由节点或远端 3x-ui 入站/客户端。`, '删除确认', { type: 'warning', customClass: 'customer-dark-message-box' });
   await api(`/api/admin/customers/${customer.id}`, { method: 'DELETE' });
   ElMessage.success('用户已删除');
   if (editingCustomerId.value === customer.id) resetCustomerForm();
   await loadCustomers();
+}
+
+async function handleCustomerCommand(customer: Customer, command: string) {
+  if (command === 'bind') return openBindDialog(customer);
+  if (command === 'balance') return openBalanceDialog(customer);
+  if (command === 'toggle') return toggleCustomerStatus(customer, customer.status !== 'active');
+  if (command === 'delete') return removeCustomer(customer);
 }
 
 async function toggleCustomerStatus(customer: Customer, enabled: boolean | string | number) {
@@ -576,9 +591,46 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false });
 }
 
+function formatShortDate(value?: string | null) {
+  if (!value) return '未设置';
+  return new Date(value).toLocaleDateString('zh-CN');
+}
+
+function customerNearestExpiry(customer: Customer) {
+  const timestamps = (customer.nodes || [])
+    .map((node) => node.expireAt)
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value).getTime())
+    .filter(Number.isFinite);
+  const future = timestamps.filter((value) => value > Date.now()).sort((left, right) => left - right);
+  const expired = timestamps.filter((value) => value <= Date.now()).sort((left, right) => right - left);
+  const nearest = future[0] ?? expired[0];
+  return nearest ? new Date(nearest).toISOString() : null;
+}
+
+function customerExpiryState(customer: Customer) {
+  const nodes = customer.nodes || [];
+  if (nodes.some((node) => isExpiredNode(node))) return { label: '存在到期绑定', tone: 'danger' };
+  if (nodes.some((node) => isExpiringNode(node))) return { label: '临近到期', tone: 'warning' };
+  if (!nodes.some((node) => node.expireAt)) return { label: '未设置到期', tone: 'neutral' };
+  return { label: '服务有效', tone: 'success' };
+}
+
+function customerAvatarClass(customer: Customer) {
+  const tones = ['indigo', 'cyan', 'emerald', 'amber', 'violet', 'rose'];
+  const value = Array.from(customer.id || customer.loginUsername).reduce((total, char) => total + (char.codePointAt(0) || 0), 0);
+  return `tone-${tones[value % tones.length]}`;
+}
+
 function isExpiredNode(node: CustomerNode) {
   if (!node.expireAt) return false;
   return new Date(node.expireAt).getTime() <= Date.now();
+}
+
+function isExpiringNode(node: CustomerNode) {
+  if (!node.expireAt) return false;
+  const remaining = new Date(node.expireAt).getTime() - Date.now();
+  return remaining > 0 && remaining <= 7 * 24 * 60 * 60 * 1000;
 }
 
 function nodeExpireStatus(node: CustomerNode) {
@@ -617,79 +669,109 @@ onMounted(loadCustomers);
 </script>
 
 <template>
-  <div class="page-head">
-    <div class="page-head-main">
-      <h1 class="page-title">用户管理</h1>
-      <p>管理面板登录用户、余额和本地节点绑定；绑定只更新路由节点已有的 3x-ui 客户端。</p>
-    </div>
-    <div class="page-actions">
-      <el-button :loading="loading" @click="loadCustomers()"><RefreshCw :size="15" />刷新</el-button>
-    </div>
-  </div>
-  <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
-
-  <div class="metric-grid compact-metrics">
-    <div class="metric"><span>面板用户</span><strong>{{ customerTotal }}</strong><small>当前页启用 {{ activeCustomerCount }}</small></div>
-    <div class="metric"><span>绑定节点</span><strong>{{ boundNodeCount }}</strong><small>启用 {{ activeBoundNodeCount }}</small></div>
-    <div class="metric"><span>到期绑定</span><strong>{{ expiredBoundNodeCount }}</strong><small>到期后会同步停用</small></div>
-    <div class="metric"><span>余额操作</span><strong>手动</strong><small>支持增减和设置</small></div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-toolbar">
-      <strong>用户业务</strong>
-      <div class="table-toolbar-actions">
-        <el-button type="primary" @click="openCustomerDialog"><Plus :size="15" />新增用户</el-button>
-        <el-button @click="openBindDialog()"><Link2 :size="15" />绑定节点</el-button>
-        <el-button @click="openBalanceDialog()"><Wallet :size="15" />调整余额</el-button>
+  <div class="customer-management-page" :class="{ loading }">
+    <header class="customer-page-header">
+      <div>
+        <h1>用户管理</h1>
+        <p>管理面板登录用户、账户余额与 3x-ui 路由节点绑定。</p>
       </div>
-    </div>
-    <div class="filter-bar">
-      <el-input v-model="customerFilters.keyword" clearable placeholder="搜索用户、账号、联系方式、绑定节点" style="max-width: 360px" @keyup.enter="loadCustomers(true)">
-        <template #prefix><Search :size="15" /></template>
-      </el-input>
-      <el-select v-model="customerFilters.status" clearable placeholder="状态" style="width: 130px" @change="loadCustomers(true)">
+      <div class="customer-page-actions">
+        <el-button class="customer-secondary-button" :loading="loading" @click="loadCustomers()"><RefreshCw :size="15" />刷新</el-button>
+        <el-button class="customer-secondary-button" @click="openBalanceDialog()"><Wallet :size="15" />调整余额</el-button>
+        <el-button type="primary" @click="openCustomerDialog"><Plus :size="15" />新增用户</el-button>
+      </div>
+    </header>
+
+    <el-alert v-if="error" class="customer-page-alert" :title="error" type="error" show-icon :closable="false" />
+
+    <section class="customer-stat-grid" aria-label="当前用户统计">
+      <article class="customer-stat-card">
+        <span class="customer-stat-icon tone-indigo"><Users :size="18" /></span>
+        <div><small>用户总数</small><strong>{{ customerTotal }}</strong><span>符合当前筛选条件</span></div>
+      </article>
+      <article class="customer-stat-card">
+        <span class="customer-stat-icon tone-emerald"><CircleCheckBig :size="18" /></span>
+        <div><small>当前页启用</small><strong>{{ activeCustomerCount }}</strong><span>本页共 {{ customers.length }} 位用户</span></div>
+      </article>
+      <article class="customer-stat-card">
+        <span class="customer-stat-icon tone-cyan"><Link2 :size="18" /></span>
+        <div><small>当前页绑定</small><strong>{{ boundNodeCount }}</strong><span>其中启用 {{ activeBoundNodeCount }} 个</span></div>
+      </article>
+      <article class="customer-stat-card">
+        <span class="customer-stat-icon tone-amber"><CalendarClock :size="18" /></span>
+        <div><small>临近 / 已到期</small><strong>{{ expiringBoundNodeCount }} / {{ expiredBoundNodeCount }}</strong><span>按当前页绑定统计</span></div>
+      </article>
+    </section>
+
+    <section class="customer-filter-panel">
+      <div class="customer-search-field">
+        <Search :size="16" />
+        <el-input v-model="customerFilters.keyword" clearable placeholder="搜索名称、账号、邮箱、手机或绑定节点" @keyup.enter="loadCustomers(true)" />
+      </div>
+      <el-select v-model="customerFilters.status" clearable placeholder="全部状态" class="customer-filter-select" @change="loadCustomers(true)">
         <el-option label="启用" value="active" />
         <el-option label="禁用" value="disabled" />
       </el-select>
-      <el-input-number v-model="customerFilters.balanceMin" :min="0" :precision="2" placeholder="最低余额" controls-position="right" style="width: 136px" @change="loadCustomers(true)" />
-      <el-input-number v-model="customerFilters.balanceMax" :min="0" :precision="2" placeholder="最高余额" controls-position="right" style="width: 136px" @change="loadCustomers(true)" />
-      <el-button @click="resetCustomerFilters"><RotateCcw :size="15" />重置</el-button>
+      <el-input-number v-model="customerFilters.balanceMin" :min="0" :precision="2" placeholder="最低余额" controls-position="right" class="customer-balance-filter" />
+      <el-input-number v-model="customerFilters.balanceMax" :min="0" :precision="2" placeholder="最高余额" controls-position="right" class="customer-balance-filter" />
+      <el-button class="customer-secondary-button" @click="resetCustomerFilters"><RotateCcw :size="15" />重置</el-button>
       <el-button type="primary" :loading="loading" @click="loadCustomers(true)"><Search :size="15" />查询</el-button>
-      <span class="filter-summary">显示 {{ customerRangeText }}</span>
-    </div>
-    <div v-loading="loading" class="entity-card-grid customer-card-grid">
-      <article v-for="customer in customers" :key="customer.id" class="entity-card customer-card">
-        <div class="entity-card-head">
-          <div>
-            <strong>{{ customer.name }}</strong>
-            <span>{{ customer.loginUsername }}</span>
+    </section>
+
+    <section v-loading="loading" class="customer-user-grid">
+      <article v-for="customer in customers" :key="customer.id" class="customer-user-card">
+        <header class="customer-card-header">
+          <div class="customer-card-identity">
+            <span class="customer-card-avatar" :class="customerAvatarClass(customer)">{{ Array.from(customer.name.trim())[0] || Array.from(customer.loginUsername)[0] || '用' }}</span>
+            <div>
+              <strong>{{ customer.name }}</strong>
+              <span>@{{ customer.loginUsername }}</span>
+            </div>
           </div>
-          <el-switch :model-value="customer.status === 'active'" size="small" :loading="togglingCustomerIds.has(customer.id)" @change="(value: boolean | string | number) => toggleCustomerStatus(customer, value)" />
+          <span class="customer-status-chip" :class="customer.status === 'active' ? 'is-active' : 'is-disabled'"><i></i>{{ customer.status === 'active' ? '启用' : '禁用' }}</span>
+        </header>
+
+        <div class="customer-contact-line"><UserRound :size="14" />{{ customer.email || customer.phone || '未填写联系方式' }}</div>
+
+        <div class="customer-card-meta">
+          <div><span>账户余额</span><strong>¥ {{ Number(customer.balance).toFixed(2) }}</strong></div>
+          <div><span>绑定节点</span><strong>{{ customer.nodes?.length || 0 }} 个</strong></div>
+          <div><span>最近到期</span><strong>{{ formatShortDate(customerNearestExpiry(customer)) }}</strong></div>
+          <div><span>创建时间</span><strong>{{ formatShortDate(customer.createdAt) }}</strong></div>
         </div>
-        <div class="entity-card-stats">
-          <div><span>余额</span><strong>{{ customer.balance }}</strong></div>
-          <div><span>绑定</span><strong>{{ customer.nodes?.length || 0 }} 个</strong></div>
-          <div><span>创建</span><strong>{{ formatDate(customer.createdAt) }}</strong></div>
+
+        <div class="customer-service-line">
+          <span class="customer-expiry-chip" :class="`is-${customerExpiryState(customer).tone}`"><i></i>{{ customerExpiryState(customer).label }}</span>
+          <span v-if="customer.remark" class="customer-card-remark" :title="customer.remark">{{ customer.remark }}</span>
+          <span v-else class="customer-card-remark is-empty">暂无备注</span>
         </div>
-        <div class="entity-card-meta">
-          <span>{{ customer.email || customer.phone || '未填写联系方式' }}</span>
-          <span v-if="customer.remark">{{ customer.remark }}</span>
-        </div>
-        <div class="entity-card-actions">
-          <el-button size="small" @click="openCustomerNodesDrawer(customer)"><Link2 :size="15" />节点</el-button>
-          <el-button size="small" @click="openBindDialog(customer)"><Link2 :size="15" />绑定</el-button>
-          <el-button size="small" @click="openBalanceDialog(customer)"><Wallet :size="15" />余额</el-button>
-          <el-button size="small" @click="editCustomer(customer)"><Edit3 :size="15" />编辑</el-button>
-          <el-button size="small" type="danger" plain @click="removeCustomer(customer)"><Trash2 :size="15" />删除</el-button>
-        </div>
+
+        <footer class="customer-card-actions">
+          <el-button type="primary" plain @click="openCustomerNodesDrawer(customer)"><Link2 :size="14" />节点详情</el-button>
+          <el-button class="customer-secondary-button" @click="editCustomer(customer)"><Edit3 :size="14" />编辑</el-button>
+          <el-dropdown trigger="click" @command="(command: string) => handleCustomerCommand(customer, command)">
+            <el-tooltip content="更多操作" placement="top">
+              <el-button class="customer-more-button" aria-label="更多操作"><MoreHorizontal :size="17" /></el-button>
+            </el-tooltip>
+            <template #dropdown>
+              <el-dropdown-menu class="customer-action-menu">
+                <el-dropdown-item command="bind"><Link2 :size="14" />绑定节点</el-dropdown-item>
+                <el-dropdown-item command="balance"><Wallet :size="14" />调整余额</el-dropdown-item>
+                <el-dropdown-item command="toggle"><Ban :size="14" />{{ customer.status === 'active' ? '禁用用户' : '启用用户' }}</el-dropdown-item>
+                <el-dropdown-item command="delete" divided><Trash2 :size="14" />删除用户</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </footer>
       </article>
-      <div v-if="!customers.length && !loading" class="empty-panel entity-empty">暂无用户数据</div>
-    </div>
-    <div class="pagination-bar">
+      <div v-if="!customers.length && !loading" class="customer-empty-state"><Users :size="30" /><strong>暂无用户数据</strong><span>调整筛选条件或新增用户后再查看。</span></div>
+    </section>
+
+    <footer class="customer-list-footer">
+      <span>显示 {{ customerRangeText }}</span>
       <el-pagination
         background
-        layout="total, sizes, prev, pager, next, jumper"
+        layout="sizes, prev, pager, next"
         :total="customerTotal"
         :current-page="customerPage.page"
         :page-size="customerPage.pageSize"
@@ -697,10 +779,10 @@ onMounted(loadCustomers);
         @current-change="handleCustomerPageChange"
         @size-change="handleCustomerPageSizeChange"
       />
-    </div>
+    </footer>
   </div>
 
-  <el-drawer v-model="customerNodeDrawerVisible" :title="selectedCustomerForNodes ? `${selectedCustomerForNodes.name} 的绑定节点` : '绑定节点'" size="min(820px, 92vw)" destroy-on-close>
+  <el-drawer v-model="customerNodeDrawerVisible" class="customer-dark-drawer" :title="selectedCustomerForNodes ? `${selectedCustomerForNodes.name} 的绑定节点` : '绑定节点'" size="min(820px, 92vw)" destroy-on-close>
     <template v-if="selectedCustomerForNodes">
       <div class="drawer-head-card">
         <div>
@@ -759,8 +841,9 @@ onMounted(loadCustomers);
     </template>
   </el-drawer>
 
-  <el-dialog v-model="customerDialogVisible" :title="editingCustomerId ? '编辑用户' : '新增用户'" width="720px" destroy-on-close>
-    <el-form :model="customerForm" label-width="82px" class="dialog-form-grid">
+  <el-dialog v-model="customerDialogVisible" class="customer-dark-dialog" :title="editingCustomerId ? '编辑用户' : '新增用户'" width="720px" destroy-on-close>
+    <div class="customer-dialog-intro"><UserRound :size="18" /><div><strong>{{ editingCustomerId ? '编辑账户资料' : '创建面板用户' }}</strong><span>填写真实登录资料、联系方式、余额和账户状态。</span></div></div>
+    <el-form :model="customerForm" label-width="82px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="名称"><el-input v-model="customerForm.name" /></el-form-item>
       <el-form-item label="登录账号"><el-input v-model="customerForm.loginUsername" /></el-form-item>
       <el-form-item label="登录密码">
@@ -773,7 +856,7 @@ onMounted(loadCustomers);
       <el-form-item label="手机"><el-input v-model="customerForm.phone" /></el-form-item>
       <el-form-item label="余额"><el-input-number v-model="customerForm.balance" :min="0" :precision="2" style="width: 100%" /></el-form-item>
       <el-form-item label="状态"><el-select v-model="customerForm.status" style="width: 100%"><el-option label="启用" value="active" /><el-option label="禁用" value="disabled" /></el-select></el-form-item>
-      <el-form-item label="备注"><el-input v-model="customerForm.remark" /></el-form-item>
+      <el-form-item label="备注" class="form-item-full"><el-input v-model="customerForm.remark" type="textarea" :rows="3" placeholder="可填写用户说明" /></el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="customerDialogVisible = false">取消</el-button>
@@ -781,8 +864,9 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="bindDialogVisible" title="绑定路由节点" width="760px" destroy-on-close>
-    <el-form :model="bindForm" label-width="104px" class="dialog-form-grid">
+  <el-dialog v-model="bindDialogVisible" class="customer-dark-dialog" title="绑定路由节点" width="760px" destroy-on-close>
+    <div class="customer-dialog-intro"><Link2 :size="18" /><div><strong>建立本地节点绑定</strong><span>仅同步路由节点中已存在的 3x-ui 客户端，不会创建新的远端客户端。</span></div></div>
+    <el-form :model="bindForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="用户">
         <el-select v-model="bindForm.customerId" placeholder="选择用户" style="width: 100%">
           <el-option v-for="customer in customers" :key="customer.id" :label="`${customer.name} / ${customer.loginUsername}`" :value="customer.id" />
@@ -813,8 +897,9 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="editNodeDialogVisible" title="编辑绑定节点" width="760px" destroy-on-close>
-    <el-form :model="nodeEditForm" label-width="104px" class="dialog-form-grid">
+  <el-dialog v-model="editNodeDialogVisible" class="customer-dark-dialog" title="编辑绑定节点" width="760px" destroy-on-close>
+    <div class="customer-dialog-intro"><Edit3 :size="18" /><div><strong>更新绑定资料</strong><span>保存后会尝试同步远端已有客户端及对应路由配置。</span></div></div>
+    <el-form :model="nodeEditForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="服务节点">
         <el-select v-model="nodeEditForm.serviceNodeId" placeholder="选择节点" style="width: 100%">
           <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
@@ -839,8 +924,9 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="balanceDialogVisible" title="调整余额" width="680px" destroy-on-close>
-    <el-form :model="balanceForm" label-width="82px" class="dialog-form-grid">
+  <el-dialog v-model="balanceDialogVisible" class="customer-dark-dialog" title="调整余额" width="680px" destroy-on-close>
+    <div class="customer-dialog-intro"><Wallet :size="18" /><div><strong>账户余额变更</strong><span>支持增加、扣减或直接设置余额，变更会记录到财务流水。</span></div></div>
+    <el-form :model="balanceForm" label-width="82px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="用户">
         <el-select v-model="balanceForm.customerId" placeholder="选择用户" style="width: 100%">
           <el-option v-for="customer in customers" :key="customer.id" :label="`${customer.name} / ${customer.loginUsername}`" :value="customer.id" />
@@ -848,7 +934,7 @@ onMounted(loadCustomers);
       </el-form-item>
       <el-form-item label="方式"><el-select v-model="balanceForm.mode" style="width: 100%"><el-option label="增加" value="add" /><el-option label="扣减" value="subtract" /><el-option label="设置为" value="set" /></el-select></el-form-item>
       <el-form-item label="金额"><el-input-number v-model="balanceForm.amount" :min="0" :precision="2" style="width: 100%" /></el-form-item>
-      <el-form-item label="备注"><el-input v-model="balanceForm.remark" /></el-form-item>
+      <el-form-item label="备注" class="form-item-full"><el-input v-model="balanceForm.remark" type="textarea" :rows="3" placeholder="建议填写本次调整原因" /></el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="balanceDialogVisible = false">取消</el-button>

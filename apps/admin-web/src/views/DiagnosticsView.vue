@@ -100,6 +100,7 @@ onMounted(loadDiagnostics);
 </script>
 
 <template>
+  <div class="operations-page diagnostics-page" :class="{ loading }">
   <div class="page-head">
     <div class="page-head-main">
       <h1 class="page-title">健康诊断</h1>
@@ -164,5 +165,6 @@ onMounted(loadDiagnostics);
   <div v-if="!diagnostics && !error" class="panel diagnostic-loading">
     <AlertTriangle :size="22" />
     <span>{{ loading ? '正在执行健康诊断...' : '等待诊断' }}</span>
+  </div>
   </div>
 </template>
