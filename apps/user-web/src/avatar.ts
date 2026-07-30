@@ -1,14 +1,14 @@
 import type { CSSProperties } from 'vue';
 
 const avatarPalettes = [
-  ['#6366f1', '#818cf8'],
-  ['#0ea5e9', '#38bdf8'],
-  ['#059669', '#34d399'],
-  ['#d97706', '#fbbf24'],
-  ['#db2777', '#f472b6'],
-  ['#7c3aed', '#a78bfa'],
-  ['#dc2626', '#f87171'],
-  ['#0891b2', '#22d3ee']
+  ['#4338ca', '#6366f1'],
+  ['#0369a1', '#0284c7'],
+  ['#047857', '#059669'],
+  ['#b45309', '#d97706'],
+  ['#be185d', '#db2777'],
+  ['#6d28d9', '#7c3aed'],
+  ['#b91c1c', '#dc2626'],
+  ['#0e7490', '#0891b2']
 ] as const;
 
 export function userInitial(value?: string | null) {
