@@ -742,3 +742,197 @@ input:-webkit-autofill:active {
   .result-panel { padding: 22px 15px; }
   .qr-modal { padding: 13px; }
 }
+
+/* User-side modal system aligned with the management console. */
+.qr-modal {
+  z-index: 80;
+  padding: 24px;
+  background: rgb(0 0 0 / 65%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: user-modal-overlay-enter .2s ease both;
+}
+
+.qr-modal-panel {
+  width: min(380px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 16px;
+  background: #0e1017;
+  color: #f1f5f9;
+  padding: 0;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 50%), 0 0 0 1px rgb(99 102 241 / 6%);
+  animation: user-modal-panel-enter .25s ease both;
+}
+
+.qr-modal-head {
+  min-height: 69px;
+  padding: 18px 20px 18px 22px;
+  border-bottom: 1px solid rgb(255 255 255 / 7%);
+}
+
+.qr-modal-head strong {
+  color: #f1f5f9;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.qr-modal-head .copy-button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.qr-modal-head .copy-button:hover {
+  border-color: rgb(255 255 255 / 7%);
+  background: rgb(255 255 255 / 6%);
+  color: #f1f5f9;
+}
+
+.qr-modal-body {
+  min-height: 0;
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 22px;
+  overflow-y: auto;
+  scrollbar-color: rgb(255 255 255 / 11%) transparent;
+  scrollbar-width: thin;
+}
+
+.qr-modal-body::-webkit-scrollbar,
+.message-modal-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.qr-modal-body::-webkit-scrollbar-thumb,
+.message-modal-body::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgb(255 255 255 / 10%);
+}
+
+.qr-modal-panel .qr-modal-body > img {
+  width: 260px;
+  height: 260px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  border: 10px solid #fff;
+  border-radius: 8px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.qr-modal-body p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.message-modal-panel {
+  width: min(430px, 100%);
+}
+
+.message-modal-body {
+  min-height: 0;
+  padding: 22px;
+  overflow-y: auto;
+  scrollbar-color: rgb(255 255 255 / 11%) transparent;
+  scrollbar-width: thin;
+}
+
+.message-modal-text {
+  margin: 0;
+  border: 1px solid rgb(248 113 113 / 22%);
+  border-radius: 10px;
+  background: rgb(248 113 113 / 9%);
+  color: #fca5a5;
+  padding: 14px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.message-modal-footer {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 16px 22px;
+  border-top: 1px solid rgb(255 255 255 / 7%);
+  background: rgb(0 0 0 / 20%);
+}
+
+.modal-primary-button {
+  min-width: 82px;
+  height: 38px;
+  border: 1px solid #6366f1;
+  border-radius: 9px;
+  background: #6366f1;
+  color: #fff;
+  padding: 0 17px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 2px 12px rgb(99 102 241 / 35%);
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.modal-primary-button:hover {
+  border-color: #5558e3;
+  background: #5558e3;
+  box-shadow: 0 4px 16px rgb(99 102 241 / 45%);
+  transform: translateY(-1px);
+}
+
+@keyframes user-modal-overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes user-modal-panel-enter {
+  from { opacity: 0; transform: translateY(16px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 560px) {
+  .qr-modal {
+    padding: 12px;
+  }
+
+  .qr-modal-panel {
+    max-height: calc(100vh - 24px);
+  }
+
+  .qr-modal-head {
+    padding-inline: 16px 14px;
+  }
+
+  .qr-modal-body,
+  .message-modal-body,
+  .message-modal-footer {
+    padding-inline: 16px;
+  }
+
+  .qr-modal-panel .qr-modal-body > img {
+    width: min(260px, calc(100vw - 76px));
+    height: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qr-modal,
+  .qr-modal-panel {
+    animation: none;
+  }
+}

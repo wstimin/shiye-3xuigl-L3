@@ -2574,3 +2574,688 @@ input:-webkit-autofill:active {
     white-space: normal;
   }
 }
+
+/* Unified modal system. Kept as the final layer so every management surface shares it. */
+.el-overlay {
+  background-color: rgb(0 0 0 / 65%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) {
+  --admin-modal-border: rgb(255 255 255 / 7%);
+  --admin-modal-text: #f1f5f9;
+  --admin-modal-secondary: #94a3b8;
+  --admin-modal-muted: #64748b;
+  width: min(var(--el-dialog-width, 680px), calc(100vw - 32px));
+  max-height: 90vh;
+  margin-block: 5vh;
+  overflow: hidden;
+  border: 1px solid var(--admin-modal-border);
+  border-radius: 16px;
+  background: #0e1017;
+  color: var(--admin-modal-text);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 50%), 0 0 0 1px rgb(99 102 241 / 6%);
+  animation: admin-modal-enter .25s ease both;
+}
+
+@keyframes admin-modal-enter {
+  from { opacity: 0; transform: translateY(16px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__header {
+  min-height: 69px;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 18px 62px 18px 22px;
+  border-bottom: 1px solid var(--admin-modal-border);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__title {
+  color: var(--admin-modal-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__headerbtn {
+  width: 32px;
+  height: 32px;
+  top: 18px;
+  right: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__headerbtn:hover {
+  border-color: var(--admin-modal-border);
+  background: rgb(255 255 255 / 6%);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__headerbtn .el-dialog__close {
+  color: var(--admin-modal-muted);
+  font-size: 17px;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__headerbtn:hover .el-dialog__close {
+  color: var(--admin-modal-text);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__body {
+  max-height: calc(90vh - 139px);
+  padding: 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #0e1017;
+  color: var(--admin-modal-secondary);
+  scrollbar-color: rgb(255 255 255 / 11%) transparent;
+  scrollbar-width: thin;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__body::-webkit-scrollbar {
+  width: 4px;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__body::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgb(255 255 255 / 10%);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-dialog__footer {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px 22px;
+  border-top: 1px solid var(--admin-modal-border);
+  background: rgb(0 0 0 / 20%);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) :is(.el-input__wrapper, .el-select__wrapper, .el-input-number .el-input__wrapper) {
+  min-height: 40px;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 3%);
+  box-shadow: 0 0 0 1px var(--admin-modal-border) inset;
+  transition: background-color .15s ease, box-shadow .15s ease;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) :is(.el-input__wrapper.is-focus, .el-select__wrapper.is-focused, .el-input-number .el-input__wrapper.is-focus) {
+  background: rgb(99 102 241 / 4%);
+  box-shadow: 0 0 0 1px rgb(99 102 241 / 50%) inset, 0 0 0 3px rgb(99 102 241 / 8%);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-textarea__inner {
+  min-height: 82px;
+  border: 0;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 3%);
+  color: var(--admin-modal-text);
+  box-shadow: 0 0 0 1px var(--admin-modal-border) inset;
+  transition: background-color .15s ease, box-shadow .15s ease;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-textarea__inner:focus {
+  background: rgb(99 102 241 / 4%);
+  box-shadow: 0 0 0 1px rgb(99 102 241 / 50%) inset, 0 0 0 3px rgb(99 102 241 / 8%);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) :is(.el-input__inner, .el-select__selected-item, .el-textarea__inner) {
+  color: var(--admin-modal-text);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-form-item__label {
+  color: var(--admin-modal-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) :is(.customer-dialog-section, .node-dialog-section, .xui-dialog-section, .socks-dialog-section, .dialog-form-section) {
+  border: 1px solid var(--admin-modal-border);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 2.5%);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-button {
+  min-height: 38px;
+  padding-inline: 17px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-button--primary:not(.is-plain) {
+  box-shadow: 0 2px 12px rgb(99 102 241 / 35%);
+}
+
+:is(
+  .customer-dark-dialog,
+  .node-dark-dialog,
+  .xui-dark-dialog,
+  .socks-dark-dialog,
+  .operations-dark-dialog
+) .el-button--primary:not(.is-plain):hover {
+  box-shadow: 0 4px 16px rgb(99 102 241 / 45%);
+  transform: translateY(-1px);
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) {
+  --admin-message-border: rgb(255 255 255 / 7%);
+  width: min(430px, calc(100vw - 32px));
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--admin-message-border);
+  border-radius: 16px;
+  background: #0e1017;
+  color: #f1f5f9;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 50%), 0 0 0 1px rgb(99 102 241 / 6%);
+  animation: admin-modal-enter .25s ease both;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__header {
+  min-height: 69px;
+  display: flex;
+  align-items: center;
+  padding: 18px 60px 18px 22px;
+  border-bottom: 1px solid var(--admin-message-border);
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__title {
+  color: #f1f5f9;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__headerbtn {
+  width: 32px;
+  height: 32px;
+  top: 18px;
+  right: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #64748b;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__headerbtn:hover {
+  border-color: var(--admin-message-border);
+  background: rgb(255 255 255 / 6%);
+  color: #f1f5f9;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__content {
+  min-height: 118px;
+  padding: 22px;
+  color: #94a3b8;
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-line;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__container {
+  align-items: flex-start;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__status {
+  width: 48px;
+  height: 48px;
+  position: static;
+  display: grid;
+  place-items: center;
+  flex: 0 0 48px;
+  margin-right: 14px;
+  border-radius: 14px;
+  font-size: 24px !important;
+  transform: none;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__status.el-message-box-icon--warning {
+  background: rgb(251 191 36 / 12%);
+  color: #fcd34d;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__status.el-message-box-icon--error {
+  background: rgb(248 113 113 / 12%);
+  color: #fca5a5;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__status.el-message-box-icon--success {
+  background: rgb(16 185 129 / 12%);
+  color: #6ee7b7;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__status.el-message-box-icon--info {
+  background: rgb(56 189 248 / 12%);
+  color: #7dd3fc;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__message {
+  min-width: 0;
+  padding: 1px 0 0;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__message p {
+  color: #94a3b8;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__input {
+  padding-top: 16px;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__input .el-input__wrapper {
+  min-height: 40px;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 3%);
+  box-shadow: 0 0 0 1px var(--admin-message-border) inset;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__input .el-input__wrapper.is-focus {
+  background: rgb(99 102 241 / 4%);
+  box-shadow: 0 0 0 1px rgb(99 102 241 / 50%) inset, 0 0 0 3px rgb(99 102 241 / 8%);
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__input .el-input__inner {
+  color: #f1f5f9;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 22px;
+  border-top: 1px solid var(--admin-message-border);
+  background: rgb(0 0 0 / 20%);
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__btns .el-button {
+  min-height: 38px;
+  margin: 0;
+  padding-inline: 17px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+:is(
+  .customer-dark-message-box,
+  .node-dark-message-box,
+  .xui-dark-message-box,
+  .socks-dark-message-box,
+  .operations-dark-message-box
+) .el-message-box__btns .el-button--primary {
+  box-shadow: 0 2px 12px rgb(99 102 241 / 35%);
+}
+
+@media (max-width: 600px) {
+  :is(
+    .customer-dark-dialog,
+    .node-dark-dialog,
+    .xui-dark-dialog,
+    .socks-dark-dialog,
+    .operations-dark-dialog
+  ) {
+    width: calc(100vw - 24px) !important;
+    margin-block: 12px;
+    max-height: calc(100vh - 24px);
+  }
+
+  :is(
+    .customer-dark-dialog,
+    .node-dark-dialog,
+    .xui-dark-dialog,
+    .socks-dark-dialog,
+    .operations-dark-dialog
+  ) :is(.el-dialog__header, .el-dialog__body, .el-dialog__footer) {
+    padding-inline: 16px;
+  }
+
+  :is(
+    .customer-dark-dialog,
+    .node-dark-dialog,
+    .xui-dark-dialog,
+    .socks-dark-dialog,
+    .operations-dark-dialog
+  ) .el-dialog__header {
+    padding-right: 54px;
+  }
+
+  :is(
+    .customer-dark-dialog,
+    .node-dark-dialog,
+    .xui-dark-dialog,
+    .socks-dark-dialog,
+    .operations-dark-dialog
+  ) .el-dialog__headerbtn {
+    right: 14px;
+  }
+
+  :is(
+    .customer-dark-dialog,
+    .node-dark-dialog,
+    .xui-dark-dialog,
+    .socks-dark-dialog,
+    .operations-dark-dialog
+  ) .el-dialog__body {
+    max-height: calc(100vh - 163px);
+  }
+
+  :is(
+    .customer-dark-dialog,
+    .node-dark-dialog,
+    .xui-dark-dialog,
+    .socks-dark-dialog,
+    .operations-dark-dialog
+  ) :is(.node-dialog-grid, .xui-dialog-grid, .socks-dialog-grid) {
+    grid-template-columns: 1fr;
+  }
+
+  :is(
+    .customer-dark-message-box,
+    .node-dark-message-box,
+    .xui-dark-message-box,
+    .socks-dark-message-box,
+    .operations-dark-message-box
+  ) {
+    width: calc(100vw - 24px);
+  }
+
+  :is(
+    .customer-dark-message-box,
+    .node-dark-message-box,
+    .xui-dark-message-box,
+    .socks-dark-message-box,
+    .operations-dark-message-box
+  ) :is(.el-message-box__header, .el-message-box__content, .el-message-box__btns) {
+    padding-inline: 16px;
+  }
+
+  :is(
+    .customer-dark-message-box,
+    .node-dark-message-box,
+    .xui-dark-message-box,
+    .socks-dark-message-box,
+    .operations-dark-message-box
+  ) .el-message-box__header {
+    padding-right: 54px;
+  }
+
+  :is(
+    .customer-dark-message-box,
+    .node-dark-message-box,
+    .xui-dark-message-box,
+    .socks-dark-message-box,
+    .operations-dark-message-box
+  ) .el-message-box__headerbtn {
+    right: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(
+    .customer-dark-dialog,
+    .node-dark-dialog,
+    .xui-dark-dialog,
+    .socks-dark-dialog,
+    .operations-dark-dialog,
+    .customer-dark-message-box,
+    .node-dark-message-box,
+    .xui-dark-message-box,
+    .socks-dark-message-box,
+    .operations-dark-message-box
+  ) {
+    animation: none;
+  }
+}

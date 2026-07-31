@@ -243,7 +243,10 @@ onMounted(loadNodes);
         <strong>{{ qrPreview.title }}</strong>
         <button class="copy-button" type="button" title="关闭" @click="closeQrCode"><X :size="16" /></button>
       </div>
-      <img :src="qrPreview.image" alt="节点二维码" />
+      <div class="qr-modal-body">
+        <img :src="qrPreview.image" alt="节点二维码" />
+        <p>使用支持该节点协议的客户端扫描二维码</p>
+      </div>
     </div>
   </div>
 
@@ -253,8 +256,12 @@ onMounted(loadNodes);
         <strong>{{ renewErrorDialog.title }}</strong>
         <button class="copy-button" type="button" title="关闭" @click="closeRenewError"><X :size="16" /></button>
       </div>
-      <p class="message-modal-text">{{ renewErrorDialog.message }}</p>
-      <button class="modal-primary-button" type="button" @click="closeRenewError">知道了</button>
+      <div class="message-modal-body">
+        <p class="message-modal-text">{{ renewErrorDialog.message }}</p>
+      </div>
+      <div class="message-modal-footer">
+        <button class="modal-primary-button" type="button" @click="closeRenewError">知道了</button>
+      </div>
     </div>
   </div>
   </div>
