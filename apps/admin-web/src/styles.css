@@ -3279,3 +3279,111 @@ input:-webkit-autofill:active {
 .customer-card-avatar {
   font-size: 21px;
 }
+
+/* Finance and card management actions stay compact; confirmations remain modal-only. */
+.record-action-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0 14px;
+}
+
+.record-action-row .el-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 0;
+}
+
+.card-status-segmented {
+  --el-segmented-bg-color: rgb(255 255 255 / 4%);
+  --el-segmented-item-selected-bg-color: #6366f1;
+  --el-segmented-item-selected-color: #f8fafc;
+  --el-segmented-item-hover-bg-color: rgb(99 102 241 / 12%);
+  --el-segmented-item-hover-color: #e2e8f0;
+  max-width: 100%;
+  min-height: 36px;
+  color: #94a3b8;
+}
+
+.card-status-segmented .el-segmented__item-label {
+  white-space: nowrap;
+}
+
+.operations-content-card > .card-filter-bar {
+  margin-bottom: 14px;
+}
+
+.card-filter-bar .el-input {
+  width: min(320px, 100%);
+  max-width: 320px;
+}
+
+.card-filter-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1 1 auto;
+}
+
+.card-pagination-bar {
+  margin: 0 18px 18px;
+}
+
+.card-management-dialog .el-dialog__body {
+  max-height: calc(90vh - 139px);
+}
+
+.card-management-dialog .management-dialog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.card-management-dialog .entity-card-grid,
+.card-management-dialog .generated-template-grid {
+  margin: 0;
+}
+
+.card-batch-dialog {
+  width: min(1120px, calc(100vw - 32px)) !important;
+}
+
+@media (max-width: 720px) {
+  .record-action-row {
+    justify-content: stretch;
+  }
+
+  .record-action-row .el-button {
+    width: 100%;
+  }
+
+  .operations-content-card > .panel-toolbar:has(.card-status-segmented) {
+    gap: 12px;
+  }
+
+  .card-status-segmented {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .card-filter-actions,
+  .card-management-dialog .management-dialog-toolbar {
+    width: 100%;
+    align-items: stretch;
+    display: grid;
+  }
+
+  .card-filter-actions .el-button,
+  .card-management-dialog .management-dialog-toolbar .el-button {
+    width: 100%;
+  }
+
+  .card-pagination-bar {
+    margin-inline: 12px;
+    overflow-x: auto;
+  }
+}

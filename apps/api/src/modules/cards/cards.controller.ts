@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { cardGenerateSchema, cardRedeemSchema, cardTemplateUpsertSchema } from '@shiye/shared';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { cardGenerateSchema, cardListQuerySchema, cardRedeemSchema, cardTemplateUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { AuthGuard } from '../../shared/auth.guard.js';
 import { CurrentUser } from '../../shared/current-user.decorator.js';
@@ -15,7 +15,7 @@ export class CardsController {
   @Get('admin/cards')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  list() { return this.cards.list(); }
+  list(@Query(new ZodValidationPipe(cardListQuerySchema)) query: z.infer<typeof cardListQuerySchema>) { return this.cards.list(query); }
 
   @Get('admin/card-templates')
   @UseGuards(AuthGuard)

@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Copy, CreditCard, Download, Edit3, Layers, LayoutTemplate, Plus, RefreshCw, TicketCheck, TicketX, Trash2 } from 'lucide-vue-next';
+import { Copy, CreditCard, Download, Edit3, Layers, LayoutTemplate, Plus, RefreshCw, RotateCcw, Search, TicketCheck, TicketX, Trash2 } from 'lucide-vue-next';
 import { api } from '../api';
 
 type CardTemplate = { id: string; name: string; amount: string; quantity: number; prefix?: string | null; enabled: boolean; remark?: string | null };
 type BatchCard = { id: string; code: string | null; codePreview: string; amount: string; status: string; usedAt?: string | null; createdAt: string; usedBy?: { name: string; loginUsername: string } | null };
 type CardBatch = { id: string; name: string; amount: string; quantity: number; prefix?: string | null; templateId?: string | null; createdAt: string; template?: CardTemplate | null; cards?: BatchCard[]; _count?: { cards: number } };
-type Card = { id: string; codePreview: string; amount: string; status: string; usedAt?: string | null; batch?: { id: string; name: string } | null; usedBy?: { name: string; loginUsername: string } | null };
-type CardResult = { items: Card[]; batches: CardBatch[]; templates: CardTemplate[] };
+type Card = { id: string; codePreview: string; amount: string; status: string; usedAt?: string | null; createdAt: string; batch?: { id: string; name: string } | null; usedBy?: { name: string; loginUsername: string } | null };
+type CardStatus = '' | 'unused' | 'used' | 'disabled';
+type CardResult = {
+  items: Card[];
+  batches: CardBatch[];
+  templates: CardTemplate[];
+  page: number;
+  pageSize: number;
+  total: number;
+  statusCounts: { all: number; unused: number; used: number; disabled: number };
+};
 type TemplateGroup = { id: string; template: CardTemplate | null; name: string; amount: string; quantity: number | string; enabled: boolean; batches: CardBatch[] };
 
 const loading = ref(false);
@@ -19,10 +28,15 @@ const error = ref('');
 const cards = ref<Card[]>([]);
 const batches = ref<CardBatch[]>([]);
 const templates = ref<CardTemplate[]>([]);
+const cardTotal = ref(0);
+const statusCounts = reactive({ all: 0, unused: 0, used: 0, disabled: 0 });
+const cardFilters = reactive<{ keyword: string; status: CardStatus }>({ keyword: '', status: '' });
+const cardPage = reactive({ page: 1, pageSize: 20 });
 const editingTemplateId = ref('');
 const deletingUnusedTemplateIds = ref<Set<string>>(new Set());
 const clearingUsedBatchIds = ref<Set<string>>(new Set());
-const activePanels = ref(['templates', 'batches']);
+const templateManagementVisible = ref(false);
+const batchManagementVisible = ref(false);
 const templateDialogVisible = ref(false);
 const generateDialogVisible = ref(false);
 const generatedCodes = ref<string[]>([]);
@@ -32,8 +46,8 @@ const templateForm = reactive({ name: '', amount: 10, quantity: 10, prefix: '', 
 
 const templateCount = computed(() => templates.value.length);
 const batchCount = computed(() => batches.value.length);
-const unusedCardCount = computed(() => cards.value.filter((card) => card.status === 'unused').length);
-const usedCardCount = computed(() => cards.value.filter((card) => card.status === 'used').length);
+const unusedCardCount = computed(() => statusCounts.unused);
+const usedCardCount = computed(() => statusCounts.used);
 const enabledTemplates = computed(() => templates.value.filter((template) => template.enabled));
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === generateForm.templateId));
 const generatedCodesText = computed(() => generatedCodes.value.join('\n'));
@@ -54,19 +68,42 @@ const templateGroups = computed<TemplateGroup[]>(() => {
   return groups;
 });
 
-async function loadCards() {
+async function loadCards(resetPage = false) {
+  if (resetPage) cardPage.page = 1;
   loading.value = true;
   error.value = '';
   try {
-    const result = await api<CardResult>('/api/admin/cards');
+    const params = new URLSearchParams({ page: String(cardPage.page), pageSize: String(cardPage.pageSize) });
+    if (cardFilters.keyword.trim()) params.set('keyword', cardFilters.keyword.trim());
+    if (cardFilters.status) params.set('status', cardFilters.status);
+    const result = await api<CardResult>(`/api/admin/cards?${params.toString()}`);
     cards.value = result.items;
     batches.value = result.batches;
     templates.value = result.templates;
+    cardPage.page = result.page;
+    cardPage.pageSize = result.pageSize;
+    cardTotal.value = result.total;
+    Object.assign(statusCounts, result.statusCounts);
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载卡密数据失败';
   } finally {
     loading.value = false;
   }
+}
+
+function resetCardFilters() {
+  Object.assign(cardFilters, { keyword: '', status: '' });
+  void loadCards(true);
+}
+
+function handleCardPageChange(page: number) {
+  cardPage.page = page;
+  void loadCards();
+}
+
+function handleCardPageSizeChange(pageSize: number) {
+  cardPage.pageSize = pageSize;
+  void loadCards(true);
 }
 
 async function saveTemplate() {
@@ -356,9 +393,10 @@ onMounted(loadCards);
       <p>按模板归档卡密批次，新生成的卡密会保留在对应批次里，刷新后仍可继续复制未使用卡密。</p>
     </div>
     <div class="page-actions">
-      <el-button type="primary" @click="openTemplateDialog"><Plus :size="16" />新增模板</el-button>
+      <el-button type="primary" @click="templateManagementVisible = true"><LayoutTemplate :size="16" />模板管理</el-button>
+      <el-button @click="batchManagementVisible = true"><Layers :size="16" />批次管理</el-button>
       <el-button @click="openGenerateDialog()"><CreditCard :size="16" />生成卡密</el-button>
-      <el-button :loading="loading" @click="loadCards"><RefreshCw :size="16" />刷新</el-button>
+      <el-button :loading="loading" @click="loadCards()"><RefreshCw :size="16" />刷新</el-button>
     </div>
   </div>
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
@@ -372,121 +410,138 @@ onMounted(loadCards);
 
   <div class="panel list-panel operations-content-card cards-business-card">
     <div class="panel-toolbar">
-      <strong>卡密业务</strong>
+      <strong>卡密列表</strong>
+      <el-segmented
+        v-model="cardFilters.status"
+        class="card-status-segmented"
+        :options="[
+          { label: `全部 ${statusCounts.all}`, value: '' },
+          { label: `未使用 ${statusCounts.unused}`, value: 'unused' },
+          { label: `已使用 ${statusCounts.used}`, value: 'used' },
+          { label: `已禁用 ${statusCounts.disabled}`, value: 'disabled' }
+        ]"
+        @change="loadCards(true)"
+      />
     </div>
-    <div class="danger-zone compact-danger-zone">
-      <div>
-        <strong>已使用记录清理</strong>
-        <span>仅清理已使用卡密记录，不影响余额流水和已完成兑换结果。</span>
+    <div class="filter-bar card-filter-bar">
+      <el-input v-model="cardFilters.keyword" clearable placeholder="搜索卡密、批次、模板或用户" @keyup.enter="loadCards(true)" @clear="loadCards(true)">
+        <template #prefix><Search :size="15" /></template>
+      </el-input>
+      <el-button @click="resetCardFilters"><RotateCcw :size="15" />重置</el-button>
+      <el-button type="primary" :loading="loading" @click="loadCards(true)"><Search :size="15" />查询</el-button>
+      <div class="card-filter-actions">
+        <span class="muted-text">{{ cardTotal }} 条记录</span>
+        <el-button size="small" type="danger" plain :loading="clearingUsed" @click="removeUsedCards"><Trash2 :size="15" />清除已使用记录</el-button>
       </div>
-      <el-button type="danger" plain :loading="clearingUsed" @click="removeUsedCards"><Trash2 :size="15" />清除全部已使用记录</el-button>
     </div>
-    <el-collapse v-model="activePanels" class="admin-collapse">
-      <el-collapse-item name="templates">
-        <template #title>
-          <div class="collapse-title"><strong>模板列表</strong><span>{{ templates.length }} 个模板</span></div>
-        </template>
-        <div v-loading="loading" class="entity-card-grid template-card-grid">
-          <section v-for="template in templates" :key="template.id" class="entity-card template-card">
-            <div class="entity-card-head">
-              <div>
-                <strong>{{ template.name }}</strong>
-                <span>{{ template.remark || '暂无备注' }}</span>
-              </div>
-              <el-tag :type="template.enabled ? 'success' : 'info'">{{ template.enabled ? '启用' : '停用' }}</el-tag>
-            </div>
-            <div class="entity-card-stats">
-              <div><span>金额</span><strong>{{ template.amount }}</strong></div>
-              <div><span>数量</span><strong>{{ template.quantity }}</strong></div>
-              <div><span>前缀</span><strong>{{ template.prefix || '-' }}</strong></div>
-            </div>
-            <div class="entity-card-actions">
-              <el-button size="small" type="primary" plain @click="openGenerateDialog(template)"><Plus :size="14" />生成</el-button>
-              <el-button size="small" @click="editTemplate(template)"><Edit3 :size="14" />编辑</el-button>
-              <el-button size="small" :loading="deletingUnusedTemplateIds.has(template.id)" @click="removeUnusedTemplateCards(template)"><Trash2 :size="14" />删除未使用</el-button>
-              <el-button size="small" type="danger" plain @click="removeTemplate(template)">删除模板</el-button>
-            </div>
-          </section>
-          <div v-if="!templates.length && !loading" class="empty-panel entity-empty">暂无卡密模板</div>
-        </div>
-      </el-collapse-item>
-
-      <el-collapse-item name="batches">
-        <template #title>
-          <div class="collapse-title"><strong><Layers :size="16" />模板批次</strong><span>{{ batches.length }} 个批次</span></div>
-        </template>
-        <div v-if="templateGroups.length" class="generated-template-grid">
-          <section v-for="group in templateGroups" :key="group.id" class="generated-template-card">
-            <div class="generated-template-head">
-              <div>
-                <strong>{{ group.name }}</strong>
-                <span>{{ group.amount }} 元 / 默认 {{ group.quantity }} 张 / {{ group.batches.length }} 个批次</span>
-              </div>
-              <div class="table-toolbar-actions">
-                <el-button v-if="group.template" size="small" type="primary" plain @click="openGenerateDialog(group.template)"><Plus :size="14" />继续生成</el-button>
-                <el-button size="small" type="success" plain :disabled="!unusedFullCodesForGroup(group).length" @click="copyCodes(unusedFullCodesForGroup(group), `已复制 ${group.name} 未使用卡密`)"><Copy :size="14" />复制未使用</el-button>
-                <el-button size="small" plain :disabled="!fullCodesForGroup(group).length" @click="copyCodes(fullCodesForGroup(group), `已复制 ${group.name} 全部可复制卡密`)"><Copy :size="14" />复制全部</el-button>
-                <el-button size="small" plain :disabled="!fullCodesForGroup(group).length" @click="exportCodes(fullCodesForGroup(group), `${group.name}-all-codes`)"><Download :size="14" />导出</el-button>
-              </div>
-            </div>
-            <div class="card-count-strip">
-              <div><span>全部</span><strong>{{ totalCountForGroup(group) }}</strong></div>
-              <div><span>未使用</span><strong>{{ unusedCountForGroup(group) }}</strong></div>
-              <div><span>已使用</span><strong>{{ usedCountForGroup(group) }}</strong></div>
-            </div>
-            <div v-if="group.batches.length" class="generated-batch-stack">
-              <section v-for="batch in group.batches" :key="batch.id" class="generated-batch-card">
-                <div class="generated-batch-head">
-                  <div>
-                    <strong>{{ batch.name }}</strong>
-                    <span>{{ batch.amount }} 元 / {{ batch._count?.cards ?? batch.quantity }} 张 / 未使用 {{ unusedCount(batch) }} / 已使用 {{ usedCount(batch) }} / {{ formatDate(batch.createdAt) }}</span>
-                  </div>
-                  <div class="table-toolbar-actions batch-actions">
-                    <el-button size="small" type="success" plain :disabled="!hasUnusedFullCodes(batch)" @click="copyCodes(unusedFullCodes(batch), '已复制本批未使用卡密')"><Copy :size="15" />复制未使用</el-button>
-                    <el-button size="small" type="primary" plain :disabled="!hasFullCodes(batch)" @click="copyCodes(fullCodes(batch))"><Copy :size="15" />复制整批</el-button>
-                    <el-button size="small" plain :disabled="!hasFullCodes(batch)" @click="exportCodes(fullCodes(batch), `${batch.name}-all-codes`)"><Download :size="15" />导出</el-button>
-                    <el-button size="small" plain :loading="clearingUsedBatchIds.has(batch.id)" @click="removeUsedBatchCards(batch)"><Trash2 :size="15" />清除已使用</el-button>
-                    <el-button size="small" type="danger" plain @click="removeBatch(batch)">删除批次</el-button>
-                  </div>
-                </div>
-                <div v-if="hasFullCodes(batch)" class="generated-code-list">
-                  <div v-for="card in batch.cards || []" :key="card.id" class="generated-code-row">
-                    <code>{{ card.code || card.codePreview }}</code>
-                    <el-tag size="small" :type="card.status === 'unused' ? 'success' : card.status === 'used' ? 'warning' : 'info'">{{ statusLabel(card.status) }}</el-tag>
-                  </div>
-                </div>
-                <div v-else class="batch-empty-detail">本批次没有可复制的完整卡密，或未使用卡密已被删除。</div>
-              </section>
-            </div>
-            <div v-else class="batch-empty-detail">该模板还没有生成卡密。</div>
-          </section>
-        </div>
-        <div v-else class="empty-panel">暂无卡密模板</div>
-      </el-collapse-item>
-
-      <el-collapse-item name="cards">
-        <template #title>
-          <div class="collapse-title"><strong>卡密列表</strong><span>{{ cards.length }} 条记录</span></div>
-        </template>
-        <div class="danger-zone collapse-danger-zone">
-          <div>
-            <strong>清除已使用记录</strong>
-            <span>保留未使用卡密，已使用记录清理前会再次确认。</span>
-          </div>
-          <el-button size="small" type="danger" plain :loading="clearingUsed" @click="removeUsedCards"><Trash2 :size="15" />清除已使用记录</el-button>
-        </div>
-        <el-table :data="cards" v-loading="loading" style="width: 100%">
-          <el-table-column prop="codePreview" label="卡密" width="140" />
-          <el-table-column prop="amount" label="金额" width="120" />
-          <el-table-column label="状态" width="100"><template #default="{ row }: { row: Card }"><el-tag :type="row.status === 'unused' ? 'success' : row.status === 'used' ? 'warning' : 'info'">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
-          <el-table-column label="批次" min-width="140"><template #default="{ row }: { row: Card }">{{ row.batch?.name || '-' }}</template></el-table-column>
-          <el-table-column label="使用用户" min-width="160"><template #default="{ row }: { row: Card }">{{ row.usedBy?.name || '-' }}</template></el-table-column>
-          <el-table-column label="使用时间" min-width="180"><template #default="{ row }: { row: Card }">{{ formatDate(row.usedAt) }}</template></el-table-column>
-          <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }: { row: Card }"><el-button size="small" type="danger" :disabled="row.status === 'used'" @click="removeCard(row)">删除</el-button></template></el-table-column>
-        </el-table>
-      </el-collapse-item>
-    </el-collapse>
+    <el-table :data="cards" v-loading="loading" style="width: 100%">
+      <el-table-column prop="codePreview" label="卡密" width="140" />
+      <el-table-column prop="amount" label="金额" width="120" />
+      <el-table-column label="状态" width="100"><template #default="{ row }: { row: Card }"><el-tag :type="row.status === 'unused' ? 'success' : row.status === 'used' ? 'warning' : 'info'">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
+      <el-table-column label="批次" min-width="140"><template #default="{ row }: { row: Card }">{{ row.batch?.name || '-' }}</template></el-table-column>
+      <el-table-column label="使用用户" min-width="160"><template #default="{ row }: { row: Card }">{{ row.usedBy?.name || '-' }}</template></el-table-column>
+      <el-table-column label="创建时间" min-width="180"><template #default="{ row }: { row: Card }">{{ formatDate(row.createdAt) }}</template></el-table-column>
+      <el-table-column label="使用时间" min-width="180"><template #default="{ row }: { row: Card }">{{ formatDate(row.usedAt) }}</template></el-table-column>
+      <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }: { row: Card }"><el-button size="small" type="danger" :disabled="row.status === 'used'" @click="removeCard(row)">删除</el-button></template></el-table-column>
+      <template #empty><el-empty description="暂无卡密记录" /></template>
+    </el-table>
+    <div class="pagination-bar card-pagination-bar">
+      <el-pagination
+        background
+        layout="total, sizes, prev, pager, next, jumper"
+        :total="cardTotal"
+        :current-page="cardPage.page"
+        :page-size="cardPage.pageSize"
+        :page-sizes="[10, 20, 50, 100, 200]"
+        @current-change="handleCardPageChange"
+        @size-change="handleCardPageSizeChange"
+      />
+    </div>
   </div>
+
+  <el-dialog v-model="templateManagementVisible" title="卡密模板管理" width="min(980px, 94vw)" class="operations-dark-dialog card-management-dialog" destroy-on-close>
+    <div class="management-dialog-toolbar">
+      <span class="muted-text">共 {{ templates.length }} 个模板</span>
+      <el-button type="primary" @click="openTemplateDialog"><Plus :size="15" />新增模板</el-button>
+    </div>
+    <div v-loading="loading" class="entity-card-grid template-card-grid">
+      <section v-for="template in templates" :key="template.id" class="entity-card template-card">
+        <div class="entity-card-head">
+          <div>
+            <strong>{{ template.name }}</strong>
+            <span>{{ template.remark || '暂无备注' }}</span>
+          </div>
+          <el-tag :type="template.enabled ? 'success' : 'info'">{{ template.enabled ? '启用' : '停用' }}</el-tag>
+        </div>
+        <div class="entity-card-stats">
+          <div><span>金额</span><strong>{{ template.amount }}</strong></div>
+          <div><span>数量</span><strong>{{ template.quantity }}</strong></div>
+          <div><span>前缀</span><strong>{{ template.prefix || '-' }}</strong></div>
+        </div>
+        <div class="entity-card-actions">
+          <el-button size="small" type="primary" plain @click="openGenerateDialog(template)"><Plus :size="14" />生成</el-button>
+          <el-button size="small" @click="editTemplate(template)"><Edit3 :size="14" />编辑</el-button>
+          <el-button size="small" :loading="deletingUnusedTemplateIds.has(template.id)" @click="removeUnusedTemplateCards(template)"><Trash2 :size="14" />删除未使用</el-button>
+          <el-button size="small" type="danger" plain @click="removeTemplate(template)">删除模板</el-button>
+        </div>
+      </section>
+      <div v-if="!templates.length && !loading" class="empty-panel entity-empty">暂无卡密模板</div>
+    </div>
+  </el-dialog>
+
+  <el-dialog v-model="batchManagementVisible" title="卡密批次管理" width="min(1120px, 96vw)" class="operations-dark-dialog card-management-dialog card-batch-dialog" destroy-on-close>
+    <div class="management-dialog-toolbar">
+      <span class="muted-text">共 {{ batches.length }} 个批次</span>
+      <el-button type="primary" @click="openGenerateDialog()"><Plus :size="15" />生成卡密</el-button>
+    </div>
+    <div v-if="templateGroups.length" class="generated-template-grid">
+      <section v-for="group in templateGroups" :key="group.id" class="generated-template-card">
+        <div class="generated-template-head">
+          <div>
+            <strong>{{ group.name }}</strong>
+            <span>{{ group.amount }} 元 / 默认 {{ group.quantity }} 张 / {{ group.batches.length }} 个批次</span>
+          </div>
+          <div class="table-toolbar-actions">
+            <el-button v-if="group.template" size="small" type="primary" plain @click="openGenerateDialog(group.template)"><Plus :size="14" />继续生成</el-button>
+            <el-button size="small" type="success" plain :disabled="!unusedFullCodesForGroup(group).length" @click="copyCodes(unusedFullCodesForGroup(group), `已复制 ${group.name} 未使用卡密`)"><Copy :size="14" />复制未使用</el-button>
+            <el-button size="small" plain :disabled="!fullCodesForGroup(group).length" @click="copyCodes(fullCodesForGroup(group), `已复制 ${group.name} 全部可复制卡密`)"><Copy :size="14" />复制全部</el-button>
+            <el-button size="small" plain :disabled="!fullCodesForGroup(group).length" @click="exportCodes(fullCodesForGroup(group), `${group.name}-all-codes`)"><Download :size="14" />导出</el-button>
+          </div>
+        </div>
+        <div class="card-count-strip">
+          <div><span>全部</span><strong>{{ totalCountForGroup(group) }}</strong></div>
+          <div><span>未使用</span><strong>{{ unusedCountForGroup(group) }}</strong></div>
+          <div><span>已使用</span><strong>{{ usedCountForGroup(group) }}</strong></div>
+        </div>
+        <div v-if="group.batches.length" class="generated-batch-stack">
+          <section v-for="batch in group.batches" :key="batch.id" class="generated-batch-card">
+            <div class="generated-batch-head">
+              <div>
+                <strong>{{ batch.name }}</strong>
+                <span>{{ batch.amount }} 元 / {{ batch._count?.cards ?? batch.quantity }} 张 / 未使用 {{ unusedCount(batch) }} / 已使用 {{ usedCount(batch) }} / {{ formatDate(batch.createdAt) }}</span>
+              </div>
+              <div class="table-toolbar-actions batch-actions">
+                <el-button size="small" type="success" plain :disabled="!hasUnusedFullCodes(batch)" @click="copyCodes(unusedFullCodes(batch), '已复制本批未使用卡密')"><Copy :size="15" />复制未使用</el-button>
+                <el-button size="small" type="primary" plain :disabled="!hasFullCodes(batch)" @click="copyCodes(fullCodes(batch))"><Copy :size="15" />复制整批</el-button>
+                <el-button size="small" plain :disabled="!hasFullCodes(batch)" @click="exportCodes(fullCodes(batch), `${batch.name}-all-codes`)"><Download :size="15" />导出</el-button>
+                <el-button size="small" plain :loading="clearingUsedBatchIds.has(batch.id)" @click="removeUsedBatchCards(batch)"><Trash2 :size="15" />清除已使用</el-button>
+                <el-button size="small" type="danger" plain @click="removeBatch(batch)">删除批次</el-button>
+              </div>
+            </div>
+            <div v-if="hasFullCodes(batch)" class="generated-code-list">
+              <div v-for="card in batch.cards || []" :key="card.id" class="generated-code-row">
+                <code>{{ card.code || card.codePreview }}</code>
+                <el-tag size="small" :type="card.status === 'unused' ? 'success' : card.status === 'used' ? 'warning' : 'info'">{{ statusLabel(card.status) }}</el-tag>
+              </div>
+            </div>
+            <div v-else class="batch-empty-detail">本批次没有可复制的完整卡密，或未使用卡密已被删除。</div>
+          </section>
+        </div>
+        <div v-else class="batch-empty-detail">该模板还没有生成卡密。</div>
+      </section>
+    </div>
+    <div v-else class="empty-panel">暂无卡密批次</div>
+  </el-dialog>
 
   <el-dialog v-model="templateDialogVisible" :title="editingTemplateId ? '编辑卡密模板' : '新增卡密模板'" width="680px" class="operations-dark-dialog" destroy-on-close>
     <el-form :model="templateForm" label-width="82px" class="sectioned-dialog-form">

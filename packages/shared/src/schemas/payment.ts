@@ -42,6 +42,11 @@ export const cardRedeemSchema = z.object({
   code: z.string().trim().min(1).max(128)
 });
 
+export const cardListQuerySchema = paginationQuerySchema.extend({
+  pageSize: z.coerce.number().int().min(1).max(200).default(100),
+  status: z.enum(['unused', 'used', 'disabled']).optional()
+});
+
 export const cardGenerateSchema = z.object({
   name: z.string().trim().min(1).max(120),
   amount: moneySchema,

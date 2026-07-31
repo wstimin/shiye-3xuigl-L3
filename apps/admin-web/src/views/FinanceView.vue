@@ -339,11 +339,7 @@ onMounted(loadFinance);
           <el-button type="primary" :loading="loading" @click="loadOrders(true)"><Search :size="15" />查询</el-button>
           <span class="filter-summary">显示 {{ orderRangeText }}</span>
         </div>
-        <div class="danger-zone collapse-danger-zone">
-          <div>
-            <strong>清除充值历史</strong>
-            <span>按时间范围清理，提交前需要二次确认。</span>
-          </div>
+        <div class="record-action-row">
           <el-button size="small" type="danger" plain :loading="clearingOrders" @click="clearRechargeHistory"><Trash2 :size="15" />清除历史记录</el-button>
         </div>
         <el-table :data="orders" v-loading="loading" style="width: 100%">
@@ -392,11 +388,7 @@ onMounted(loadFinance);
           <el-button type="primary" :loading="loading" @click="loadLogs(true)"><Search :size="15" />查询</el-button>
           <span class="filter-summary">显示 {{ logRangeText }}</span>
         </div>
-        <div class="danger-zone collapse-danger-zone">
-          <div>
-            <strong>清除余额流水</strong>
-            <span>按时间范围清理，提交前需要二次确认。</span>
-          </div>
+        <div class="record-action-row">
           <el-button size="small" type="danger" plain :loading="clearingLogs" @click="clearBalanceHistory"><Trash2 :size="15" />清除历史记录</el-button>
         </div>
         <el-table :data="logs" v-loading="loading" style="width: 100%">

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { cardGenerateSchema, cardRedeemSchema, cardTemplateUpsertSchema } from '@shiye/shared';
+import { cardGenerateSchema, cardListQuerySchema, cardRedeemSchema, cardTemplateUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import crypto from 'node:crypto';
 import { Prisma } from '@prisma/client';
@@ -10,22 +10,25 @@ import { EncryptionService } from '../security/encryption.service.js';
 export class CardsService {
   constructor(private readonly prisma: PrismaService, private readonly encryption: EncryptionService) {}
 
-  async list() {
-    const [items, batches, templates, total] = await this.prisma.$transaction([
-      this.prisma.card.findMany({
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-        select: {
-          id: true,
-          codePreview: true,
-          amount: true,
-          status: true,
-          usedAt: true,
-          createdAt: true,
-          batch: { select: { id: true, name: true, templateId: true } },
-          usedBy: { select: { id: true, name: true, loginUsername: true } }
-        }
-      }),
+  async list(query: z.infer<typeof cardListQuerySchema>) {
+    const page = query.page;
+    const pageSize = query.pageSize;
+    const keyword = query.keyword?.trim();
+    const where: Prisma.CardWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+      ...(keyword ? {
+        OR: [
+          { codeHash: hashCardCode(keyword) },
+          { codePreview: { contains: keyword } },
+          { batch: { is: { name: { contains: keyword } } } },
+          { batch: { is: { template: { is: { name: { contains: keyword } } } } } },
+          { usedBy: { is: { name: { contains: keyword } } } },
+          { usedBy: { is: { loginUsername: { contains: keyword } } } }
+        ]
+      } : {})
+    };
+    const [total, batches, templates, allCount, unusedCount, usedCount, disabledCount] = await this.prisma.$transaction([
+      this.prisma.card.count({ where }),
       this.prisma.cardBatch.findMany({
         orderBy: { createdAt: 'desc' },
         take: 100,
@@ -39,8 +42,28 @@ export class CardsService {
         }
       }),
       this.prisma.cardTemplate.findMany({ orderBy: { createdAt: 'desc' } }),
-      this.prisma.card.count()
+      this.prisma.card.count(),
+      this.prisma.card.count({ where: { status: 'unused' } }),
+      this.prisma.card.count({ where: { status: 'used' } }),
+      this.prisma.card.count({ where: { status: 'disabled' } })
     ]);
+    const resolvedPage = Math.min(page, Math.max(1, Math.ceil(total / pageSize)));
+    const items = await this.prisma.card.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (resolvedPage - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        codePreview: true,
+        amount: true,
+        status: true,
+        usedAt: true,
+        createdAt: true,
+        batch: { select: { id: true, name: true, templateId: true } },
+        usedBy: { select: { id: true, name: true, loginUsername: true } }
+      }
+    });
 
     return {
       items,
@@ -58,9 +81,10 @@ export class CardsService {
         }))
       })),
       templates,
-      page: 1,
-      pageSize: 100,
-      total
+      page: resolvedPage,
+      pageSize,
+      total,
+      statusCounts: { all: allCount, unused: unusedCount, used: usedCount, disabled: disabledCount }
     };
   }
 
