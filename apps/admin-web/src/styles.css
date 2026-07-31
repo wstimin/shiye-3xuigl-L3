@@ -3945,22 +3945,26 @@ input:-webkit-autofill:active {
 
 /* Keep initials crisp and readable across every generated avatar palette. */
 .overview-shell .sidebar-user-avatar,
-.customer-card-avatar {
-  color: #f8fafc;
-  font-weight: 800;
+.customer-card-identity > .customer-card-avatar {
+  color: #fff;
+  font-weight: 900;
   letter-spacing: 0;
   line-height: 1;
-  text-shadow: 0 1px 1px rgb(0 0 0 / 48%);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 42%), 0 0 5px rgb(255 255 255 / 14%);
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
 }
 
 .overview-shell .sidebar-user-avatar {
-  font-size: 17px;
+  font-size: 18px;
 }
 
-.customer-card-avatar {
-  font-size: 21px;
+.customer-card-identity > .customer-card-avatar {
+  color: #fff;
+  font-size: 23px;
+  font-weight: 900;
+  text-overflow: clip;
+  overflow: visible;
 }
 
 /* Finance and card management actions stay compact; confirmations remain modal-only. */
