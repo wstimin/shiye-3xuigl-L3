@@ -1,22 +1,49 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Activity, Clock3, CreditCard, Monitor, RefreshCw, Router, ShieldOff, Users } from 'lucide-vue-next';
+import {
+  Activity,
+  Banknote,
+  CircleDollarSign,
+  Clock3,
+  Link2,
+  RefreshCw,
+  Router,
+  ShieldOff,
+  TicketCheck,
+  Users
+} from 'lucide-vue-next';
 import { api } from '../api';
 
+type BusinessActivity = {
+  key: string;
+  type: 'payment' | 'renewal' | 'card' | 'sync';
+  status: string;
+  title: string;
+  description: string;
+  createdAt: string;
+};
 type Overview = {
   customers: { total: number; active: number };
+  customerNodes: { total: number; active: number; disabled: number; expiredActive: number };
   serviceNodes: { total: number; enabled: number; expiredActive: number };
   servers: { total: number; enabled: number };
-  cards: { total: number; unused: number };
-  payments: { enabledChannels: number; pendingOrders: number; todayPaidCount: number; todayPaidAmount: string | number };
+  socksNodes: { total: number; enabled: number };
+  cards: { total: number; unused: number; used: number; disabled: number };
+  payments: {
+    channels: number;
+    enabledChannels: number;
+    pendingOrders: number;
+    todayPaidCount: number;
+    todayPaidAmount: string | number;
+  };
   renewals: { todayCount: number; todayAmount: string | number };
+  activity: BusinessActivity[];
 };
 type JobSettings = { disableExpiredEnabled: boolean; trafficSyncEnabled: boolean };
 type DisableExpiredResult = { checkedAt: string; total: number; success: number; failed: number };
 type TrafficSyncResult = { checkedAt: string; checked: number; disabled: number; failed: number };
 type JobStatus = { lastDisableExpired: DisableExpiredResult | null; lastTrafficSync: TrafficSyncResult | null };
-type ActivityItem = { key: string; tone: 'green' | 'purple' | 'blue'; icon: typeof Activity; title: string; text: string; time: string };
 
 const loading = ref(false);
 const jobRunning = ref(false);
@@ -30,47 +57,31 @@ const lastTrafficSync = ref<TrafficSyncResult | null>(null);
 
 const customerTotal = computed(() => overview.value?.customers.total ?? 0);
 const activeCustomers = computed(() => overview.value?.customers.active ?? 0);
-const nodeTotal = computed(() => overview.value?.serviceNodes.total ?? 0);
-const enabledNodes = computed(() => overview.value?.serviceNodes.enabled ?? 0);
-const expiredNodes = computed(() => overview.value?.serviceNodes.expiredActive ?? 0);
+const customerNodeTotal = computed(() => overview.value?.customerNodes.total ?? 0);
+const activeCustomerNodes = computed(() => overview.value?.customerNodes.active ?? 0);
+const expiredCustomerNodes = computed(() => overview.value?.customerNodes.expiredActive ?? 0);
+const serviceNodeTotal = computed(() => overview.value?.serviceNodes.total ?? 0);
+const enabledServiceNodes = computed(() => overview.value?.serviceNodes.enabled ?? 0);
 const serverTotal = computed(() => overview.value?.servers.total ?? 0);
 const enabledServers = computed(() => overview.value?.servers.enabled ?? 0);
+const socksTotal = computed(() => overview.value?.socksNodes.total ?? 0);
+const enabledSocks = computed(() => overview.value?.socksNodes.enabled ?? 0);
 const cardTotal = computed(() => overview.value?.cards.total ?? 0);
 const unusedCards = computed(() => overview.value?.cards.unused ?? 0);
+const usedCards = computed(() => overview.value?.cards.used ?? 0);
+const disabledCards = computed(() => overview.value?.cards.disabled ?? 0);
+const paymentChannels = computed(() => overview.value?.payments.channels ?? 0);
 const enabledPaymentChannels = computed(() => overview.value?.payments.enabledChannels ?? 0);
 const pendingOrders = computed(() => overview.value?.payments.pendingOrders ?? 0);
-
+const todayPaidCount = computed(() => overview.value?.payments.todayPaidCount ?? 0);
+const todayRenewalCount = computed(() => overview.value?.renewals.todayCount ?? 0);
+const todayIncome = computed(() => numberValue(overview.value?.payments.todayPaidAmount) + numberValue(overview.value?.renewals.todayAmount));
 const customerRate = computed(() => percent(activeCustomers.value, customerTotal.value));
-const nodeRate = computed(() => percent(enabledNodes.value, nodeTotal.value));
-const serverRate = computed(() => percent(enabledServers.value, serverTotal.value));
-const cardRate = computed(() => percent(unusedCards.value, cardTotal.value));
-
-const recentActivity = computed<ActivityItem[]>(() => {
-  const items: ActivityItem[] = [];
-  if (lastTrafficSync.value) {
-    const result = lastTrafficSync.value;
-    items.push({
-      key: 'traffic-sync',
-      tone: result.failed ? 'purple' : 'green',
-      icon: Activity,
-      title: '流量同步',
-      text: `检查 ${result.checked} 个节点，停用 ${result.disabled} 个，失败 ${result.failed} 个`,
-      time: formatRelativeDate(result.checkedAt)
-    });
-  }
-  if (lastDisableExpired.value) {
-    const result = lastDisableExpired.value;
-    items.push({
-      key: 'disable-expired',
-      tone: result.failed ? 'purple' : 'blue',
-      icon: ShieldOff,
-      title: '过期检测',
-      text: `检查 ${result.total} 个到期节点，成功 ${result.success} 个，失败 ${result.failed} 个`,
-      time: formatRelativeDate(result.checkedAt)
-    });
-  }
-  return items.sort((left, right) => activityTime(right.key) - activityTime(left.key));
-});
+const customerNodeRate = computed(() => percent(activeCustomerNodes.value, customerNodeTotal.value));
+const networkTotal = computed(() => serviceNodeTotal.value + serverTotal.value);
+const networkRate = computed(() => percent(enabledServiceNodes.value + enabledServers.value, networkTotal.value));
+const incomeRate = computed(() => (todayIncome.value > 0 ? 100 : 0));
+const recentActivity = computed(() => overview.value?.activity ?? []);
 
 async function loadDashboard() {
   loading.value = true;
@@ -113,24 +124,22 @@ async function saveJobSettings(patch: Partial<JobSettings>) {
 async function toggleDisableExpired(value: string | number | boolean) {
   const enabled = Boolean(value);
   const saved = await saveJobSettings({ disableExpiredEnabled: enabled });
-  if (!saved) return;
-  if (enabled) {
-    try {
-      await runDisableExpiredNodes();
-    } catch {
-    }
+  if (!saved || !enabled) return;
+  try {
+    await runDisableExpiredNodes();
+  } catch {
+    // The request error is already displayed on the page.
   }
 }
 
 async function toggleTrafficSync(value: string | number | boolean) {
   const enabled = Boolean(value);
   const saved = await saveJobSettings({ trafficSyncEnabled: enabled });
-  if (!saved) return;
-  if (enabled) {
-    try {
-      await runTrafficSync();
-    } catch {
-    }
+  if (!saved || !enabled) return;
+  try {
+    await runTrafficSync();
+  } catch {
+    // The request error is already displayed on the page.
   }
 }
 
@@ -167,11 +176,16 @@ async function runTrafficSync() {
 }
 
 async function disableExpiredNodes() {
-  await ElMessageBox.confirm('系统会把已到期且仍处于启用状态的用户节点同步停用到远端 3x-ui，远端同步成功后再更新本地状态。确认执行？', '停用过期节点', { type: 'warning', customClass: 'operations-dark-message-box' });
+  await ElMessageBox.confirm(
+    '系统会把已到期且仍处于启用状态的用户节点同步停用到远端 3x-ui，远端同步成功后再更新本地状态。确认执行？',
+    '停用过期节点',
+    { type: 'warning', customClass: 'operations-dark-message-box' }
+  );
   try {
     const result = await runDisableExpiredNodes();
     ElMessage.success(`执行完成：成功 ${result.success}，失败 ${result.failed}，总数 ${result.total}`);
   } catch {
+    // The request error is already displayed on the page.
   }
 }
 
@@ -180,12 +194,22 @@ async function syncTraffic() {
     const result = await runTrafficSync();
     ElMessage.success(`流量同步完成：检查 ${result.checked}，停用 ${result.disabled}，失败 ${result.failed}`);
   } catch {
+    // The request error is already displayed on the page.
   }
 }
 
 function percent(value: number, total: number) {
   if (!total || value <= 0) return 0;
   return Math.min(100, Math.round((value / total) * 100));
+}
+
+function numberValue(value?: string | number | null) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoney(value?: string | number | null) {
+  return `¥${numberValue(value).toFixed(2)}`;
 }
 
 function formatDate(value?: string | null) {
@@ -202,10 +226,14 @@ function formatRelativeDate(value: string) {
   return formatDate(value);
 }
 
-function activityTime(key: string) {
-  const value = key === 'traffic-sync' ? lastTrafficSync.value?.checkedAt : lastDisableExpired.value?.checkedAt;
-  const timestamp = value ? new Date(value).getTime() : 0;
-  return Number.isFinite(timestamp) ? timestamp : 0;
+function activityTone(item: BusinessActivity) {
+  if (item.status === 'failed' || item.status === 'error') return 'rose';
+  if (item.status === 'partial') return 'amber';
+  return { payment: 'green', renewal: 'purple', card: 'orange', sync: 'blue' }[item.type];
+}
+
+function activityIcon(type: BusinessActivity['type']) {
+  return { payment: CircleDollarSign, renewal: RefreshCw, card: TicketCheck, sync: Activity }[type];
 }
 
 onMounted(loadDashboard);
@@ -216,12 +244,12 @@ onMounted(loadDashboard);
     <section class="dashboard-welcome">
       <div>
         <h1>数据概览</h1>
-        <p>查看系统初始化状态、核心资源数量和后台自动任务</p>
+        <p>集中查看账户、节点、支付、卡密与远端同步的实时运行状态</p>
       </div>
       <div class="dashboard-welcome-meta">
         <div>
           <span>数据状态</span>
-          <strong><i></i>{{ error ? '读取异常' : '读取正常' }}</strong>
+          <strong><i :class="{ error: Boolean(error) }"></i>{{ error ? '读取异常' : '读取正常' }}</strong>
         </div>
         <button class="dashboard-refresh" type="button" :disabled="loading" title="刷新数据概览" @click="loadDashboard">
           <RefreshCw :size="15" :class="{ spinning: loading }" />
@@ -232,71 +260,75 @@ onMounted(loadDashboard);
 
     <el-alert v-if="error" class="dashboard-alert" :title="error" type="error" show-icon :closable="false" />
 
-    <section class="dashboard-stat-grid" aria-label="核心资源统计">
+    <section class="dashboard-stat-grid" aria-label="核心业务统计">
       <article class="dashboard-stat-card purple">
-        <div class="dashboard-stat-head"><span>用户总数</span><i><Users :size="18" /></i></div>
+        <div class="dashboard-stat-head"><span>用户账户</span><i><Users :size="18" /></i></div>
         <strong>{{ customerTotal }}</strong>
-        <p>状态正常 {{ activeCustomers }} <em>{{ customerRate ? `${customerRate}%` : '暂无正常用户' }}</em></p>
+        <p>正常 {{ activeCustomers }} / 停用 {{ customerTotal - activeCustomers }} <em>{{ customerRate }}% 正常</em></p>
         <div class="dashboard-stat-bar"><i :style="{ width: `${customerRate}%` }"></i></div>
       </article>
       <article class="dashboard-stat-card blue">
-        <div class="dashboard-stat-head"><span>路由节点</span><i><Router :size="18" /></i></div>
-        <strong>{{ nodeTotal }}</strong>
-        <p>启用 {{ enabledNodes }} / 到期用户节点 {{ expiredNodes }}</p>
-        <div class="dashboard-stat-bar"><i :style="{ width: `${nodeRate}%` }"></i></div>
+        <div class="dashboard-stat-head"><span>用户绑定节点</span><i><Link2 :size="18" /></i></div>
+        <strong>{{ customerNodeTotal }}</strong>
+        <p>启用 {{ activeCustomerNodes }} / 过期待停用 {{ expiredCustomerNodes }}</p>
+        <div class="dashboard-stat-bar"><i :style="{ width: `${customerNodeRate}%` }"></i></div>
       </article>
       <article class="dashboard-stat-card green">
-        <div class="dashboard-stat-head"><span>面板连接</span><i><Monitor :size="18" /></i></div>
-        <strong>{{ serverTotal }}</strong>
-        <p>已启用 {{ enabledServers }} <em>{{ enabledServers ? '已配置' : '待启用' }}</em></p>
-        <div class="dashboard-stat-bar"><i :style="{ width: `${serverRate}%` }"></i></div>
+        <div class="dashboard-stat-head"><span>网络资源</span><i><Router :size="18" /></i></div>
+        <strong>{{ networkTotal }}</strong>
+        <p>路由启用 {{ enabledServiceNodes }} / 面板在线 {{ enabledServers }}/{{ serverTotal }}</p>
+        <div class="dashboard-stat-bar"><i :style="{ width: `${networkRate}%` }"></i></div>
       </article>
       <article class="dashboard-stat-card orange">
-        <div class="dashboard-stat-head"><span>卡密总数</span><i><CreditCard :size="18" /></i></div>
-        <strong>{{ cardTotal }}</strong>
-        <p>未使用 {{ unusedCards }}</p>
-        <div class="dashboard-stat-bar"><i :style="{ width: `${cardRate}%` }"></i></div>
+        <div class="dashboard-stat-head"><span>今日收入</span><i><Banknote :size="18" /></i></div>
+        <strong class="dashboard-money-value">{{ formatMoney(todayIncome) }}</strong>
+        <p>在线充值 {{ todayPaidCount }} 笔 / 节点续费 {{ todayRenewalCount }} 笔</p>
+        <div class="dashboard-stat-bar"><i :style="{ width: `${incomeRate}%` }"></i></div>
       </article>
     </section>
 
     <section class="dashboard-middle-grid">
       <article class="dashboard-section-card">
         <header class="dashboard-section-head">
-          <h2>初始化状态 <span>核心</span></h2>
+          <h2>业务运行概览 <span>实时</span></h2>
         </header>
-        <div class="dashboard-init-grid">
+        <div class="dashboard-init-grid dashboard-business-grid">
+          <div>
+            <span><i :class="unusedCards ? 'on' : 'off'"></i>卡密库存</span>
+            <strong :class="{ muted: !unusedCards }">{{ unusedCards }} 张可用</strong>
+            <small>总计 {{ cardTotal }} / 已使用 {{ usedCards }} / 禁用 {{ disabledCards }}</small>
+          </div>
           <div>
             <span><i :class="enabledPaymentChannels ? 'on' : 'off'"></i>在线支付</span>
-            <strong :class="{ muted: !enabledPaymentChannels, ok: enabledPaymentChannels }">{{ enabledPaymentChannels ? `已启用 ${enabledPaymentChannels} 个通道` : '未启用' }}</strong>
+            <strong :class="{ muted: !enabledPaymentChannels }">{{ enabledPaymentChannels }}/{{ paymentChannels }} 个通道启用</strong>
+            <small>今日到账 {{ formatMoney(overview?.payments.todayPaidAmount) }}</small>
           </div>
           <div>
-            <span><i :class="enabledServers ? 'on' : 'off'"></i>面板连接</span>
-            <strong :class="{ muted: !enabledServers, ok: enabledServers }">{{ enabledServers }}/{{ serverTotal }} 已启用</strong>
-          </div>
-          <div>
-            <span><i :class="enabledNodes ? 'on' : 'off'"></i>路由节点</span>
-            <strong :class="{ muted: !enabledNodes, ok: enabledNodes }">{{ enabledNodes }}/{{ nodeTotal }} 启用</strong>
+            <span><i :class="enabledSocks ? 'on' : 'off'"></i>SOCKS 出站</span>
+            <strong :class="{ muted: !enabledSocks }">{{ enabledSocks }}/{{ socksTotal }} 个启用</strong>
+            <small>可用于路由节点出站中转</small>
           </div>
           <div>
             <span><i :class="pendingOrders ? 'warn' : 'off'"></i>待支付订单</span>
-            <strong>{{ pendingOrders }} 单</strong>
+            <strong>{{ pendingOrders }} 笔</strong>
+            <small>今日续费 {{ formatMoney(overview?.renewals.todayAmount) }}</small>
           </div>
         </div>
       </article>
 
       <article class="dashboard-section-card">
         <header class="dashboard-section-head">
-          <h2>最近动态 <span>任务状态</span></h2>
+          <h2>最近业务动态 <span>真实记录</span></h2>
         </header>
         <div v-if="recentActivity.length" class="dashboard-activity-list">
           <div v-for="item in recentActivity" :key="item.key" class="dashboard-activity-item">
-            <i :class="item.tone"><component :is="item.icon" :size="16" /></i>
-            <div><p><strong>{{ item.title }}</strong> {{ item.text }}</p><span>{{ item.time }}</span></div>
+            <i :class="activityTone(item)"><component :is="activityIcon(item.type)" :size="16" /></i>
+            <div><p><strong>{{ item.title }}</strong> {{ item.description }}</p><span>{{ formatRelativeDate(item.createdAt) }}</span></div>
           </div>
         </div>
         <div v-else class="dashboard-empty-activity">
           <Activity :size="20" />
-          <span>暂无任务执行记录</span>
+          <span>暂无支付、续费、卡密兑换或同步记录</span>
         </div>
       </article>
     </section>
@@ -304,7 +336,7 @@ onMounted(loadDashboard);
     <section class="dashboard-job-grid">
       <article class="dashboard-job-card">
         <header>
-          <div class="dashboard-job-title"><i><ShieldOff :size="18" /></i><div><h2>自动停用过期节点</h2><p>每 10 分钟自动检测；启动后立即检测一次</p></div></div>
+          <div class="dashboard-job-title"><i><ShieldOff :size="18" /></i><div><h2>自动停用过期节点</h2><p>每 10 分钟自动检测，启用后立即检测一次</p></div></div>
           <div class="dashboard-job-switch"><span>{{ jobSettings.disableExpiredEnabled ? '启用' : '停用' }}</span><el-switch :model-value="jobSettings.disableExpiredEnabled" :loading="jobSettingsSaving" @change="toggleDisableExpired" /></div>
         </header>
         <div class="dashboard-job-stats">
@@ -317,7 +349,7 @@ onMounted(loadDashboard);
 
       <article class="dashboard-job-card">
         <header>
-          <div class="dashboard-job-title"><i><Activity :size="18" /></i><div><h2>远端流量同步任务</h2><p>每 10 分钟读取远端用量；启动后立即同步一次</p></div></div>
+          <div class="dashboard-job-title"><i><Activity :size="18" /></i><div><h2>远端流量同步任务</h2><p>每 10 分钟读取远端用量，超限后同步停用节点</p></div></div>
           <div class="dashboard-job-switch"><span>{{ jobSettings.trafficSyncEnabled ? '启用' : '停用' }}</span><el-switch :model-value="jobSettings.trafficSyncEnabled" :loading="jobSettingsSaving" @change="toggleTrafficSync" /></div>
         </header>
         <div class="dashboard-job-stats">
