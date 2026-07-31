@@ -3259,3 +3259,23 @@ input:-webkit-autofill:active {
     animation: none;
   }
 }
+
+/* Keep initials crisp and readable across every generated avatar palette. */
+.overview-shell .sidebar-user-avatar,
+.customer-card-avatar {
+  color: #f8fafc;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 48%);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.overview-shell .sidebar-user-avatar {
+  font-size: 17px;
+}
+
+.customer-card-avatar {
+  font-size: 21px;
+}

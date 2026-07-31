@@ -936,3 +936,23 @@ input:-webkit-autofill:active {
     animation: none;
   }
 }
+
+/* Generated avatar initials stay bright without a harsh glow. */
+.user-avatar,
+.profile-avatar {
+  color: #f8fafc;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 48%);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.user-avatar {
+  font-size: 18px;
+}
+
+.profile-avatar {
+  font-size: 36px;
+}
