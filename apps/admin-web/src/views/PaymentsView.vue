@@ -170,8 +170,8 @@ async function loadChannels() {
   error.value = '';
   try {
     channels.value = await api<PaymentChannel[]>('/api/admin/payment-channels');
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载支付通道失败';
+  } catch {
+    error.value = '加载失败';
   } finally {
     loading.value = false;
   }
@@ -191,8 +191,8 @@ async function saveChannel() {
     channelDialogVisible.value = false;
     resetChannelForm();
     await loadChannels();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存支付通道失败';
+  } catch {
+    error.value = '保存失败';
     ElMessage.error(error.value);
   } finally {
     savingChannel.value = false;
@@ -229,9 +229,9 @@ async function toggleChannel(channel: PaymentChannel, enabled: boolean | string 
     await api(`/api/admin/payment-channels/${channel.id}`, { method: 'PATCH', body: { enabled: nextEnabled } });
     ElMessage.success(nextEnabled ? '支付通道已启用' : '支付通道已停用');
     await loadChannels();
-  } catch (err) {
+  } catch {
     channel.enabled = previous;
-    error.value = err instanceof Error ? err.message : '切换支付通道失败';
+    error.value = '更新失败';
     ElMessage.error(error.value);
   } finally {
     const next = new Set(togglingIds.value);
@@ -311,8 +311,8 @@ async function revealChannelSecrets() {
     }
     if (channelForm.provider === 'wechat') channelForm.apiKey = secrets.apiKey || '';
     ElMessage.success(hasAnySecret(secrets) ? '已读取保存的支付凭据' : '该通道没有保存凭据');
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取保存凭据失败';
+  } catch {
+    error.value = '读取失败';
     ElMessage.error(error.value);
   } finally {
     revealingChannelSecrets.value = false;
@@ -333,7 +333,7 @@ async function removeChannel(channel: PaymentChannel) {
     await loadChannels();
   } catch (err) {
     if (err === 'cancel' || err === 'close') return;
-    error.value = err instanceof Error ? err.message : '删除支付通道失败';
+    error.value = '删除失败';
     ElMessage.error(error.value);
   }
 }

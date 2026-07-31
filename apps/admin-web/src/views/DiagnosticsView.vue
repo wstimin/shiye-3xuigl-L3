@@ -153,9 +153,9 @@ async function loadDiagnostics(notify = false) {
   error.value = '';
   try {
     diagnostics.value = await api<DiagnosticsPayload>('/api/admin/diagnostics');
-    if (notify) ElMessage.success('健康诊断已完成');
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载健康诊断失败';
+    if (notify) ElMessage.success('诊断成功');
+  } catch {
+    error.value = '诊断失败';
     ElMessage.error(error.value);
   } finally {
     loading.value = false;

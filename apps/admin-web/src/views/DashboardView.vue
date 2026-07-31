@@ -96,8 +96,8 @@ async function loadDashboard() {
     jobSettings.value = settingsResult;
     lastDisableExpired.value = statusResult.lastDisableExpired;
     lastTrafficSync.value = statusResult.lastTrafficSync;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载数据概览失败';
+  } catch {
+    error.value = '加载失败';
   } finally {
     loading.value = false;
   }
@@ -112,9 +112,10 @@ async function saveJobSettings(patch: Partial<JobSettings>) {
     jobSettings.value = await api<JobSettings>('/api/admin/jobs/settings', { method: 'PATCH', body: patch });
     ElMessage.success('任务设置已保存');
     return true;
-  } catch (err) {
+  } catch {
     jobSettings.value = previous;
-    error.value = err instanceof Error ? err.message : '保存任务设置失败';
+    error.value = '保存失败';
+    ElMessage.error(error.value);
     return false;
   } finally {
     jobSettingsSaving.value = false;
@@ -152,7 +153,8 @@ async function runDisableExpiredNodes() {
     await loadDashboard();
     return result;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '停用过期节点失败';
+    error.value = '执行失败';
+    ElMessage.error(error.value);
     throw err;
   } finally {
     jobRunning.value = false;
@@ -168,7 +170,8 @@ async function runTrafficSync() {
     await loadDashboard();
     return result;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '同步远端流量失败';
+    error.value = '同步失败';
+    ElMessage.error(error.value);
     throw err;
   } finally {
     trafficJobRunning.value = false;
@@ -182,8 +185,8 @@ async function disableExpiredNodes() {
     { type: 'warning', customClass: 'operations-dark-message-box' }
   );
   try {
-    const result = await runDisableExpiredNodes();
-    ElMessage.success(`执行完成：成功 ${result.success}，失败 ${result.failed}，总数 ${result.total}`);
+    await runDisableExpiredNodes();
+    ElMessage.success('执行成功');
   } catch {
     // The request error is already displayed on the page.
   }
@@ -191,8 +194,8 @@ async function disableExpiredNodes() {
 
 async function syncTraffic() {
   try {
-    const result = await runTrafficSync();
-    ElMessage.success(`流量同步完成：检查 ${result.checked}，停用 ${result.disabled}，失败 ${result.failed}`);
+    await runTrafficSync();
+    ElMessage.success('同步成功');
   } catch {
     // The request error is already displayed on the page.
   }

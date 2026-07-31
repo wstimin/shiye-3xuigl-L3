@@ -35,7 +35,6 @@ type SocksNode = {
 };
 type ServiceNode = { id: string; config?: { socksRelayEnabled?: boolean; socksNodeId?: string | null } | null };
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
-type SocksSyncResult = { remoteSocksFound: number; remoteSocksImported: number };
 
 const nodes = ref<SocksNode[]>([]);
 const serviceNodes = ref<ServiceNode[]>([]);
@@ -137,8 +136,8 @@ async function syncRemoteSocks() {
   syncingRemote.value = true;
   error.value = '';
   try {
-    const result = await api<SocksSyncResult>(`/api/admin/xui-servers/${syncServerId.value}/sync-socks`, { method: 'POST' });
-    ElMessage.success(`远端 SOCKS 导入完成：发现 ${result.remoteSocksFound}，导入或更新 ${result.remoteSocksImported}`);
+    await api(`/api/admin/xui-servers/${syncServerId.value}/sync-socks`, { method: 'POST' });
+    ElMessage.success('导入成功');
     await loadNodes();
   } catch (err) {
     showError(err, '导入远端 SOCKS 失败');
@@ -310,9 +309,9 @@ function removePendingId(source: Set<string>, id: string) {
   return next;
 }
 
-function showError(err: unknown, fallback: string) {
-  error.value = err instanceof Error ? err.message : fallback;
-  ElMessage.error(error.value);
+function showError(_err: unknown, fallback: string) {
+  error.value = fallback;
+  ElMessage.error(fallback);
 }
 
 onMounted(loadNodes);

@@ -32,8 +32,8 @@ async function loadResult() {
   try {
     result.value = await api<PaymentResult>(`/api/payments/result?trade_no=${encodeURIComponent(tradeNo.value)}`);
     qrImage.value = result.value.qrCode ? await QRCode.toDataURL(result.value.qrCode, { width: 220, margin: 1 }) : '';
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '查询支付结果失败';
+  } catch {
+    error.value = '查询失败';
     notifyError(error.value);
   } finally {
     loading.value = false;

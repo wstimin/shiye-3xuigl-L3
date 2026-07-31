@@ -48,8 +48,8 @@ async function loadLogs() {
     actions.value = result.filters.actions;
     statuses.value = result.filters.statuses;
     servers.value = result.filters.servers;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载同步日志失败';
+  } catch {
+    error.value = '加载失败';
     ElMessage.error(error.value);
   } finally {
     loading.value = false;

@@ -37,8 +37,8 @@ async function loadProfile() {
     ]);
     user.value = session;
     dashboard.value = profile;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载资料失败';
+  } catch {
+    error.value = '加载失败';
     notifyError(error.value);
   } finally {
     loading.value = false;
@@ -51,11 +51,11 @@ async function changePassword() {
   message.value = '';
   try {
     await api('/api/change-password', { method: 'POST', body: form });
-    message.value = '密码已修改，请重新登录';
+    message.value = '修改成功';
     notifySuccess(message.value);
     Object.assign(form, { currentPassword: '', newPassword: '' });
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '修改失败';
+  } catch {
+    error.value = '修改失败';
     notifyError(error.value);
   } finally {
     changing.value = false;

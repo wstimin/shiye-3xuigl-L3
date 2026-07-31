@@ -84,8 +84,8 @@ async function loadCards(resetPage = false) {
     cardPage.pageSize = result.pageSize;
     cardTotal.value = result.total;
     Object.assign(statusCounts, result.statusCounts);
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载卡密数据失败';
+  } catch {
+    error.value = '加载失败';
   } finally {
     loading.value = false;
   }
@@ -116,8 +116,9 @@ async function saveTemplate() {
     templateDialogVisible.value = false;
     resetTemplateForm();
     await loadCards();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存模板失败';
+  } catch {
+    error.value = '保存失败';
+    ElMessage.error(error.value);
   } finally {
     savingTemplate.value = false;
   }
@@ -134,11 +135,12 @@ async function generateCards() {
     const result = await api<{ batchId: string; generated: number; codes: string[] }>('/api/admin/cards/generate', { method: 'POST', body });
     generatedCodes.value = result.codes;
     generatedBatchName.value = body.name;
-    ElMessage.success(`已生成 ${result.codes.length} 张卡密`);
+    ElMessage.success('生成成功');
     resetGenerateForm(template?.id || '');
     await loadCards();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '生成卡密失败';
+  } catch {
+    error.value = '生成失败';
+    ElMessage.error(error.value);
   } finally {
     generating.value = false;
   }
@@ -190,11 +192,12 @@ async function removeUnusedTemplateCards(template: CardTemplate) {
   deletingUnusedTemplateIds.value = new Set(deletingUnusedTemplateIds.value).add(template.id);
   error.value = '';
   try {
-    const result = await api<{ deletedCards: number; deletedBatches: number }>(`/api/admin/card-templates/${template.id}/unused-cards`, { method: 'DELETE' });
-    ElMessage.success(`已删除 ${result.deletedCards} 张未使用卡密`);
+    await api(`/api/admin/card-templates/${template.id}/unused-cards`, { method: 'DELETE' });
+    ElMessage.success('删除成功');
     await loadCards();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '删除未使用卡密失败';
+  } catch {
+    error.value = '删除失败';
+    ElMessage.error(error.value);
   } finally {
     const next = new Set(deletingUnusedTemplateIds.value);
     next.delete(template.id);
@@ -221,11 +224,12 @@ async function removeUsedCards() {
   clearingUsed.value = true;
   error.value = '';
   try {
-    const result = await api<{ deletedCards: number; deletedBatches: number }>('/api/admin/cards/used/history', { method: 'DELETE' });
-    ElMessage.success(`已清除 ${result.deletedCards} 条已使用卡密记录`);
+    await api('/api/admin/cards/used/history', { method: 'DELETE' });
+    ElMessage.success('清除成功');
     await loadCards();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '清除已使用卡密记录失败';
+  } catch {
+    error.value = '清除失败';
+    ElMessage.error(error.value);
   } finally {
     clearingUsed.value = false;
   }
@@ -236,11 +240,12 @@ async function removeUsedBatchCards(batch: CardBatch) {
   clearingUsedBatchIds.value = new Set(clearingUsedBatchIds.value).add(batch.id);
   error.value = '';
   try {
-    const result = await api<{ deletedCards: number; deletedBatches: number }>(`/api/admin/card-batches/${batch.id}/used-cards`, { method: 'DELETE' });
-    ElMessage.success(`已清除 ${result.deletedCards} 条批次已使用卡密记录`);
+    await api(`/api/admin/card-batches/${batch.id}/used-cards`, { method: 'DELETE' });
+    ElMessage.success('清除成功');
     await loadCards();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '清除批次已使用卡密记录失败';
+  } catch {
+    error.value = '清除失败';
+    ElMessage.error(error.value);
   } finally {
     const next = new Set(clearingUsedBatchIds.value);
     next.delete(batch.id);
@@ -248,12 +253,12 @@ async function removeUsedBatchCards(batch: CardBatch) {
   }
 }
 
-async function copyCodes(codes: string[], message = `已复制 ${codes.length} 张卡密`) {
+async function copyCodes(codes: string[], message = '复制成功') {
   try {
     await copyText(codes.join('\n'));
     ElMessage.success(message);
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '复制失败');
+  } catch {
+    ElMessage.error('复制失败');
   }
 }
 
@@ -263,7 +268,7 @@ function exportCodes(codes: string[], filename: string) {
     return;
   }
   downloadText(`${safeFileName(filename)}.txt`, codes.join('\n'));
-  ElMessage.success(`已导出 ${codes.length} 张卡密`);
+  ElMessage.success('导出成功');
 }
 
 function downloadText(filename: string, content: string) {

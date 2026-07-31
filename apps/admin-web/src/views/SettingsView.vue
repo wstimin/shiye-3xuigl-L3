@@ -242,8 +242,8 @@ async function onLogoSelected(event: Event) {
   }
   try {
     brandForm.logoDataUrl = await imageToDataUrl(file, 256);
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : 'Logo 图片读取失败');
+  } catch {
+    ElMessage.error('图片读取失败');
   }
 }
 
@@ -316,9 +316,9 @@ function validateAdminPath(value: string) {
   return '';
 }
 
-function showError(err: unknown, fallback: string) {
-  error.value = err instanceof Error ? err.message : fallback;
-  ElMessage.error(error.value);
+function showError(_err: unknown, fallback: string) {
+  error.value = fallback;
+  ElMessage.error(fallback);
 }
 
 function imageToDataUrl(file: File, maxSize: number) {

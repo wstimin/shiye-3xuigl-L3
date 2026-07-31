@@ -46,15 +46,6 @@ type XuiServer = {
   hasToken?: boolean;
 };
 
-type SyncResult = {
-  total: number;
-  created: number;
-  updated: number;
-  skipped: number;
-  remoteSocksFound?: number;
-  remoteSocksImported?: number;
-};
-type SocksSyncResult = { remoteSocksFound: number; remoteSocksImported: number };
 type CertResult = { found: boolean; certFile: string; keyFile: string; message?: string; raw?: unknown };
 type ConnectionTest = { state: 'success' | 'error'; inboundCount?: number; message?: string };
 
@@ -152,8 +143,8 @@ async function testForm() {
   testingForm.value = true;
   error.value = '';
   try {
-    const result = await api<{ connected: boolean; inbounds: unknown }>('/api/admin/xui/test', { method: 'POST', body: cleanFormBody() });
-    ElMessage.success(`连接成功，读取到 ${countXuiItems(result.inbounds)} 个入站`);
+    await api<{ connected: boolean; inbounds: unknown }>('/api/admin/xui/test', { method: 'POST', body: cleanFormBody() });
+    ElMessage.success('连接成功');
   } catch (err) {
     showError(err, '测试连接失败');
   } finally {
@@ -167,11 +158,11 @@ async function testSaved(server: XuiServer) {
   try {
     const result = await api<{ inboundCount: number }>(`/api/admin/xui-servers/${server.id}/test`, { method: 'POST' });
     connectionTests.value = { ...connectionTests.value, [server.id]: { state: 'success', inboundCount: result.inboundCount } };
-    ElMessage.success(`${server.name} 连接成功，读取到 ${result.inboundCount} 个入站`);
+    ElMessage.success('连接成功');
   } catch (err) {
-    const message = errorMessage(err, '测试已保存面板连接失败');
+    const message = '连接失败';
     connectionTests.value = { ...connectionTests.value, [server.id]: { state: 'error', message } };
-    showError(err, '测试已保存面板连接失败');
+    showError(err, message);
   } finally {
     testingIds.value = removePendingId(testingIds.value, server.id);
   }
@@ -182,9 +173,9 @@ async function testFormCerts() {
   error.value = '';
   try {
     const result = await api<CertResult>('/api/admin/xui/certs', { method: 'POST', body: cleanFormBody() });
-    await showCertResult(result, '表单证书检测', true);
+    await showCertResult(result, true);
   } catch (err) {
-    showError(err, '读取面板证书失败');
+    showError(err, '证书读取失败');
   } finally {
     testingCertForm.value = false;
   }
@@ -195,42 +186,33 @@ async function testSavedCerts(server: XuiServer) {
   error.value = '';
   try {
     const result = await api<CertResult>(`/api/admin/xui-servers/${server.id}/certs`);
-    await showCertResult(result, `${server.name} 证书检测`, false);
+    await showCertResult(result, false);
   } catch (err) {
-    showError(err, '读取已保存面板证书失败');
+    showError(err, '证书读取失败');
   } finally {
     certIds.value = removePendingId(certIds.value, server.id);
   }
 }
 
-async function showCertResult(result: CertResult, title: string, allowFill: boolean) {
-  const raw = JSON.stringify(result.raw ?? null, null, 2);
-  const content = [
-    result.message || (result.found ? '已读取到证书路径' : '没有读取到完整证书路径'),
-    '',
-    `证书路径：${result.certFile || '-'}`,
-    `私钥路径：${result.keyFile || '-'}`,
-    '',
-    '接口返回：',
-    raw.length > 1200 ? `${raw.slice(0, 1200)}...` : raw
-  ].join('\n');
+async function showCertResult(result: CertResult, allowFill: boolean) {
   if (allowFill && result.found) {
     try {
-      await ElMessageBox.confirm(content, title, {
+      await ElMessageBox.confirm('已读取证书配置，是否回填？', '证书读取成功', {
         type: 'success',
-        confirmButtonText: '回填路径',
-        cancelButtonText: '只查看',
+        confirmButtonText: '回填',
+        cancelButtonText: '取消',
         customClass: 'xui-dark-message-box'
       });
       form.tlsCertFile = result.certFile;
       form.tlsKeyFile = result.keyFile;
-      ElMessage.success('证书路径已回填');
+      ElMessage.success('证书回填成功');
     } catch {
-      // The user chose to keep the detected paths unchanged.
+      ElMessage.success('证书读取成功');
     }
     return;
   }
-  await ElMessageBox.alert(content, title, { type: result.found ? 'success' : 'warning', customClass: 'xui-dark-message-box' });
+  if (result.found) ElMessage.success('证书读取成功');
+  else ElMessage.warning('未读取到证书');
 }
 
 async function syncServer(server: XuiServer) {
@@ -246,16 +228,8 @@ async function syncServer(server: XuiServer) {
   syncingIds.value = addPendingId(syncingIds.value, server.id);
   error.value = '';
   try {
-    const result = await api<SyncResult>(`/api/admin/xui-servers/${server.id}/sync`, { method: 'POST' });
-    ElMessage.success(`同步完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}，总数 ${result.total}`);
-    await ElMessageBox.alert([
-      `远端入站总数：${result.total}`,
-      `新增本地节点：${result.created}`,
-      `更新本地节点：${result.updated}`,
-      `跳过：${result.skipped}`,
-      `发现远端 SOCKS：${result.remoteSocksFound ?? 0}`,
-      `导入或更新 SOCKS：${result.remoteSocksImported ?? 0}`
-    ].join('\n'), `${server.name} 同步结果`, { type: result.skipped ? 'warning' : 'success', customClass: 'xui-dark-message-box' });
+    await api(`/api/admin/xui-servers/${server.id}/sync`, { method: 'POST' });
+    ElMessage.success('同步成功');
   } catch (err) {
     showError(err, '同步远端节点失败');
   } finally {
@@ -276,8 +250,8 @@ async function syncServerSocks(server: XuiServer) {
   syncingSocksIds.value = addPendingId(syncingSocksIds.value, server.id);
   error.value = '';
   try {
-    const result = await api<SocksSyncResult>(`/api/admin/xui-servers/${server.id}/sync-socks`, { method: 'POST' });
-    ElMessage.success(`SOCKS 导入完成：发现 ${result.remoteSocksFound}，导入或更新 ${result.remoteSocksImported}`);
+    await api(`/api/admin/xui-servers/${server.id}/sync-socks`, { method: 'POST' });
+    ElMessage.success('导入成功');
   } catch (err) {
     showError(err, '导入远端 SOCKS 失败');
   } finally {
@@ -524,14 +498,6 @@ function hasRealityCandidate(server: XuiServer) {
   return Boolean(server.config?.realityTarget || server.config?.realityServerName);
 }
 
-function countXuiItems(value: unknown) {
-  if (Array.isArray(value)) return value.length;
-  const record = objectValue(value);
-  if (Array.isArray(record.obj)) return record.obj.length;
-  if (Array.isArray(record.data)) return record.data.length;
-  return 0;
-}
-
 function objectValue(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -588,13 +554,9 @@ function removePendingId(source: Set<string>, id: string) {
   return next;
 }
 
-function errorMessage(err: unknown, fallback: string) {
-  return err instanceof Error ? err.message : fallback;
-}
-
-function showError(err: unknown, fallback: string) {
-  error.value = errorMessage(err, fallback);
-  ElMessage.error(error.value);
+function showError(_err: unknown, fallback: string) {
+  error.value = fallback;
+  ElMessage.error(fallback);
 }
 
 onMounted(loadServers);

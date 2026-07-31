@@ -125,6 +125,7 @@ model ServiceNode {
   customerNodes  CustomerNode[]
 
   @@index([serverId])
+  @@unique([serverId, inboundId])
   @@index([enabled])
   @@map("service_nodes")
 }

@@ -122,6 +122,7 @@ export class NodesService {
 
     if (remoteMode === 'bind') {
       if (!inboundId) throw new BadRequestException('绑定已有入站时必须填写入站 ID');
+      await this.assertServiceNodeInboundAvailable(input.serverId, inboundId);
       remoteValidation = await this.xui.validateServiceNodeInbound(input.serverId, inboundId);
       this.assertShareLinkProtocol(remoteValidation.protocol);
       this.assertTransportCompatibility(remoteValidation.protocol, remoteValidation.encryption, remoteValidation.transportConfig.transport);
@@ -150,29 +151,35 @@ export class NodesService {
       remoteClient = { email: remoteCreated.remoteClientEmail, uuid: remoteCreated.remoteClientUuid, subId: remoteCreated.remoteClientSubId };
     }
 
-    const config = await this.serviceNodeConfig(input, null, remoteCreated ? {
-      remoteMode,
-      remoteManaged: true,
-      remoteInboundTag: remoteCreated.tag,
-      remoteInboundRemark: remoteCreated.remark,
-      remoteInboundPort: remoteCreated.port,
-      remoteClientEmail: remoteCreated.remoteClientEmail,
-      remoteClientUuid: remoteCreated.remoteClientUuid,
-      remoteClientSubId: remoteCreated.remoteClientSubId,
-      remoteClientLinks: remoteCreated.links
-    } : {
-      remoteMode,
-      remoteManaged: false,
-      remoteInboundPort: remoteValidation?.port || input.inboundPort,
-      remoteClientEmail: remoteClient?.email,
-      remoteClientUuid: remoteClient?.uuid,
-      remoteClientSubId: remoteClient?.subId,
-      encryption: remoteValidation?.encryption,
-      ...remoteValidation?.transportConfig
-    });
-    if (remoteValidation) Object.assign(config, { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig });
+    try {
+      await this.assertServiceNodeInboundAvailable(input.serverId, inboundId);
+    } catch (error) {
+      if (remoteCreated) await this.xui.deleteRemoteInbound(input.serverId, remoteCreated.inboundId).catch(() => undefined);
+      throw error;
+    }
 
     try {
+      const config = await this.serviceNodeConfig(input, null, remoteCreated ? {
+        remoteMode,
+        remoteManaged: true,
+        remoteInboundTag: remoteCreated.tag,
+        remoteInboundRemark: remoteCreated.remark,
+        remoteInboundPort: remoteCreated.port,
+        remoteClientEmail: remoteCreated.remoteClientEmail,
+        remoteClientUuid: remoteCreated.remoteClientUuid,
+        remoteClientSubId: remoteCreated.remoteClientSubId,
+        remoteClientLinks: remoteCreated.links
+      } : {
+        remoteMode,
+        remoteManaged: false,
+        remoteInboundPort: remoteValidation?.port || input.inboundPort,
+        remoteClientEmail: remoteClient?.email,
+        remoteClientUuid: remoteClient?.uuid,
+        remoteClientSubId: remoteClient?.subId,
+        encryption: remoteValidation?.encryption,
+        ...remoteValidation?.transportConfig
+      });
+      if (remoteValidation) Object.assign(config, { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig });
       const node = await this.prisma.serviceNode.create({
         data: {
           serverId: input.serverId,
@@ -191,6 +198,7 @@ export class NodesService {
       return node;
     } catch (error) {
       if (remoteCreated) await this.xui.deleteRemoteInbound(input.serverId, remoteCreated.inboundId).catch(() => undefined);
+      if (this.isUniqueConstraintError(error)) throw new BadRequestException('该 3x-ui 入站已绑定到其他路由节点');
       throw error;
     }
   }
@@ -223,6 +231,7 @@ export class NodesService {
 
     if (remoteMode === 'bind') {
       if (!inboundId) throw new BadRequestException('绑定已有入站时必须填写入站 ID');
+      await this.assertServiceNodeInboundAvailable(nextServerId, inboundId, id);
       remoteValidation = await this.xui.validateServiceNodeInbound(nextServerId, inboundId);
       this.assertShareLinkProtocol(remoteValidation.protocol);
       this.assertTransportCompatibility(remoteValidation.protocol, remoteValidation.encryption, remoteValidation.transportConfig.transport);
@@ -254,29 +263,36 @@ export class NodesService {
       remoteClient = { email: remoteCreated.remoteClientEmail, uuid: remoteCreated.remoteClientUuid, subId: remoteCreated.remoteClientSubId };
     }
 
-    const remotePatch = remoteCreated ? {
-      remoteMode,
-      remoteManaged: true,
-      remoteInboundTag: remoteCreated.tag,
-      remoteInboundRemark: remoteCreated.remark,
-      remoteInboundPort: remoteCreated.port,
-      remoteClientEmail: remoteCreated.remoteClientEmail,
-      remoteClientUuid: remoteCreated.remoteClientUuid,
-      remoteClientSubId: remoteCreated.remoteClientSubId,
-      remoteClientLinks: remoteCreated.links
-    } : {
-      remoteMode,
-      remoteManaged: remoteMode === 'create' ? Boolean(previousConfig.remoteManaged) : false,
-      remoteInboundRemark: remoteMode === 'create' ? nextRemoteRemark : previousConfig.remoteInboundRemark,
-      remoteInboundPort: remoteValidation?.port || (input.inboundPort === undefined ? previousConfig.remoteInboundPort : input.inboundPort),
-      remoteClientEmail: remoteClient?.email || previousConfig.remoteClientEmail,
-      remoteClientUuid: remoteClient?.uuid || previousConfig.remoteClientUuid,
-      remoteClientSubId: remoteClient?.subId || previousConfig.remoteClientSubId,
-      ...(remoteValidation ? { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig } : {})
-    };
-    const config = await this.serviceNodeConfig(input, current.config, remotePatch);
-    if (remoteValidation) Object.assign(config, { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig });
     try {
+      await this.assertServiceNodeInboundAvailable(nextServerId, inboundId, id);
+    } catch (error) {
+      if (remoteCreated) await this.xui.deleteRemoteInbound(nextServerId, remoteCreated.inboundId).catch(() => undefined);
+      throw error;
+    }
+
+    try {
+      const remotePatch = remoteCreated ? {
+        remoteMode,
+        remoteManaged: true,
+        remoteInboundTag: remoteCreated.tag,
+        remoteInboundRemark: remoteCreated.remark,
+        remoteInboundPort: remoteCreated.port,
+        remoteClientEmail: remoteCreated.remoteClientEmail,
+        remoteClientUuid: remoteCreated.remoteClientUuid,
+        remoteClientSubId: remoteCreated.remoteClientSubId,
+        remoteClientLinks: remoteCreated.links
+      } : {
+        remoteMode,
+        remoteManaged: remoteMode === 'create' ? Boolean(previousConfig.remoteManaged) : false,
+        remoteInboundRemark: remoteMode === 'create' ? nextRemoteRemark : previousConfig.remoteInboundRemark,
+        remoteInboundPort: remoteValidation?.port || (input.inboundPort === undefined ? previousConfig.remoteInboundPort : input.inboundPort),
+        remoteClientEmail: remoteClient?.email || previousConfig.remoteClientEmail,
+        remoteClientUuid: remoteClient?.uuid || previousConfig.remoteClientUuid,
+        remoteClientSubId: remoteClient?.subId || previousConfig.remoteClientSubId,
+        ...(remoteValidation ? { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig } : {})
+      };
+      const config = await this.serviceNodeConfig(input, current.config, remotePatch);
+      if (remoteValidation) Object.assign(config, { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig });
       const remoteInboundChanged = Boolean(
         (input.serverId !== undefined && nextServerId !== current.serverId) ||
         (input.inboundId !== undefined && inboundId !== current.inboundId) ||
@@ -373,6 +389,7 @@ export class NodesService {
       return updated;
     } catch (error) {
       if (remoteCreated) await this.xui.deleteRemoteInbound(nextServerId, remoteCreated.inboundId).catch(() => undefined);
+      if (this.isUniqueConstraintError(error)) throw new BadRequestException('该 3x-ui 入站已绑定到其他路由节点');
       throw error;
     }
   }
@@ -670,6 +687,23 @@ export class NodesService {
     const exists = await this.prisma.serviceNode.findUnique({ where: { id }, select: { id: true, serverId: true, name: true, protocol: true, inboundId: true, enabled: true, trafficLimitGb: true, remark: true, config: true } });
     if (!exists) throw new NotFoundException('Service node not found');
     return exists;
+  }
+
+  private async assertServiceNodeInboundAvailable(serverId: string, inboundId: number | null, excludeId?: string) {
+    if (!inboundId) return;
+    const existing = await this.prisma.serviceNode.findFirst({
+      where: {
+        serverId,
+        inboundId,
+        ...(excludeId ? { id: { not: excludeId } } : {})
+      },
+      select: { id: true, name: true }
+    });
+    if (existing) throw new BadRequestException(`该 3x-ui 入站已绑定到路由节点「${existing.name}」`);
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
   }
 
   private async ensureSocksNode(id: string) {

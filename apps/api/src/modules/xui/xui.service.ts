@@ -25,6 +25,7 @@ type SyncOptions = {
   createIfMissing?: boolean;
   requireExisting?: boolean;
   syncServiceConfig?: boolean;
+  persistLocal?: boolean;
 };
 
 type SyncLogQuery = {
@@ -338,72 +339,78 @@ export class XuiService {
     this.assertXuiSuccess(response);
 
     let inboundId = this.extractCreatedInboundId(response);
-    if (!inboundId) {
-      const afterPayload = await client.listInbounds();
-      this.assertXuiSuccess(afterPayload);
-      const created = this.xuiArray(afterPayload).find((item) => {
-        const inbound = this.xuiObject(item);
-        return inbound.tag === tag || (inbound.remark === payload.remark && Number(inbound.port) === port);
-      });
-      inboundId = this.inboundIdOf(created);
-    }
-
-    if (!inboundId) throw new BadGatewayException('3x-ui 已返回成功，但没有返回新入站 ID');
-    const remoteClientUuid = randomUUID();
-    const remoteClientSubId = this.subscriptionId(remoteClientUuid);
-    const remoteClientEmail = this.serviceClientEmail(input.name, inboundId);
-    const remoteClient = this.buildXuiClient({
-      protocol: input.protocol,
-      uuid: remoteClientUuid,
-      subId: remoteClientSubId,
-      email: remoteClientEmail,
-      enabled: input.enabled,
-      expireAt: null,
-      trafficLimitGb: input.trafficLimitGb ?? 0,
-      flow: this.clientFlowForProtocol(input.protocol, input.encryption || 'none')
-    });
-    let clientResponse: unknown;
     try {
+      if (!inboundId) {
+        const afterPayload = await client.listInbounds();
+        this.assertXuiSuccess(afterPayload);
+        inboundId = this.findCreatedInboundId(afterPayload, tag, payload.remark, port);
+      }
+
+      if (!inboundId) throw new BadGatewayException('3x-ui 已返回成功，但没有返回新入站 ID');
+      const remoteClientUuid = randomUUID();
+      const remoteClientSubId = this.subscriptionId(remoteClientUuid);
+      const remoteClientEmail = this.serviceClientEmail(input.name, inboundId);
+      const remoteClient = this.buildXuiClient({
+        protocol: input.protocol,
+        uuid: remoteClientUuid,
+        subId: remoteClientSubId,
+        email: remoteClientEmail,
+        enabled: input.enabled,
+        expireAt: null,
+        trafficLimitGb: input.trafficLimitGb ?? 0,
+        flow: this.clientFlowForProtocol(input.protocol, input.encryption || 'none')
+      });
+      let clientResponse: unknown;
       clientResponse = await client.addClient(inboundId, remoteClient);
       this.assertXuiSuccess(clientResponse);
+      const links = input.enabled
+        ? await this.requireLinksForServiceNode(client, remoteClientEmail, remoteClientSubId, {
+          serverId: server.id,
+          inboundId,
+          serviceNodeName: input.name,
+          protocol: input.protocol,
+          encryption: input.encryption || 'none',
+          server,
+          uuid: remoteClientUuid
+        }, true)
+        : await this.linksForClient(client, remoteClientEmail, remoteClientSubId, {
+          serverId: server.id,
+          inboundId,
+          serviceNodeName: input.name,
+          protocol: input.protocol,
+          encryption: input.encryption || 'none',
+          server,
+          uuid: remoteClientUuid
+        }).catch(() => [] as string[]);
+      await this.writeSyncLog(server.id, 'service-node-inbound-create', 'success', `Created inbound ${inboundId} for ${input.name}`, {
+        inboundId,
+        port,
+        protocol: input.protocol,
+        tag,
+        reality: this.realityLogDetail(streamSettings),
+        remoteClientEmail,
+        remoteClientUuid,
+        remoteClientSubId,
+        links,
+        response: this.toJsonValue(response),
+        clientResponse: this.toJsonValue(clientResponse)
+      }, true);
+      return { inboundId, port, tag, remark: String(payload.remark), remoteClientEmail, remoteClientUuid, remoteClientSubId, links, response };
     } catch (error) {
-      await client.deleteInbound(inboundId).catch(() => undefined);
+      if (!inboundId) {
+        const cleanupPayload = await client.listInbounds().catch(() => undefined);
+        if (cleanupPayload) inboundId = this.findCreatedInboundId(cleanupPayload, tag, payload.remark, port);
+      }
+      if (inboundId) await this.deleteRemoteInbound(server.id, inboundId).catch(async (cleanupError) => {
+        await this.writeSyncLog(server.id, 'service-node-inbound-create-cleanup', 'failed', this.errorMessage(cleanupError), {
+          inboundId,
+          serviceNodeName: input.name,
+          originalError: this.errorMessage(error),
+          cleanupError: this.errorMessage(cleanupError)
+        });
+      });
       throw error;
     }
-
-    const links = input.enabled
-      ? await this.requireLinksForServiceNode(client, remoteClientEmail, remoteClientSubId, {
-        serverId: server.id,
-        inboundId,
-        serviceNodeName: input.name,
-        protocol: input.protocol,
-        encryption: input.encryption || 'none',
-        server,
-        uuid: remoteClientUuid
-      })
-      : await this.linksForClient(client, remoteClientEmail, remoteClientSubId, {
-        serverId: server.id,
-        inboundId,
-        serviceNodeName: input.name,
-        protocol: input.protocol,
-        encryption: input.encryption || 'none',
-        server,
-        uuid: remoteClientUuid
-      }).catch(() => [] as string[]);
-    await this.writeSyncLog(server.id, 'service-node-inbound-create', 'success', `Created inbound ${inboundId} for ${input.name}`, {
-      inboundId,
-      port,
-      protocol: input.protocol,
-      tag,
-      reality: this.realityLogDetail(streamSettings),
-      remoteClientEmail,
-      remoteClientUuid,
-      remoteClientSubId,
-      links,
-      response: this.toJsonValue(response),
-      clientResponse: this.toJsonValue(clientResponse)
-    });
-    return { inboundId, port, tag, remark: String(payload.remark), remoteClientEmail, remoteClientUuid, remoteClientSubId, links, response };
   }
 
   async validateServiceNodeInbound(serverId: string, inboundId: number) {
@@ -588,7 +595,12 @@ export class XuiService {
         continue;
       }
       try {
-        await this.syncCustomerNode(node.customerId, node.id, { status: node.status, trafficLimitGb: serviceNode.trafficLimitGb, createIfMissing: false });
+        await this.syncCustomerNode(node.customerId, node.id, {
+          status: node.status,
+          trafficLimitGb: serviceNode.trafficLimitGb,
+          createIfMissing: false,
+          requireExisting: true
+        });
         results.push({ target: `customer:${node.id}`, updated: true });
       } catch (error) {
         results.push({ target: `customer:${node.id}`, updated: false, message: this.errorMessage(error) });
@@ -809,20 +821,31 @@ export class XuiService {
           continue;
         }
 
-        const created = await this.prisma.serviceNode.create({
-          data: {
-            serverId,
-            name,
-            inboundId,
-            protocol,
-            priceMonthly: new Prisma.Decimal(0),
-            trafficLimitGb: new Prisma.Decimal(0),
-            enabled,
-            config: this.toJsonValue(config),
-            remark: String(inbound.remark || '').trim() || null
-          }
-        });
-        results.push({ inboundId, name, action: 'created', serviceNodeId: created.id });
+        try {
+          const created = await this.prisma.serviceNode.create({
+            data: {
+              serverId,
+              name,
+              inboundId,
+              protocol,
+              priceMonthly: new Prisma.Decimal(0),
+              trafficLimitGb: new Prisma.Decimal(0),
+              enabled,
+              config: this.toJsonValue(config),
+              remark: String(inbound.remark || '').trim() || null
+            }
+          });
+          results.push({ inboundId, name, action: 'created', serviceNodeId: created.id });
+        } catch (error) {
+          if (!this.isUniqueConstraintError(error)) throw error;
+          const winner = await this.prisma.serviceNode.findFirst({ where: { serverId, inboundId } });
+          if (!winner) throw error;
+          const updated = await this.prisma.serviceNode.update({
+            where: { id: winner.id },
+            data: { name, protocol, enabled, config: this.toJsonValue(config) }
+          });
+          results.push({ inboundId, name, action: 'updated', serviceNodeId: updated.id, message: 'Concurrent import reused the existing local service node' });
+        }
       } catch (error) {
         results.push({ inboundId, name: inboundId ? `Inbound ${inboundId}` : 'unknown', action: 'skipped', message: this.errorMessage(error) });
       }
@@ -1086,11 +1109,19 @@ export class XuiService {
           uuid
         }).catch(() => [] as string[]);
       const syncedAt = new Date();
-      const updatedNode = await this.prisma.customerNode.update({
-        where: { id: customerNode.id },
-        data: { xuiEmail, uuid, lastSyncedAt: syncedAt, config: this.toJsonValue({ ...savedConfig, uuid, subId, links }) },
-        include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
-      });
+      const localPatch = {
+        xuiEmail,
+        uuid,
+        lastSyncedAt: syncedAt,
+        config: this.toJsonValue({ ...savedConfig, uuid, subId, links })
+      };
+      const updatedNode = options.persistLocal === false
+        ? customerNode
+        : await this.prisma.customerNode.update({
+          where: { id: customerNode.id },
+          data: localPatch,
+          include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+        });
 
       const detail = {
         customerId,
@@ -1107,7 +1138,7 @@ export class XuiService {
       const remoteConfigSync = options.syncServiceConfig ? await this.syncServiceNodeRemoteConfig(customerNode.serviceNodeId) : null;
       detail.remoteConfig = remoteConfigSync ? this.toJsonValue(remoteConfigSync) : null;
       await this.writeSyncLog(serverId, 'customer-node-sync', 'success', `Synced ${xuiEmail}`, detail);
-      return { synced: true, action: 'update', route, node: updatedNode, detail, remoteConfig: remoteConfigSync };
+      return { synced: true, action: 'update', route, node: updatedNode, detail, localPatch, remoteConfig: remoteConfigSync };
     } catch (error) {
       await this.writeSyncLog(serverId, 'customer-node-sync', 'failed', this.errorMessage(error), {
         customerId,
@@ -1770,7 +1801,8 @@ export class XuiService {
     client: XuiClient,
     email: string,
     subId: string | undefined,
-    context: ShareLinkContext
+    context: ShareLinkContext,
+    throwOnFailure = false
   ) {
     try {
       const links = await this.linksForClient(client, email, subId, context);
@@ -1786,6 +1818,7 @@ export class XuiService {
         remoteClientSubId: subId,
         note: 'Legacy share endpoints and local share-link generation both returned no usable link'
       });
+      if (throwOnFailure) throw error;
       return [];
     }
   }
@@ -2769,6 +2802,14 @@ export class XuiService {
     return 0;
   }
 
+  private findCreatedInboundId(payload: unknown, tag: string, remark: unknown, port: number) {
+    const created = this.xuiArray(payload).find((item) => {
+      const inbound = this.xuiObject(item);
+      return inbound.tag === tag || (inbound.remark === remark && Number(inbound.port) === port);
+    });
+    return this.inboundIdOf(created);
+  }
+
   private randomSecret(bytes = 24) {
     return randomBytes(bytes).toString('base64url');
   }
@@ -2777,8 +2818,8 @@ export class XuiService {
     return randomBytes(8).toString('hex');
   }
 
-  private async writeSyncLog(serverId: string | null, action: string, status: string, message: string, detail: unknown) {
-    await this.prisma.syncLog.create({
+  private async writeSyncLog(serverId: string | null, action: string, status: string, message: string, detail: unknown, strict = false) {
+    const write = this.prisma.syncLog.create({
       data: {
         serverId,
         action,
@@ -2786,7 +2827,12 @@ export class XuiService {
         message,
         detail: this.toJsonValue(detail)
       }
-    }).catch(() => undefined);
+    });
+    if (strict) {
+      await write;
+      return;
+    }
+    await write.catch(() => undefined);
   }
 
   private toJsonValue(value: unknown): Prisma.InputJsonValue {
@@ -2795,5 +2841,9 @@ export class XuiService {
 
   private errorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
   }
 }

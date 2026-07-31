@@ -69,8 +69,8 @@ async function loadFinance() {
     logPage.page = logResult.page;
     logPage.pageSize = logResult.pageSize;
     paymentChannels.value = channelResult;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载失败';
+  } catch {
+    error.value = '加载失败';
   } finally {
     loading.value = false;
   }
@@ -86,8 +86,8 @@ async function loadOrders(resetPage = false) {
     orderTotal.value = result.total;
     orderPage.page = result.page;
     orderPage.pageSize = result.pageSize;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载充值订单失败';
+  } catch {
+    error.value = '加载失败';
   } finally {
     loading.value = false;
   }
@@ -103,8 +103,8 @@ async function loadLogs(resetPage = false) {
     logTotal.value = result.total;
     logPage.page = result.page;
     logPage.pageSize = result.pageSize;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载余额流水失败';
+  } catch {
+    error.value = '加载失败';
   } finally {
     loading.value = false;
   }
@@ -165,11 +165,12 @@ async function clearRechargeHistory() {
   clearingOrders.value = true;
   error.value = '';
   try {
-    const result = await api<{ deleted: number }>('/api/admin/recharge-orders/history', { method: 'DELETE', body: { ...range, confirmText: 'CLEAR_RECHARGE_HISTORY' } });
-    ElMessage.success(`已清除 ${result.deleted} 条充值订单历史`);
+    await api('/api/admin/recharge-orders/history', { method: 'DELETE', body: { ...range, confirmText: 'CLEAR_RECHARGE_HISTORY' } });
+    ElMessage.success('清除成功');
     await loadFinance();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '清除充值订单历史失败';
+  } catch {
+    error.value = '清除失败';
+    ElMessage.error(error.value);
   } finally {
     clearingOrders.value = false;
   }
@@ -181,11 +182,12 @@ async function clearBalanceHistory() {
   clearingLogs.value = true;
   error.value = '';
   try {
-    const result = await api<{ deleted: number }>('/api/admin/balance-logs/history', { method: 'DELETE', body: { ...range, confirmText: 'CLEAR_BALANCE_HISTORY' } });
-    ElMessage.success(`已清除 ${result.deleted} 条余额流水`);
+    await api('/api/admin/balance-logs/history', { method: 'DELETE', body: { ...range, confirmText: 'CLEAR_BALANCE_HISTORY' } });
+    ElMessage.success('清除成功');
     await loadFinance();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '清除余额流水失败';
+  } catch {
+    error.value = '清除失败';
+    ElMessage.error(error.value);
   } finally {
     clearingLogs.value = false;
   }

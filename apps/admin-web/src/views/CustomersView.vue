@@ -30,57 +30,6 @@ type Customer = {
 
 type ServiceNode = { id: string; name: string; server?: { name: string } };
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
-type CleanupResult = {
-  skipped?: boolean;
-  deleted?: boolean;
-  alreadyAbsent?: boolean;
-  synced?: boolean;
-  action?: string;
-  reason?: string;
-  message?: string;
-  verified?: { retried?: boolean; absent?: boolean };
-  remoteClientCleanup?: CleanupResult;
-};
-type DeleteServiceNodeResult = {
-  deleted: boolean;
-  id: string;
-  remoteClientCleanup?: CleanupResult;
-  remoteConfigCleanup?: CleanupResult;
-  remoteInboundCleanup?: CleanupResult;
-};
-type SyncDetail = {
-  inboundId?: number;
-  xuiEmail?: string;
-  route?: string;
-  action?: string;
-  subId?: string;
-  links?: string[];
-  remoteConfig?: RemoteConfigSyncResult | null;
-};
-type RemoteConfigSyncResult = {
-  synced?: boolean;
-  action?: string;
-  serviceNodeId?: string;
-  inboundId?: number;
-  inboundTag?: string;
-  outboundTag?: string;
-  socks?: { host?: string; port?: number; username?: string } | null;
-};
-type CustomerNodeSyncResult = {
-  synced: boolean;
-  action?: string;
-  route?: string;
-  detail?: SyncDetail;
-  remoteConfig?: RemoteConfigSyncResult | null;
-};
-type CustomerNodeMutationResult = {
-  node?: CustomerNode | null;
-  sync?: CustomerNodeSyncResult;
-};
-type RenewalResult = {
-  node?: CustomerNode;
-  sync?: SyncDetail;
-};
 
 const customerAvatarPalettes = [
   ['#4338ca', '#6366f1'],
@@ -161,8 +110,8 @@ async function loadCustomers(resetPage = false) {
     if (!bindForm.customerId && customerResult.items[0]) bindForm.customerId = customerResult.items[0].id;
     if (!balanceForm.customerId && customerResult.items[0]) balanceForm.customerId = customerResult.items[0].id;
     if (!bindForm.serviceNodeId && nodeResult[0]) bindForm.serviceNodeId = nodeResult[0].id;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载失败';
+  } catch {
+    error.value = '加载失败';
   } finally {
     loading.value = false;
   }
@@ -203,8 +152,9 @@ async function saveCustomer() {
     customerDialogVisible.value = false;
     resetCustomerForm();
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存用户失败';
+  } catch {
+    error.value = '保存失败';
+    ElMessage.error(error.value);
   } finally {
     savingCustomer.value = false;
   }
@@ -215,7 +165,7 @@ async function bindNode() {
   binding.value = true;
   error.value = '';
   try {
-    const result = await api<CustomerNodeMutationResult>(`/api/admin/customers/${bindForm.customerId}/nodes`, {
+    await api(`/api/admin/customers/${bindForm.customerId}/nodes`, {
       method: 'POST',
       body: {
         serviceNodeId: bindForm.serviceNodeId,
@@ -224,13 +174,13 @@ async function bindNode() {
         trafficLimitGb: bindForm.trafficLimitGb
       }
     });
-    ElMessage.success('节点已绑定，远端已有客户端已更新');
-    await showCustomerSyncResult(result.sync, '绑定同步结果');
+    ElMessage.success('绑定成功');
     bindDialogVisible.value = false;
     Object.assign(bindForm, { xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '绑定失败';
+  } catch {
+    error.value = '绑定失败';
+    ElMessage.error(error.value);
   } finally {
     binding.value = false;
   }
@@ -241,7 +191,7 @@ async function updateCustomerNode() {
   updatingCustomerNode.value = true;
   error.value = '';
   try {
-    const result = await api<CustomerNodeMutationResult>(`/api/admin/customers/${nodeEditForm.customerId}/nodes/${nodeEditForm.customerNodeId}`, {
+    await api(`/api/admin/customers/${nodeEditForm.customerId}/nodes/${nodeEditForm.customerNodeId}`, {
       method: 'PATCH',
       body: {
         serviceNodeId: nodeEditForm.serviceNodeId,
@@ -250,12 +200,12 @@ async function updateCustomerNode() {
         trafficLimitGb: nodeEditForm.trafficLimitGb
       }
     });
-    ElMessage.success('绑定节点已更新，远端已有客户端已同步');
-    await showCustomerSyncResult(result.sync, '绑定更新结果');
+    ElMessage.success('更新成功');
     editNodeDialogVisible.value = false;
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '更新绑定节点失败';
+  } catch {
+    error.value = '更新失败';
+    ElMessage.error(error.value);
   } finally {
     updatingCustomerNode.value = false;
   }
@@ -278,8 +228,9 @@ async function adjustBalance() {
     balanceDialogVisible.value = false;
     Object.assign(balanceForm, { mode: 'add', amount: 0, remark: '' });
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '调整余额失败';
+  } catch {
+    error.value = '调整失败';
+    ElMessage.error(error.value);
   } finally {
     adjustingBalance.value = false;
   }
@@ -289,12 +240,12 @@ async function syncNode(customer: Customer, node: CustomerNode) {
   syncingIds.value = new Set(syncingIds.value).add(node.id);
   error.value = '';
   try {
-    const result = await api<CustomerNodeSyncResult>(`/api/admin/customers/${customer.id}/nodes/${node.id}/sync`, { method: 'POST' });
-    ElMessage.success(`已同步 ${node.serviceNode?.name || node.xuiEmail}`);
-    await showCustomerSyncResult(result, '手动同步结果');
+    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/sync`, { method: 'POST' });
+    ElMessage.success('同步成功');
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '同步失败';
+  } catch {
+    error.value = '同步失败';
+    ElMessage.error(error.value);
   } finally {
     const done = new Set(syncingIds.value);
     done.delete(node.id);
@@ -307,12 +258,12 @@ async function renewNode(customer: Customer, node: CustomerNode) {
   renewingIds.value = new Set(renewingIds.value).add(node.id);
   error.value = '';
   try {
-    const result = await api<RenewalResult>(`/api/admin/customers/${customer.id}/nodes/${node.id}/renew`, { method: 'POST', body: { months } });
-    ElMessage.success('续费成功，已同步远端');
-    await showCustomerSyncResult({ synced: true, action: result.sync?.action, route: result.sync?.route, detail: result.sync }, '续费同步结果');
+    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/renew`, { method: 'POST', body: { months } });
+    ElMessage.success('续费成功');
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '续费失败';
+  } catch {
+    error.value = '续费失败';
+    ElMessage.error(error.value);
   } finally {
     const done = new Set(renewingIds.value);
     done.delete(node.id);
@@ -327,16 +278,17 @@ async function showNodeTraffic(customer: Customer, node: CustomerNode) {
     const result = await api<{ traffic?: Record<string, unknown>; xuiEmail?: string }>(`/api/admin/customers/${customer.id}/nodes/${node.id}/traffic`);
     const traffic = result.traffic || {};
     await ElMessageBox.alert([
-      `Email: ${result.xuiEmail || node.xuiEmail}`,
-      `Enabled: ${traffic.enable ?? '-'}`,
-      `Upload: ${formatBytes(Number(traffic.up || 0))}`,
-      `Download: ${formatBytes(Number(traffic.down || 0))}`,
-      `Total: ${formatBytes(Number(traffic.total || 0))}`,
-      `Expiry: ${formatRemoteExpiry(traffic.expiryTime)}`,
-      `Last online: ${formatRemoteLastOnline(traffic.lastOnline)}`
+      `客户端：${result.xuiEmail || node.xuiEmail}`,
+      `启用状态：${traffic.enable ?? '-'}`,
+      `上传流量：${formatBytes(Number(traffic.up || 0))}`,
+      `下载流量：${formatBytes(Number(traffic.down || 0))}`,
+      `总流量：${formatBytes(Number(traffic.total || 0))}`,
+      `到期时间：${formatRemoteExpiry(traffic.expiryTime)}`,
+      `最近在线：${formatRemoteLastOnline(traffic.lastOnline)}`
     ].join('\n'), '3x-ui 客户端流量', { type: 'info', customClass: 'customer-dark-message-box' });
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取远端流量失败';
+  } catch {
+    error.value = '读取失败';
+    ElMessage.error(error.value);
   } finally {
     const next = new Set(trafficIds.value);
     next.delete(node.id);
@@ -352,8 +304,9 @@ async function resetNodeTraffic(customer: Customer, node: CustomerNode) {
     await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/reset-traffic`, { method: 'POST' });
     ElMessage.success('远端客户端流量已重置');
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '重置远端流量失败';
+  } catch {
+    error.value = '重置失败';
+    ElMessage.error(error.value);
   } finally {
     const next = new Set(resettingTrafficIds.value);
     next.delete(node.id);
@@ -377,12 +330,12 @@ async function deleteBoundServiceNode(customer: Customer, node: CustomerNode) {
   deletingServiceNodeIds.value = new Set(deletingServiceNodeIds.value).add(node.id);
   error.value = '';
   try {
-    const result = await api<DeleteServiceNodeResult>(`/api/admin/customers/${customer.id}/nodes/${node.id}/service-node`, { method: 'DELETE' });
-    ElMessage.success('服务节点和远端已删除');
-    await showDeleteResult(result);
+    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/service-node`, { method: 'DELETE' });
+    ElMessage.success('删除成功');
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '删除服务节点失败';
+  } catch {
+    error.value = '删除失败';
+    ElMessage.error(error.value);
   } finally {
     const next = new Set(deletingServiceNodeIds.value);
     next.delete(node.id);
@@ -402,66 +355,14 @@ async function revealEditingCustomerPassword() {
     }
     customerForm.loginPassword = result.loginPassword;
     ElMessage.success('已读取到登录密码输入框');
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取用户密码失败';
+  } catch {
+    error.value = '读取失败';
     ElMessage.error(error.value);
   } finally {
     const next = new Set(readingPasswordIds.value);
     next.delete(editingCustomerId.value);
     readingPasswordIds.value = next;
   }
-}
-
-async function showDeleteResult(result: DeleteServiceNodeResult) {
-  const remoteClient = result.remoteInboundCleanup?.remoteClientCleanup || result.remoteClientCleanup;
-  await ElMessageBox.alert([
-    cleanupStatusLine('远端出站/路由配置', result.remoteConfigCleanup),
-    cleanupStatusLine('远端入站', result.remoteInboundCleanup),
-    cleanupStatusLine('远端客户端', remoteClient),
-    result.deleted ? '本地路由节点和绑定：已清理' : '本地路由节点和绑定：未清理'
-  ].join('\n'), '删除结果', { type: 'success', customClass: 'customer-dark-message-box' });
-}
-
-function cleanupStatusLine(label: string, result?: CleanupResult) {
-  if (!result) return `${label}：没有返回结果`;
-  if (result.skipped) return `${label}：已跳过（${result.reason || result.message || '-'}）`;
-  if (result.synced) return `${label}：${result.action === 'removed' ? '已清理' : '已同步'}`;
-  if (result.deleted && result.alreadyAbsent) return `${label}：远端已不存在，按删除成功处理`;
-  if (result.deleted) return `${label}：已删除${result.verified?.retried ? '（复查后重试删除成功）' : ''}`;
-  if (result.message) return `${label}：失败（${result.message}）`;
-  return `${label}：已处理`;
-}
-
-async function showCustomerSyncResult(result: CustomerNodeSyncResult | undefined, title: string) {
-  if (!result) return;
-  const detail = result.detail || {};
-  const remoteConfig = result.remoteConfig || detail.remoteConfig;
-  const lines = [
-    `远端状态：${result.synced ? '已同步' : '未同步'}`,
-    `远端接口：${result.route || detail.route || '-'}`,
-    `执行动作：${result.action || detail.action || '-'}`,
-    `入站 ID：${detail.inboundId ?? '-'}`,
-    `客户端标识：${detail.xuiEmail || '-'}`,
-    `订阅 ID：${detail.subId || '-'}`,
-    `可用链接：${Array.isArray(detail.links) ? detail.links.length : 0} 条`
-  ];
-  if (remoteConfig !== undefined) {
-    lines.push(`出站规则：${formatRemoteConfigStatus(remoteConfig)}`);
-    if (remoteConfig?.outboundTag) lines.push(`出站 Tag：${remoteConfig.outboundTag}`);
-    if (remoteConfig?.inboundTag) lines.push(`入站 Tag：${remoteConfig.inboundTag}`);
-  }
-  await ElMessageBox.alert([
-    ...lines
-  ].join('\n'), title, { type: result.synced ? 'success' : 'warning', customClass: 'customer-dark-message-box' });
-}
-
-function formatRemoteConfigStatus(result: RemoteConfigSyncResult | null | undefined) {
-  if (result === undefined) return '未执行';
-  if (result === null) return '未执行';
-  if (!result.synced) return '未同步';
-  if (result.action === 'updated') return '已同步';
-  if (result.action === 'removed') return '已清理';
-  return '已处理';
 }
 
 function openCustomerDialog() {
@@ -534,8 +435,8 @@ async function removeCustomer(customer: Customer) {
     ElMessage.success('用户已删除');
     if (editingCustomerId.value === customer.id) resetCustomerForm();
     await loadCustomers();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '删除用户失败';
+  } catch {
+    error.value = '删除失败';
     ElMessage.error(error.value);
   } finally {
     const next = new Set(deletingCustomerIds.value);
@@ -561,9 +462,9 @@ async function toggleCustomerStatus(customer: Customer, enabled: boolean | strin
     await api(`/api/admin/customers/${customer.id}`, { method: 'PATCH', body: { status: nextStatus } });
     customer.status = nextStatus;
     ElMessage.success(nextStatus === 'active' ? '用户已启用' : '用户已禁用');
-  } catch (err) {
+  } catch {
     customer.status = previous;
-    error.value = err instanceof Error ? err.message : '更新用户状态失败';
+    error.value = '更新失败';
     ElMessage.error(error.value);
   } finally {
     const next = new Set(togglingCustomerIds.value);

@@ -48,8 +48,8 @@ async function loadNodes() {
   error.value = '';
   try {
     nodes.value = await api<UserNode[]>('/api/user/nodes');
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载节点失败';
+  } catch {
+    error.value = '加载失败';
     notifyError(error.value);
   } finally {
     loading.value = false;
@@ -63,11 +63,11 @@ async function renewNode(nodeId: string) {
   try {
     const months = monthsByNode.value[nodeId] || 1;
     await api('/api/user/renewals', { method: 'POST', body: { nodeId, months } });
-    message.value = '续费成功，节点已同步远端';
+    message.value = '续费成功';
     notifySuccess(message.value);
     await loadNodes();
-  } catch (err) {
-    const text = err instanceof Error ? err.message : '续费失败';
+  } catch {
+    const text = '续费失败';
     renewErrorDialog.value = { title: '续费失败', message: text };
     notifyError(text);
   } finally {
@@ -92,7 +92,7 @@ async function copyText(text: string) {
       message.value = '节点链接已复制';
       notifySuccess(message.value, '复制成功');
     } catch {
-      error.value = err instanceof Error ? err.message : '复制失败，请使用 HTTPS 访问后重试';
+      error.value = '复制失败';
       notifyError(error.value);
     }
   }
@@ -119,8 +119,8 @@ async function showQrCode(node: UserNode, link: string, index: number) {
       title: `${node.serviceNode.name} / 线路 ${index + 1}`,
       image: await QRCode.toDataURL(link, { width: 260, margin: 1 })
     };
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '生成二维码失败';
+  } catch {
+    error.value = '生成失败';
     notifyError(error.value);
   }
 }

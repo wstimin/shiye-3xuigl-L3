@@ -48,8 +48,8 @@ async function loadDashboard() {
     ]);
     dashboard.value = dashboardResult;
     nodes.value = nodeResult;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载用户概览失败';
+  } catch {
+    error.value = '加载失败';
   } finally {
     loading.value = false;
   }

@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { createConnection, type RowDataPacket } from 'mysql2/promise';
 import type { z } from 'zod';
 import { balanceLogListQuerySchema, rechargeOrderListQuerySchema } from '@shiye/shared';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -96,95 +97,175 @@ export class FinanceService {
   }
 
   async renewCustomerNode(customerId: string, customerNodeId: string, months: number, operator: string) {
-    const pending = await this.prisma.$transaction(async (tx) => {
-      const customerNode = await tx.customerNode.findFirst({
-        where: { id: customerNodeId, customerId },
-        include: { serviceNode: true, customer: true }
-      });
-      if (!customerNode) throw new NotFoundException('用户节点不存在');
+    return this.withRenewalLock(customerNodeId, async () => {
+      const pending = await this.prisma.$transaction(async (tx) => {
+        const customerNode = await tx.customerNode.findFirst({
+          where: { id: customerNodeId, customerId },
+          include: { serviceNode: true, customer: true }
+        });
+        if (!customerNode) throw new NotFoundException('用户节点不存在');
 
-      const priceMonthly = new Prisma.Decimal(customerNode.serviceNode.priceMonthly);
-      const amount = priceMonthly.mul(months);
-      const beforeBalance = new Prisma.Decimal(customerNode.customer.balance);
-      if (beforeBalance.lessThan(amount)) throw new BadRequestException('余额不足');
+        const priceMonthly = new Prisma.Decimal(customerNode.serviceNode.priceMonthly);
+        const amount = priceMonthly.mul(months);
+        const beforeBalance = new Prisma.Decimal(customerNode.customer.balance);
+        if (beforeBalance.lessThan(amount)) throw new BadRequestException('余额不足');
 
-      const now = new Date();
-      const beforeExpireAt = customerNode.expireAt;
-      const baseDate = beforeExpireAt && beforeExpireAt > now ? beforeExpireAt : now;
-      const afterExpireAt = addMonths(baseDate, months);
-      const debited = await tx.customer.updateMany({
-        where: { id: customerId, balance: { gte: amount } },
-        data: { balance: { decrement: amount } }
+        const now = new Date();
+        const beforeExpireAt = customerNode.expireAt;
+        const baseDate = beforeExpireAt && beforeExpireAt > now ? beforeExpireAt : now;
+        const afterExpireAt = addMonths(baseDate, months);
+        const debited = await tx.customer.updateMany({
+          where: { id: customerId, balance: { gte: amount } },
+          data: { balance: { decrement: amount } }
+        });
+        if (debited.count !== 1) throw new BadRequestException('余额不足');
+        const updatedCustomer = await tx.customer.findUnique({ where: { id: customerId }, select: { balance: true } });
+        if (!updatedCustomer) throw new NotFoundException('用户不存在');
+        const afterBalance = new Prisma.Decimal(updatedCustomer.balance);
+        const actualBeforeBalance = afterBalance.plus(amount);
+        const renewalLog = await tx.renewalLog.create({
+          data: {
+            customerId,
+            customerNodeId,
+            months,
+            amount,
+            status: 'pending',
+            beforeExpireAt,
+            afterExpireAt,
+            detail: toJsonValue({ operator, serviceNodeName: customerNode.serviceNode.name, serviceNodeId: customerNode.serviceNodeId })
+          }
+        });
+        const balanceLog = await tx.balanceLog.create({
+          data: {
+            customerId,
+            type: 'renewal',
+            amount: amount.negated(),
+            beforeBalance: actualBeforeBalance,
+            afterBalance,
+            operator,
+            remark: `续费 ${customerNode.serviceNode.name} ${months} 个月`,
+            detail: toJsonValue({ renewalLogId: renewalLog.id, customerNodeId, serviceNodeId: customerNode.serviceNodeId, months, syncStatus: 'pending' })
+          }
+        });
+
+        return { customerNode, amount, afterBalance, beforeExpireAt, afterExpireAt, renewalLog, balanceLog };
       });
-      if (debited.count !== 1) throw new BadRequestException('余额不足');
-      const updatedCustomer = await tx.customer.findUnique({ where: { id: customerId }, select: { balance: true } });
-      if (!updatedCustomer) throw new NotFoundException('用户不存在');
-      const afterBalance = new Prisma.Decimal(updatedCustomer.balance);
-      const actualBeforeBalance = afterBalance.plus(amount);
-      const renewalLog = await tx.renewalLog.create({
-        data: {
-          customerId,
-          customerNodeId,
-          months,
-          amount,
-          status: 'pending',
-          beforeExpireAt,
-          afterExpireAt,
-          detail: toJsonValue({ operator, serviceNodeName: customerNode.serviceNode.name, serviceNodeId: customerNode.serviceNodeId })
+
+      let syncResult: Awaited<ReturnType<XuiService['syncCustomerNode']>>;
+      try {
+        syncResult = await this.xui.syncCustomerNode(customerId, customerNodeId, {
+          expireAt: pending.afterExpireAt,
+          status: 'active',
+          createIfMissing: false,
+          requireExisting: true,
+          persistLocal: false
+        });
+      } catch (error) {
+        await this.refundOrMarkForReconciliation(customerId, pending, operator, error);
+        throw error;
+      }
+
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const localPatch = 'localPatch' in syncResult ? syncResult.localPatch : {};
+          const updatedNode = await tx.customerNode.update({
+            where: { id: customerNodeId },
+            data: { ...localPatch, expireAt: pending.afterExpireAt, status: 'active', lastSyncedAt: new Date() },
+            include: { serviceNode: { include: { server: true } } }
+          });
+          const renewalLog = await tx.renewalLog.update({
+            where: { id: pending.renewalLog.id },
+            data: {
+              status: 'success',
+              detail: toJsonValue({
+                operator,
+                serviceNodeName: pending.customerNode.serviceNode.name,
+                serviceNodeId: pending.customerNode.serviceNodeId,
+                balanceLogId: pending.balanceLog.id,
+                syncRoute: syncResult.route,
+                sync: syncResult.detail
+              })
+            }
+          });
+
+          return { node: updatedNode, renewalLog, amount: pending.amount, afterBalance: pending.afterBalance, sync: syncResult.detail };
+        });
+      } catch (localError) {
+        try {
+          await this.xui.syncCustomerNode(customerId, customerNodeId, {
+            expireAt: pending.beforeExpireAt,
+            status: pending.customerNode.status,
+            createIfMissing: false,
+            requireExisting: true,
+            persistLocal: false
+          });
+        } catch (rollbackError) {
+          await this.markRenewalForReconciliation(pending, operator, localError, rollbackError).catch(() => undefined);
+          throw new BadGatewayException(`续费已同步到 3x-ui，但本地保存和远端回滚都失败，需要人工核对：${errorMessage(rollbackError)}`);
         }
-      });
-      const balanceLog = await tx.balanceLog.create({
-        data: {
-          customerId,
-          type: 'renewal',
-          amount: amount.negated(),
-          beforeBalance: actualBeforeBalance,
-          afterBalance,
-          operator,
-          remark: `续费 ${customerNode.serviceNode.name} ${months} 个月`,
-          detail: toJsonValue({ renewalLogId: renewalLog.id, customerNodeId, serviceNodeId: customerNode.serviceNodeId, months, syncStatus: 'pending' })
-        }
-      });
-
-      return { customerNode, amount, beforeBalance, afterBalance, beforeExpireAt, afterExpireAt, renewalLog, balanceLog };
+        await this.refundOrMarkForReconciliation(customerId, pending, operator, localError);
+        throw localError;
+      }
     });
+  }
 
-    let syncResult: Awaited<ReturnType<XuiService['syncCustomerNode']>>;
+  private async withRenewalLock<T>(customerNodeId: string, operation: () => Promise<T>) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) throw new BadGatewayException('DATABASE_URL 未配置，无法执行续费锁');
+    const connection = await createConnection(databaseUrl);
+    const lockName = `shiye:renew:${customerNodeId}`.slice(0, 64);
+    let acquired = false;
     try {
-      syncResult = await this.xui.syncCustomerNode(customerId, customerNodeId, {
-        expireAt: pending.afterExpireAt,
-        status: 'active',
-        createIfMissing: false,
-        requireExisting: true
-      });
-    } catch (error) {
-      await this.refundFailedRenewal(customerId, pending, operator, error);
-      throw error;
+      const [rows] = await connection.query<RowDataPacket[]>('SELECT GET_LOCK(?, 30) AS acquired', [lockName]);
+      acquired = Number(rows[0]?.acquired) === 1;
+      if (!acquired) throw new BadRequestException('该节点正在续费，请稍后重试');
+      return await operation();
+    } finally {
+      if (acquired) await connection.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => undefined);
+      await connection.end().catch(() => undefined);
     }
+  }
 
-    return this.prisma.$transaction(async (tx) => {
-      const updatedNode = await tx.customerNode.update({
-        where: { id: customerNodeId },
-        data: { expireAt: pending.afterExpireAt, status: 'active', lastSyncedAt: new Date() },
-        include: { serviceNode: { include: { server: true } } }
-      });
-      const renewalLog = await tx.renewalLog.update({
+  private async markRenewalForReconciliation(pending: PendingRenewal, operator: string, localError: unknown, rollbackError: unknown) {
+    await this.prisma.$transaction([
+      this.prisma.renewalLog.update({
         where: { id: pending.renewalLog.id },
         data: {
-          status: 'success',
+          status: 'failed',
           detail: toJsonValue({
             operator,
             serviceNodeName: pending.customerNode.serviceNode.name,
             serviceNodeId: pending.customerNode.serviceNodeId,
             balanceLogId: pending.balanceLog.id,
-            syncRoute: syncResult.route,
-            sync: syncResult.detail
+            refunded: false,
+            reconciliationRequired: true,
+            localError: errorMessage(localError),
+            rollbackError: errorMessage(rollbackError)
           })
         }
-      });
+      }),
+      this.prisma.balanceLog.update({
+        where: { id: pending.balanceLog.id },
+        data: {
+          detail: toJsonValue({
+            renewalLogId: pending.renewalLog.id,
+            serviceNodeId: pending.customerNode.serviceNodeId,
+            syncStatus: 'reconciliation-required',
+            localError: errorMessage(localError),
+            rollbackError: errorMessage(rollbackError)
+          })
+        }
+      })
+    ]);
+  }
 
-      return { node: updatedNode, renewalLog, amount: pending.amount, afterBalance: pending.afterBalance, sync: syncResult.detail };
-    });
+  private async refundOrMarkForReconciliation(customerId: string, pending: PendingRenewal, operator: string, error: unknown) {
+    try {
+      await this.refundFailedRenewal(customerId, pending, operator, error);
+    } catch (refundError) {
+      await this.markRenewalForReconciliation(pending, operator, error, refundError).catch(() => undefined);
+      throw new BadGatewayException(`续费退款失败，需要人工核对：${errorMessage(refundError)}`);
+    }
   }
 
   private async refundFailedRenewal(customerId: string, pending: PendingRenewal, operator: string, error: unknown) {
@@ -230,7 +311,8 @@ type PendingRenewal = {
   amount: Prisma.Decimal;
   renewalLog: { id: string };
   balanceLog: { id: string };
-  customerNode: { serviceNode: { name: string }; serviceNodeId: string };
+  customerNode: { status: 'active' | 'disabled'; serviceNode: { name: string }; serviceNodeId: string };
+  beforeExpireAt: Date | null;
 };
 
 function addMonths(date: Date, months: number) {

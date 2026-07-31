@@ -105,8 +105,8 @@ async function login() {
     }
     user.value = session;
     Object.assign(loginForm, { username: '', password: '' });
-  } catch (err) {
-    loginError.value = err instanceof Error ? err.message : '登录失败';
+  } catch {
+    loginError.value = '登录失败';
   } finally {
     loggingIn.value = false;
   }
