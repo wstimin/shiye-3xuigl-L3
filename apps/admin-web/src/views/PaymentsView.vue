@@ -266,7 +266,7 @@ function channelBody() {
   };
 }
 
-function openChannelDialog(provider: PaymentProvider = 'alipay') {
+function openChannelDialog(provider: PaymentProvider) {
   resetChannelForm(provider);
   channelDialogVisible.value = true;
 }
@@ -361,7 +361,7 @@ async function copyText(value: string) {
   ElMessage.success('地址已复制');
 }
 
-function resetChannelForm(provider: PaymentProvider = 'alipay') {
+function resetChannelForm(provider: PaymentProvider = channelForm.provider) {
   editingChannelId.value = '';
   advancedSections.value = [];
   Object.assign(channelForm, {
@@ -589,8 +589,21 @@ onMounted(loadChannels);
         <div v-if="!channels.length && !loading" class="payment-console-empty">
           <span><CreditCard :size="23" /></span>
           <strong>还没有支付通道</strong>
-          <p>新增并完成商户配置后，用户即可使用在线充值。</p>
-          <el-button type="primary" @click="openChannelDialog('alipay')"><Plus :size="15" />新增首个通道</el-button>
+          <p>选择一种已实现的支付方式，填写真实商户配置后再启用。</p>
+          <div class="payment-empty-provider-grid">
+            <button
+              v-for="provider in providerCatalog"
+              :key="provider.value"
+              type="button"
+              class="payment-empty-provider"
+              :class="`provider-${provider.value}`"
+              @click="openChannelDialog(provider.value)"
+            >
+              <span><component :is="provider.icon" :size="18" /></span>
+              <strong>{{ provider.label }}</strong>
+              <small>{{ provider.description }}</small>
+            </button>
+          </div>
         </div>
       </div>
     </div>
