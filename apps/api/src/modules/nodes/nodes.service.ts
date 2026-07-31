@@ -8,6 +8,14 @@ import { XuiService } from '../xui/xui.service.js';
 
 type ServiceNodeConfig = {
   encryption?: string;
+  transport?: string;
+  tcpHeaderType?: string;
+  transportHost?: string;
+  transportPath?: string;
+  grpcServiceName?: string;
+  grpcAuthority?: string;
+  grpcMultiMode?: boolean;
+  xhttpMode?: string;
   socksRelayEnabled?: boolean;
   socksNodeId?: string | null;
   remoteMode?: 'create' | 'bind';
@@ -110,17 +118,29 @@ export class NodesService {
     let inboundId = input.inboundId || null;
     let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[] } | null = null;
     let remoteClient: { email?: string; uuid?: string; subId?: string } | null = null;
+    let remoteValidation: Awaited<ReturnType<XuiService['validateServiceNodeInbound']>> | null = null;
 
     if (remoteMode === 'bind') {
       if (!inboundId) throw new BadRequestException('绑定已有入站时必须填写入站 ID');
-      const validation = await this.xui.validateServiceNodeInbound(input.serverId, inboundId);
-      remoteClient = validation.remoteClient;
+      remoteValidation = await this.xui.validateServiceNodeInbound(input.serverId, inboundId);
+      this.assertShareLinkProtocol(remoteValidation.protocol);
+      this.assertTransportCompatibility(remoteValidation.protocol, remoteValidation.encryption, remoteValidation.transportConfig.transport);
+      remoteClient = remoteValidation.remoteClient;
     } else {
+      this.assertTransportCompatibility(input.protocol, input.encryption, input.transport);
       remoteCreated = await this.xui.createServiceNodeInbound({
         serverId: input.serverId,
         name: input.name,
         protocol: input.protocol,
         encryption: input.encryption,
+        transport: input.transport,
+        tcpHeaderType: input.tcpHeaderType,
+        transportHost: input.transportHost,
+        transportPath: input.transportPath,
+        grpcServiceName: input.grpcServiceName,
+        grpcAuthority: input.grpcAuthority,
+        grpcMultiMode: input.grpcMultiMode,
+        xhttpMode: input.xhttpMode,
         enabled: input.enabled,
         port: input.inboundPort,
         remark: input.name,
@@ -140,7 +160,17 @@ export class NodesService {
       remoteClientUuid: remoteCreated.remoteClientUuid,
       remoteClientSubId: remoteCreated.remoteClientSubId,
       remoteClientLinks: remoteCreated.links
-    } : { remoteMode, remoteManaged: false, remoteInboundPort: input.inboundPort, remoteClientEmail: remoteClient?.email, remoteClientUuid: remoteClient?.uuid, remoteClientSubId: remoteClient?.subId });
+    } : {
+      remoteMode,
+      remoteManaged: false,
+      remoteInboundPort: remoteValidation?.port || input.inboundPort,
+      remoteClientEmail: remoteClient?.email,
+      remoteClientUuid: remoteClient?.uuid,
+      remoteClientSubId: remoteClient?.subId,
+      encryption: remoteValidation?.encryption,
+      ...remoteValidation?.transportConfig
+    });
+    if (remoteValidation) Object.assign(config, { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig });
 
     try {
       const node = await this.prisma.serviceNode.create({
@@ -148,7 +178,7 @@ export class NodesService {
           serverId: input.serverId,
           name: input.name,
           inboundId,
-          protocol: input.protocol,
+          protocol: remoteValidation?.protocol || input.protocol,
           config: this.toJsonValue(config),
           priceMonthly: new Prisma.Decimal(input.priceMonthly),
           trafficLimitGb: new Prisma.Decimal(input.trafficLimitGb),
@@ -175,11 +205,14 @@ export class NodesService {
     let inboundId = input.inboundId === undefined ? current.inboundId : input.inboundId || null;
     let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[] } | null = null;
     let remoteClient: { email?: string; uuid?: string; subId?: string } | null = null;
+    let remoteValidation: Awaited<ReturnType<XuiService['validateServiceNodeInbound']>> | null = null;
     const nextName = input.name || current.name;
-    const nextProtocol = input.protocol || current.protocol;
-    const nextEncryption = input.encryption || previousConfig.encryption || 'none';
+    let nextProtocol = input.protocol || current.protocol;
+    let nextEncryption = input.encryption || previousConfig.encryption || 'none';
+    let nextTransport = input.transport || previousConfig.transport || 'tcp';
+    this.assertTransportCompatibility(nextProtocol, nextEncryption, nextTransport);
     const nextEnabled = input.enabled ?? current.enabled;
-    const nextRemotePort = input.inboundPort === undefined ? previousConfig.remoteInboundPort : input.inboundPort;
+    let nextRemotePort = input.inboundPort === undefined ? previousConfig.remoteInboundPort : input.inboundPort;
     const nextRemark = input.remark === undefined ? current.remark : input.remark || null;
     const nextRemoteRemark = nextName;
     const trafficLimitChanged = input.trafficLimitGb !== undefined && Number(input.trafficLimitGb) !== Number(current.trafficLimitGb);
@@ -190,16 +223,28 @@ export class NodesService {
 
     if (remoteMode === 'bind') {
       if (!inboundId) throw new BadRequestException('绑定已有入站时必须填写入站 ID');
-      if (input.serverId || input.inboundId !== undefined || !previousConfig.remoteClientEmail) {
-        const validation = await this.xui.validateServiceNodeInbound(nextServerId, inboundId);
-        remoteClient = validation.remoteClient;
-      }
+      remoteValidation = await this.xui.validateServiceNodeInbound(nextServerId, inboundId);
+      this.assertShareLinkProtocol(remoteValidation.protocol);
+      this.assertTransportCompatibility(remoteValidation.protocol, remoteValidation.encryption, remoteValidation.transportConfig.transport);
+      remoteClient = remoteValidation.remoteClient;
+      nextProtocol = remoteValidation.protocol;
+      nextEncryption = remoteValidation.encryption;
+      nextTransport = remoteValidation.transportConfig.transport;
+      nextRemotePort = remoteValidation.port || nextRemotePort;
     } else if (!inboundId) {
       remoteCreated = await this.xui.createServiceNodeInbound({
         serverId: nextServerId,
         name: nextName,
         protocol: nextProtocol,
         encryption: nextEncryption,
+        transport: nextTransport,
+        tcpHeaderType: input.tcpHeaderType || previousConfig.tcpHeaderType || 'none',
+        transportHost: input.transportHost === undefined ? previousConfig.transportHost : input.transportHost,
+        transportPath: input.transportPath === undefined ? previousConfig.transportPath : input.transportPath,
+        grpcServiceName: input.grpcServiceName === undefined ? previousConfig.grpcServiceName : input.grpcServiceName,
+        grpcAuthority: input.grpcAuthority === undefined ? previousConfig.grpcAuthority : input.grpcAuthority,
+        grpcMultiMode: input.grpcMultiMode === undefined ? previousConfig.grpcMultiMode : input.grpcMultiMode,
+        xhttpMode: input.xhttpMode || previousConfig.xhttpMode || 'auto',
         enabled: nextEnabled,
         port: input.inboundPort,
         remark: nextRemoteRemark,
@@ -223,12 +268,14 @@ export class NodesService {
       remoteMode,
       remoteManaged: remoteMode === 'create' ? Boolean(previousConfig.remoteManaged) : false,
       remoteInboundRemark: remoteMode === 'create' ? nextRemoteRemark : previousConfig.remoteInboundRemark,
-      remoteInboundPort: input.inboundPort === undefined ? previousConfig.remoteInboundPort : input.inboundPort,
+      remoteInboundPort: remoteValidation?.port || (input.inboundPort === undefined ? previousConfig.remoteInboundPort : input.inboundPort),
       remoteClientEmail: remoteClient?.email || previousConfig.remoteClientEmail,
       remoteClientUuid: remoteClient?.uuid || previousConfig.remoteClientUuid,
-      remoteClientSubId: remoteClient?.subId || previousConfig.remoteClientSubId
+      remoteClientSubId: remoteClient?.subId || previousConfig.remoteClientSubId,
+      ...(remoteValidation ? { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig } : {})
     };
     const config = await this.serviceNodeConfig(input, current.config, remotePatch);
+    if (remoteValidation) Object.assign(config, { encryption: remoteValidation.encryption, ...remoteValidation.transportConfig });
     try {
       const remoteInboundChanged = Boolean(
         (input.serverId !== undefined && nextServerId !== current.serverId) ||
@@ -236,6 +283,14 @@ export class NodesService {
         nextName !== current.name ||
         nextProtocol !== current.protocol ||
         nextEncryption !== (previousConfig.encryption || 'none') ||
+        nextTransport !== (previousConfig.transport || 'tcp') ||
+        (input.tcpHeaderType !== undefined && input.tcpHeaderType !== (previousConfig.tcpHeaderType || 'none')) ||
+        (input.transportHost !== undefined && input.transportHost !== (previousConfig.transportHost || '')) ||
+        (input.transportPath !== undefined && input.transportPath !== (previousConfig.transportPath || '')) ||
+        (input.grpcServiceName !== undefined && input.grpcServiceName !== (previousConfig.grpcServiceName || '')) ||
+        (input.grpcAuthority !== undefined && input.grpcAuthority !== (previousConfig.grpcAuthority || '')) ||
+        (input.grpcMultiMode !== undefined && input.grpcMultiMode !== Boolean(previousConfig.grpcMultiMode)) ||
+        (input.xhttpMode !== undefined && input.xhttpMode !== (previousConfig.xhttpMode || 'auto')) ||
         nextEnabled !== current.enabled ||
         (remoteMode === 'create' && previousConfig.remoteInboundRemark !== nextRemoteRemark) ||
         (input.inboundPort !== undefined && nextRemotePort !== previousConfig.remoteInboundPort)
@@ -250,6 +305,14 @@ export class NodesService {
         nextName === current.name &&
         nextProtocol === current.protocol &&
         nextEncryption === (previousConfig.encryption || 'none') &&
+        nextTransport === (previousConfig.transport || 'tcp') &&
+        (config.tcpHeaderType || 'none') === (previousConfig.tcpHeaderType || 'none') &&
+        (config.transportHost || '') === (previousConfig.transportHost || '') &&
+        (config.transportPath || '/') === (previousConfig.transportPath || '/') &&
+        (config.grpcServiceName || '') === (previousConfig.grpcServiceName || '') &&
+        (config.grpcAuthority || '') === (previousConfig.grpcAuthority || '') &&
+        Boolean(config.grpcMultiMode) === Boolean(previousConfig.grpcMultiMode) &&
+        (config.xhttpMode || 'auto') === (previousConfig.xhttpMode || 'auto') &&
         previousConfig.remoteInboundRemark === nextRemoteRemark &&
         nextRemark === current.remark &&
         (input.inboundPort === undefined || nextRemotePort === previousConfig.remoteInboundPort)
@@ -264,6 +327,14 @@ export class NodesService {
             name: nextName,
             protocol: nextProtocol,
             encryption: config.encryption || 'none',
+            transport: config.transport || 'tcp',
+            tcpHeaderType: config.tcpHeaderType,
+            transportHost: config.transportHost,
+            transportPath: config.transportPath,
+            grpcServiceName: config.grpcServiceName,
+            grpcAuthority: config.grpcAuthority,
+            grpcMultiMode: config.grpcMultiMode,
+            xhttpMode: config.xhttpMode,
             enabled: nextEnabled,
             port: nextRemotePort,
             remark: nextRemoteRemark
@@ -276,7 +347,7 @@ export class NodesService {
           serverId: input.serverId,
           name: input.name,
           inboundId,
-          protocol: input.protocol,
+          protocol: remoteValidation?.protocol || input.protocol,
           config: this.toJsonValue(config),
           priceMonthly: input.priceMonthly === undefined ? undefined : new Prisma.Decimal(input.priceMonthly),
           trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb),
@@ -662,12 +733,32 @@ export class NodesService {
     }
   }
 
+  private assertTransportCompatibility(protocol: string, encryption: string, transport: string) {
+    if (encryption === 'reality' && !['vless', 'trojan'].includes(protocol)) {
+      throw new BadRequestException('Reality 仅支持 VLESS 或 Trojan 节点');
+    }
+    if (encryption === 'reality' && transport !== 'tcp') {
+      throw new BadRequestException('Reality 节点当前仅支持 TCP 传输');
+    }
+    if (['shadowsocks', 'hysteria', 'hysteria2'].includes(protocol) && transport !== 'tcp') {
+      throw new BadRequestException(`${protocol} 节点当前仅支持默认传输配置`);
+    }
+  }
+
   private async serviceNodeConfig(input: Partial<z.infer<typeof serviceNodeUpsertSchema>>, current?: Prisma.JsonValue | null, remotePatch: Partial<ServiceNodeConfig> = {}): Promise<ServiceNodeConfig> {
     const previous = jsonObject(current) as ServiceNodeConfig;
     const next: ServiceNodeConfig = {
       ...previous,
       ...remotePatch,
       encryption: input.encryption === undefined ? previous.encryption || 'none' : input.encryption,
+      transport: input.transport === undefined ? previous.transport || 'tcp' : input.transport,
+      tcpHeaderType: input.tcpHeaderType === undefined ? previous.tcpHeaderType || 'none' : input.tcpHeaderType,
+      transportHost: input.transportHost === undefined ? previous.transportHost || '' : input.transportHost || '',
+      transportPath: input.transportPath === undefined ? previous.transportPath || '/' : input.transportPath || '/',
+      grpcServiceName: input.grpcServiceName === undefined ? previous.grpcServiceName || '' : input.grpcServiceName || '',
+      grpcAuthority: input.grpcAuthority === undefined ? previous.grpcAuthority || '' : input.grpcAuthority || '',
+      grpcMultiMode: input.grpcMultiMode === undefined ? Boolean(previous.grpcMultiMode) : input.grpcMultiMode,
+      xhttpMode: input.xhttpMode === undefined ? previous.xhttpMode || 'auto' : input.xhttpMode,
       socksRelayEnabled: input.socksRelayEnabled === undefined ? Boolean(previous.socksRelayEnabled) : input.socksRelayEnabled,
       socksNodeId: input.socksNodeId === undefined ? previous.socksNodeId || null : input.socksNodeId || null
     };

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   CheckCircle2,
@@ -31,6 +31,14 @@ type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean }
 type SocksNode = { id: string; name: string; host: string; port: number; enabled: boolean };
 type ServiceNodeConfig = {
   encryption?: string;
+  transport?: string;
+  tcpHeaderType?: string;
+  transportHost?: string;
+  transportPath?: string;
+  grpcServiceName?: string;
+  grpcAuthority?: string;
+  grpcMultiMode?: boolean;
+  xhttpMode?: string;
   socksRelayEnabled?: boolean;
   socksNodeId?: string | null;
   remoteMode?: 'create' | 'bind';
@@ -102,6 +110,19 @@ const encryptionOptions = [
   { label: 'TLS', value: 'tls' },
   { label: 'Reality', value: 'reality' }
 ];
+const transportOptions = [
+  { label: 'TCP', value: 'tcp' },
+  { label: 'WebSocket', value: 'ws' },
+  { label: 'gRPC', value: 'grpc' },
+  { label: 'HTTPUpgrade', value: 'httpupgrade' },
+  { label: 'XHTTP', value: 'xhttp' }
+];
+const xhttpModeOptions = [
+  { label: '自动', value: 'auto' },
+  { label: 'Packet Up', value: 'packet-up' },
+  { label: 'Stream Up', value: 'stream-up' },
+  { label: 'Stream One', value: 'stream-one' }
+];
 const regionDefinitions: RegionDefinition[] = [
   { value: 'hong-kong', label: '香港', keywords: ['香港', 'hong kong', 'hongkong'], codes: ['hk'] },
   { value: 'japan', label: '日本', keywords: ['日本', '东京', '大阪', 'japan', 'tokyo', 'osaka'], codes: ['jp'] },
@@ -142,6 +163,14 @@ const form = reactive({
   inboundPort: undefined as number | undefined,
   protocol: 'vless',
   encryption: 'none',
+  transport: 'tcp',
+  tcpHeaderType: 'none',
+  transportHost: '',
+  transportPath: '/',
+  grpcServiceName: '',
+  grpcAuthority: '',
+  grpcMultiMode: false,
+  xhttpMode: 'auto',
   priceMonthly: 0,
   trafficLimitGb: 0,
   enabled: true,
@@ -174,6 +203,25 @@ const filteredNodes = computed(() => {
 const hasActiveFilters = computed(() => Boolean(
   searchQuery.value.trim() || selectedServerId.value || selectedStatus.value || selectedProtocol.value || selectedRegion.value
 ));
+const selectableTransportOptions = computed(() => {
+  if (form.encryption === 'reality' || ['shadowsocks', 'hysteria'].includes(form.protocol)) {
+    return transportOptions.filter((item) => item.value === 'tcp');
+  }
+  return transportOptions;
+});
+const selectableEncryptionOptions = computed(() => {
+  if (['vless', 'trojan'].includes(form.protocol)) return encryptionOptions;
+  return encryptionOptions.filter((item) => item.value !== 'reality');
+});
+const transportNeedsHostPath = computed(() => ['ws', 'httpupgrade', 'xhttp'].includes(form.transport));
+const transportSummary = computed(() => {
+  if (form.transport === 'ws') return 'WebSocket 会把 Path 与 Host 同步到远端入站和分享链接。';
+  if (form.transport === 'grpc') return 'gRPC 会把 Service Name、Authority 与多路模式同步到远端。';
+  if (form.transport === 'httpupgrade') return 'HTTPUpgrade 会把 Path 与 Host 同步到远端入站和分享链接。';
+  if (form.transport === 'xhttp') return 'XHTTP 会把 Path、Host 与 Mode 同步到远端及分享链接。';
+  if (form.tcpHeaderType === 'http') return 'TCP HTTP 伪装会把 Host 与 Path 写入请求头配置。';
+  return 'TCP 无伪装使用 3x-ui 标准原始传输配置。';
+});
 
 async function loadNodes() {
   loading.value = true;
@@ -200,7 +248,19 @@ async function saveNode() {
   error.value = '';
   try {
     const path = editingId.value ? `/api/admin/service-nodes/${editingId.value}` : '/api/admin/service-nodes';
-    await api(path, { method: editingId.value ? 'PATCH' : 'POST', body: form });
+    const body = form.remoteMode === 'bind'
+      ? Object.fromEntries(Object.entries(form).filter(([key]) => ![
+        'transport',
+        'tcpHeaderType',
+        'transportHost',
+        'transportPath',
+        'grpcServiceName',
+        'grpcAuthority',
+        'grpcMultiMode',
+        'xhttpMode'
+      ].includes(key)))
+      : form;
+    await api(path, { method: editingId.value ? 'PATCH' : 'POST', body });
     ElMessage.success(editingId.value ? '路由节点已更新' : '路由节点已创建');
     dialogVisible.value = false;
     resetForm();
@@ -292,6 +352,14 @@ function editNode(node: ServiceNode) {
     inboundPort: config.remoteInboundPort ?? undefined,
     protocol: node.protocol || 'vless',
     encryption: config.encryption || 'none',
+    transport: config.transport || 'tcp',
+    tcpHeaderType: config.tcpHeaderType || 'none',
+    transportHost: config.transportHost || '',
+    transportPath: config.transportPath || '/',
+    grpcServiceName: config.grpcServiceName || '',
+    grpcAuthority: config.grpcAuthority || '',
+    grpcMultiMode: Boolean(config.grpcMultiMode),
+    xhttpMode: config.xhttpMode || 'auto',
     priceMonthly: Number(node.priceMonthly),
     trafficLimitGb: Number(node.trafficLimitGb),
     enabled: node.enabled,
@@ -439,6 +507,14 @@ function resetForm() {
     inboundPort: undefined,
     protocol: 'vless',
     encryption: 'none',
+    transport: 'tcp',
+    tcpHeaderType: 'none',
+    transportHost: '',
+    transportPath: '/',
+    grpcServiceName: '',
+    grpcAuthority: '',
+    grpcMultiMode: false,
+    xhttpMode: 'auto',
     priceMonthly: 0,
     trafficLimitGb: 0,
     enabled: true,
@@ -459,6 +535,16 @@ function remoteModeLabel(node: ServiceNode) {
 
 function protocolLabel(protocol: string) {
   return protocolOptions.find((item) => item.value === protocol)?.label || protocol.toUpperCase();
+}
+
+function transportLabel(transport?: string) {
+  const knownLabels: Record<string, string> = {
+    http: 'HTTP/2',
+    h2: 'HTTP/2',
+    kcp: 'mKCP',
+    quic: 'QUIC'
+  };
+  return transportOptions.find((item) => item.value === transport)?.label || knownLabels[String(transport || '').toLowerCase()] || String(transport || 'tcp').toUpperCase();
 }
 
 function protocolIcon(protocol: string) {
@@ -486,6 +572,8 @@ function nodeSearchText(node: ServiceNode) {
     node.protocol,
     protocolLabel(node.protocol),
     node.config?.encryption,
+    node.config?.transport,
+    transportLabel(node.config?.transport),
     remoteModeLabel(node),
     node.inboundId,
     node.config?.remoteInboundPort,
@@ -512,6 +600,19 @@ function removePendingId(source: Set<string>, id: string) {
 }
 
 onMounted(loadNodes);
+
+watch(() => form.protocol, (protocol) => {
+  if (!['vless', 'trojan'].includes(protocol) && form.encryption === 'reality') form.encryption = 'none';
+  if (['shadowsocks', 'hysteria'].includes(protocol)) form.transport = 'tcp';
+});
+
+watch(() => form.encryption, (encryption) => {
+  if (encryption === 'reality') form.transport = 'tcp';
+});
+
+watch(() => form.transport, () => {
+  if (!form.transportPath.trim()) form.transportPath = '/';
+});
 </script>
 
 <template>
@@ -578,7 +679,7 @@ onMounted(loadNodes);
             </span>
             <div>
               <strong :title="node.name">{{ node.name }}</strong>
-              <span>{{ protocolLabel(node.protocol) }} · {{ node.config?.encryption || 'none' }}</span>
+              <span>{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }} · {{ node.config?.encryption || 'none' }}</span>
             </div>
           </div>
           <span class="node-status-chip" :class="node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.enabled ? '已启用' : '已停用' }}</span>
@@ -604,6 +705,7 @@ onMounted(loadNodes);
 
         <div class="route-node-tags">
           <span v-if="nodeRegion(node)" class="route-node-tag region">{{ nodeRegion(node)?.label }}</span>
+          <span class="route-node-tag transport">{{ transportLabel(node.config?.transport) }}</span>
           <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
           <span class="route-node-tag">{{ remoteModeLabel(node) }}</span>
           <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
@@ -698,10 +800,49 @@ onMounted(loadNodes);
           </el-form-item>
           <el-form-item label="传输安全">
             <el-select v-model="form.encryption" style="width: 100%">
-              <el-option v-for="item in encryptionOptions" :key="item.value" :label="item.label" :value="item.value" />
+              <el-option v-for="item in selectableEncryptionOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
         </div>
+      </section>
+
+      <section class="node-dialog-section">
+        <header><strong>传输配置</strong><span>{{ form.remoteMode === 'bind' ? '绑定已有入站时，保存会读取并采用远端真实传输配置。' : '传输参数会直接写入 3x-ui 入站，并用于生成用户分享链接和二维码。' }}</span></header>
+        <template v-if="form.remoteMode === 'create'">
+          <div class="node-dialog-grid">
+            <el-form-item label="传输方式">
+              <el-select v-model="form.transport" style="width: 100%">
+                <el-option v-for="item in selectableTransportOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item v-if="form.transport === 'tcp'" label="TCP Header">
+              <el-select v-model="form.tcpHeaderType" style="width: 100%">
+                <el-option label="None" value="none" />
+                <el-option label="HTTP" value="http" />
+              </el-select>
+            </el-form-item>
+            <el-form-item v-if="transportNeedsHostPath || (form.transport === 'tcp' && form.tcpHeaderType === 'http')" label="Host">
+              <el-input v-model="form.transportHost" maxlength="255" placeholder="可留空；使用域名伪装时填写" />
+            </el-form-item>
+            <el-form-item v-if="transportNeedsHostPath || (form.transport === 'tcp' && form.tcpHeaderType === 'http')" label="Path">
+              <el-input v-model="form.transportPath" maxlength="500" placeholder="例如 /service" />
+            </el-form-item>
+            <el-form-item v-if="form.transport === 'grpc'" label="Service Name">
+              <el-input v-model="form.grpcServiceName" maxlength="255" placeholder="可留空，建议使用唯一服务名" />
+            </el-form-item>
+            <el-form-item v-if="form.transport === 'grpc'" label="Authority">
+              <el-input v-model="form.grpcAuthority" maxlength="255" placeholder="可留空；反向代理需要时填写" />
+            </el-form-item>
+            <el-form-item v-if="form.transport === 'grpc'" label="多路模式" class="node-switch-item"><el-switch v-model="form.grpcMultiMode" /></el-form-item>
+            <el-form-item v-if="form.transport === 'xhttp'" label="XHTTP Mode">
+              <el-select v-model="form.xhttpMode" style="width: 100%">
+                <el-option v-for="item in xhttpModeOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </div>
+          <div class="node-transport-note"><Network :size="15" /><span>{{ transportSummary }}</span></div>
+        </template>
+        <div v-else class="node-transport-note is-remote"><RefreshCw :size="15" /><span>系统会校验入站 ID，并读取远端协议、安全类型和传输参数；表单默认值不会覆盖远端配置。</span></div>
       </section>
 
       <section class="node-dialog-section">

@@ -24,6 +24,22 @@ export const serviceNodeEncryptionValues = [
 
 export const serviceNodeEncryptionSchema = z.enum(serviceNodeEncryptionValues);
 
+export const serviceNodeTransportValues = [
+  'tcp',
+  'ws',
+  'grpc',
+  'httpupgrade',
+  'xhttp'
+] as const;
+
+export const serviceNodeTransportSchema = z.enum(serviceNodeTransportValues);
+
+export const serviceNodeTcpHeaderValues = ['none', 'http'] as const;
+export const serviceNodeTcpHeaderSchema = z.enum(serviceNodeTcpHeaderValues);
+
+export const serviceNodeXhttpModeValues = ['auto', 'packet-up', 'stream-up', 'stream-one'] as const;
+export const serviceNodeXhttpModeSchema = z.enum(serviceNodeXhttpModeValues);
+
 export const xuiServerUpsertSchema = z.object({
   name: z.string().trim().min(1).max(100),
   baseUrl: z.string().url(),
@@ -51,6 +67,14 @@ export const serviceNodeUpsertSchema = z.object({
   inboundPort: z.coerce.number().int().min(1).max(65535).optional(),
   protocol: serviceNodeProtocolSchema.default('vless'),
   encryption: serviceNodeEncryptionSchema.default('none'),
+  transport: serviceNodeTransportSchema.default('tcp'),
+  tcpHeaderType: serviceNodeTcpHeaderSchema.default('none'),
+  transportHost: z.string().trim().max(255).optional().or(z.literal('')),
+  transportPath: z.string().trim().max(500).optional().or(z.literal('')),
+  grpcServiceName: z.string().trim().max(255).optional().or(z.literal('')),
+  grpcAuthority: z.string().trim().max(255).optional().or(z.literal('')),
+  grpcMultiMode: z.boolean().default(false),
+  xhttpMode: serviceNodeXhttpModeSchema.default('auto'),
   socksRelayEnabled: z.boolean().default(false),
   socksNodeId: z.string().trim().optional().or(z.literal('')),
   priceMonthly: z.coerce.number().finite().min(0).default(0),

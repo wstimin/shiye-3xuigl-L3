@@ -36,6 +36,14 @@ type SyncLogQuery = {
 
 type ServiceNodeConfig = {
   encryption?: string;
+  transport?: string;
+  tcpHeaderType?: string;
+  transportHost?: string;
+  transportPath?: string;
+  grpcServiceName?: string;
+  grpcAuthority?: string;
+  grpcMultiMode?: boolean;
+  xhttpMode?: string;
   socksRelayEnabled?: boolean;
   socksNodeId?: string | null;
   remoteSocksOutboundTag?: string;
@@ -56,6 +64,14 @@ type CreateServiceInboundInput = {
   name: string;
   protocol: string;
   encryption?: string;
+  transport?: string;
+  tcpHeaderType?: string;
+  transportHost?: string;
+  transportPath?: string;
+  grpcServiceName?: string;
+  grpcAuthority?: string;
+  grpcMultiMode?: boolean;
+  xhttpMode?: string;
   enabled: boolean;
   port?: number;
   remark?: string | null;
@@ -316,7 +332,7 @@ export class XuiService {
 
     const tag = this.serviceInboundTag();
     const serverConfig = { ...this.xuiObject(server.config), baseUrl: server.baseUrl };
-    const streamSettings = await this.defaultStreamSettings(client, input.encryption || 'none', serverConfig);
+    const streamSettings = await this.defaultStreamSettings(client, input.encryption || 'none', serverConfig, input);
     const payload = this.buildInboundPayload({ ...input, port, tag, streamSettings });
     const response = await client.addInbound(payload);
     this.assertXuiSuccess(response);
@@ -399,7 +415,17 @@ export class XuiService {
     const inbound = this.remoteInboundFromPayload(payload);
     const remoteClient = this.firstInboundClientIdentity(inbound);
     if (!remoteClient.email && !remoteClient.uuid && !remoteClient.subId) throw new BadRequestException('This 3x-ui inbound has no client. Create a client in 3x-ui first, or use automatic service-node creation.');
-    return { inboundId, valid: true, remoteClient };
+    const streamSettings = this.xuiObject(this.parseMaybeJson(inbound.streamSettings));
+    return {
+      inboundId,
+      valid: true,
+      remoteClient,
+      protocol: String(inbound.protocol || 'vless').trim() || 'vless',
+      encryption: String(streamSettings.security || 'none').trim() || 'none',
+      enabled: this.booleanValue(inbound.enable, true),
+      port: this.positiveInteger(inbound.port),
+      transportConfig: this.transportConfigFromStream(streamSettings)
+    };
   }
 
   async updateServiceNodeInbound(input: UpdateServiceInboundInput) {
@@ -417,9 +443,22 @@ export class XuiService {
     const currentStreamSettings = this.xuiObject(this.parseMaybeJson(currentInbound.streamSettings));
     const currentSecurity = String(currentStreamSettings.security || 'none').trim() || 'none';
     const nextSecurity = input.encryption || 'none';
-    const streamSettings = currentSecurity === nextSecurity
+    const currentTransport = this.transportConfigFromStream(currentStreamSettings);
+    const requestedTransport = String(input.transport || 'tcp').trim().toLowerCase() || 'tcp';
+    const selectableTransport = ['tcp', 'ws', 'grpc', 'httpupgrade', 'xhttp'].includes(requestedTransport);
+    if (!selectableTransport && requestedTransport !== currentTransport.transport) {
+      throw new BadRequestException(`Transport ${requestedTransport} can only be preserved from an existing 3x-ui inbound`);
+    }
+    if (!selectableTransport && currentSecurity !== nextSecurity) {
+      throw new BadRequestException(`Transport ${requestedTransport} does not support changing security from this panel`);
+    }
+    const nextTransport = this.normalizeTransportConfig(input);
+    const transportUnchanged = requestedTransport === currentTransport.transport && (
+      !selectableTransport || this.sameTransportConfig(currentTransport, nextTransport)
+    );
+    const streamSettings = currentSecurity === nextSecurity && transportUnchanged
       ? currentStreamSettings
-      : await this.defaultStreamSettings(client, nextSecurity, serverConfig);
+      : await this.defaultStreamSettings(client, nextSecurity, serverConfig, nextTransport);
     const currentSettings = this.xuiObject(this.parseMaybeJson(currentInbound.settings));
     const port = input.port || this.positiveInteger(currentInbound.port);
     if (!port) throw new BadRequestException('3x-ui inbound is missing a valid port');
@@ -752,6 +791,7 @@ export class XuiService {
           remoteClientSubId: remoteClient.subId || previousConfig.remoteClientSubId || undefined,
           remoteClientLinks,
           encryption: String(streamSettings.security || previousConfig.encryption || 'none'),
+          ...this.transportConfigFromStream(streamSettings),
           importedFromRemote: existing ? Boolean(previousConfig.importedFromRemote) : true
         };
 
@@ -1350,11 +1390,14 @@ export class XuiService {
     return next;
   }
 
-  private async defaultStreamSettings(client: XuiClient, security: string, serverConfig: Record<string, unknown> = {}) {
-    const base: Record<string, unknown> = {
-      network: 'tcp',
-      tcpSettings: { acceptProxyProtocol: false, header: { type: 'none' } }
-    };
+  private async defaultStreamSettings(
+    client: XuiClient,
+    security: string,
+    serverConfig: Record<string, unknown> = {},
+    transportInput: Partial<CreateServiceInboundInput> = {}
+  ) {
+    const transport = this.normalizeTransportConfig(transportInput);
+    const base = this.transportStreamSettings(transport);
     if (security === 'tls') {
       const certFiles = await this.resolveTlsCertFiles(client, serverConfig);
       const serverName = String(serverConfig.tlsServerName || '').trim();
@@ -1404,6 +1447,141 @@ export class XuiService {
       };
     }
     return { ...base, security: 'none' };
+  }
+
+  private normalizeTransportConfig(input: Partial<CreateServiceInboundInput> | ServiceNodeConfig) {
+    const transport = ['tcp', 'ws', 'grpc', 'httpupgrade', 'xhttp'].includes(String(input.transport || '').toLowerCase())
+      ? String(input.transport).toLowerCase()
+      : 'tcp';
+    return {
+      transport,
+      tcpHeaderType: input.tcpHeaderType === 'http' ? 'http' : 'none',
+      transportHost: String(input.transportHost || '').trim(),
+      transportPath: this.normalizeTransportPath(input.transportPath),
+      grpcServiceName: String(input.grpcServiceName || '').trim(),
+      grpcAuthority: String(input.grpcAuthority || '').trim(),
+      grpcMultiMode: Boolean(input.grpcMultiMode),
+      xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(input.xhttpMode || '')) ? String(input.xhttpMode) : 'auto'
+    };
+  }
+
+  private transportStreamSettings(input: ReturnType<XuiService['normalizeTransportConfig']>): Record<string, unknown> {
+    if (input.transport === 'ws') {
+      return {
+        network: 'ws',
+        wsSettings: {
+          acceptProxyProtocol: false,
+          path: input.transportPath,
+          host: input.transportHost,
+          headers: {},
+          heartbeatPeriod: 0
+        }
+      };
+    }
+    if (input.transport === 'grpc') {
+      return {
+        network: 'grpc',
+        grpcSettings: {
+          serviceName: input.grpcServiceName,
+          authority: input.grpcAuthority,
+          multiMode: input.grpcMultiMode
+        }
+      };
+    }
+    if (input.transport === 'httpupgrade') {
+      return {
+        network: 'httpupgrade',
+        httpupgradeSettings: {
+          acceptProxyProtocol: false,
+          path: input.transportPath,
+          host: input.transportHost,
+          headers: {}
+        }
+      };
+    }
+    if (input.transport === 'xhttp') {
+      return {
+        network: 'xhttp',
+        xhttpSettings: {
+          path: input.transportPath,
+          host: input.transportHost,
+          mode: input.xhttpMode,
+          xPaddingBytes: '100-1000',
+          xPaddingObfsMode: false,
+          xPaddingKey: '',
+          xPaddingHeader: '',
+          xPaddingPlacement: '',
+          xPaddingMethod: '',
+          sessionPlacement: '',
+          sessionKey: '',
+          seqPlacement: '',
+          seqKey: '',
+          uplinkDataPlacement: '',
+          uplinkDataKey: '',
+          scMaxEachPostBytes: '1000000',
+          noSSEHeader: false,
+          scMaxBufferedPosts: 30,
+          scStreamUpServerSecs: '20-80',
+          serverMaxHeaderBytes: 0,
+          headers: {}
+        }
+      };
+    }
+    const header = input.tcpHeaderType === 'http'
+      ? {
+        type: 'http',
+        request: {
+          version: '1.1',
+          method: 'GET',
+          path: [input.transportPath],
+          headers: input.transportHost ? { Host: [input.transportHost] } : {}
+        },
+        response: { version: '1.1', status: '200', reason: 'OK', headers: {} }
+      }
+      : { type: 'none' };
+    return { network: 'tcp', tcpSettings: { acceptProxyProtocol: false, header } };
+  }
+
+  private transportConfigFromStream(streamSettings: Record<string, unknown>) {
+    const transport = this.shareTransport(streamSettings);
+    return {
+      transport: transport.network,
+      tcpHeaderType: transport.network === 'tcp' && transport.headerType === 'http' ? 'http' : 'none',
+      transportHost: transport.host || '',
+      transportPath: transport.path || '/',
+      grpcServiceName: transport.serviceName || '',
+      grpcAuthority: transport.authority || '',
+      grpcMultiMode: transport.mode === 'multi',
+      xhttpMode: transport.network === 'xhttp' && transport.mode && ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(transport.mode) ? transport.mode : 'auto'
+    };
+  }
+
+  private sameTransportConfig(left: ReturnType<XuiService['normalizeTransportConfig']>, right: ReturnType<XuiService['normalizeTransportConfig']>) {
+    if (left.transport !== right.transport) return false;
+    if (left.transport === 'tcp') {
+      if (left.tcpHeaderType !== right.tcpHeaderType) return false;
+      return left.tcpHeaderType !== 'http' || (
+        left.transportHost === right.transportHost &&
+        left.transportPath === right.transportPath
+      );
+    }
+    if (left.transport === 'grpc') {
+      return left.grpcServiceName === right.grpcServiceName &&
+        left.grpcAuthority === right.grpcAuthority &&
+        left.grpcMultiMode === right.grpcMultiMode;
+    }
+    if (left.transport === 'xhttp') {
+      return left.transportHost === right.transportHost &&
+        left.transportPath === right.transportPath &&
+        left.xhttpMode === right.xhttpMode;
+    }
+    return left.transportHost === right.transportHost && left.transportPath === right.transportPath;
+  }
+
+  private normalizeTransportPath(value: unknown) {
+    const path = String(value || '').trim();
+    if (!path) return '/';
+    return path.startsWith('/') ? path : `/${path}`;
   }
 
   private async resolveWebCertFiles(client: XuiClient) {
