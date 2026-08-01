@@ -312,7 +312,6 @@ onMounted(loadFinance);
       <el-button :loading="loading" @click="loadFinance()"><RefreshCw :size="15" />刷新</el-button>
     </div>
   </div>
-  <el-alert v-if="!paymentChannels.some((item) => item.enabled)" class="page-alert" title="尚未启用在线支付方式；用户仍可使用卡密兑换，管理员也可手工调整余额。" type="warning" show-icon :closable="false" />
   <el-alert v-if="error" class="page-alert" :title="error" type="error" show-icon :closable="false" />
 
   <div class="metric-grid operations-stat-grid">

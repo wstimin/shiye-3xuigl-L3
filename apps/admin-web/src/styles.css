@@ -7196,6 +7196,53 @@ input:-webkit-autofill:active {
   backdrop-filter: blur(2px);
 }
 
+/* Lazy Element Plus styles load after the shell CSS; keep desktop filters compact. */
+@media (min-width: 601px) {
+  .overview-shell :is(.customer-search-field, .node-search-field, .xui-search-field, .socks-search-field) {
+    min-width: 240px;
+    flex: 1 1 320px;
+  }
+
+  .overview-shell .customer-filter-select {
+    --el-select-width: 136px;
+    width: 136px;
+    flex: 0 0 136px;
+  }
+
+  .overview-shell .customer-balance-filter {
+    width: 142px;
+    flex: 0 0 142px;
+  }
+
+  .overview-shell .node-filter-select {
+    --el-select-width: 126px;
+    width: 126px;
+    flex: 0 0 126px;
+  }
+
+  .overview-shell .node-server-filter {
+    --el-select-width: 168px;
+    width: 168px;
+    flex-basis: 168px;
+  }
+
+  .overview-shell .xui-filter-select {
+    --el-select-width: 160px;
+    width: 160px;
+    flex: 0 0 160px;
+  }
+
+  .overview-shell .socks-filter-select {
+    --el-select-width: 140px;
+    width: 140px;
+    flex: 0 0 140px;
+  }
+
+  .overview-shell :is(.customer-filter-panel, .node-filter-panel, .xui-filter-panel, .socks-filter-panel) > .el-button {
+    flex: 0 0 auto;
+  }
+}
+
 @media (max-width: 760px) {
   .overview-shell .el-main::before {
     left: 0;

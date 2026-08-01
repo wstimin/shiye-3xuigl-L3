@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const adminStyles = readFileSync('apps/admin-web/src/styles.css', 'utf8');
 const userStyles = readFileSync('apps/user-web/src/styles.css', 'utf8');
+const financeView = readFileSync('apps/admin-web/src/views/FinanceView.vue', 'utf8');
 
 test('runtime-generated UI classes keep their visual rules', () => {
   for (const selector of [
@@ -43,4 +44,21 @@ test('retired UI layers stay removed', () => {
   for (const selector of ['.app-shell', '.header-brand', '.quick-link-grid', '.profile-panel']) {
     assert.equal(userStyles.includes(selector), false, 'Retired user selector returned: ' + selector);
   }
+});
+
+test('lazy Element Plus styles cannot expand desktop management filters', () => {
+  for (const selector of [
+    '.overview-shell .customer-filter-select',
+    '.overview-shell .customer-balance-filter',
+    '.overview-shell .node-filter-select',
+    '.overview-shell .node-server-filter',
+    '.overview-shell .xui-filter-select',
+    '.overview-shell .socks-filter-select'
+  ]) {
+    assert.equal(adminStyles.includes(selector), true, 'Missing compact filter rule: ' + selector);
+  }
+
+  assert.equal(adminStyles.includes('--el-select-width: 136px'), true);
+  assert.equal(adminStyles.includes('--el-select-width: 168px'), true);
+  assert.equal(financeView.includes('尚未启用在线支付方式；用户仍可使用卡密兑换，管理员也可手工调整余额。'), false);
 });
