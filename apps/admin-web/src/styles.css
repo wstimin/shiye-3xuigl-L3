@@ -1706,6 +1706,27 @@ input:-webkit-autofill:active {
 .xui-dialog-full { grid-column: 1 / -1; }
 .xui-switch-item .el-form-item__content { min-height: 36px; display: flex; align-items: center; }
 .xui-dark-dialog .el-switch { --el-switch-on-color: #6366f1; --el-switch-off-color: rgb(255 255 255 / 12%); }
+.xui-connection-grid {
+  grid-template-columns: 138px minmax(0, 1fr) 138px;
+  column-gap: 16px;
+}
+.xui-connection-name { grid-column: 1 / 3; }
+.xui-connection-remark { grid-column: 3; }
+.xui-connection-protocol { grid-column: 1; }
+.xui-connection-host { grid-column: 2; }
+.xui-connection-port { grid-column: 3; }
+.xui-connection-path { grid-column: 1 / 3; }
+.xui-connection-enabled { grid-column: 3; }
+.xui-connection-grid .el-form-item__label::before { color: #fb7185 !important; }
+.xui-connection-grid .el-input-number .el-input__wrapper { width: 100%; }
+.xui-enabled-control {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #7f8b9d;
+  font-size: 11px;
+}
 .xui-clear-secret { display: flex; margin-top: 7px; color: #94a3b8; }
 .xui-clear-secret .el-checkbox__label { color: #94a3b8; font-size: 11px; }
 .xui-dark-message-box .el-message-box__content { color: #cbd5e1; white-space: pre-line; }
@@ -2273,6 +2294,8 @@ input:-webkit-autofill:active {
   .xui-dark-dialog .el-dialog__body { padding: 16px; }
   .xui-dark-dialog .el-dialog__header, .xui-dark-dialog .el-dialog__footer { padding-inline: 16px; }
   .xui-dialog-grid { grid-template-columns: 1fr; }
+  .xui-connection-grid { grid-template-columns: 1fr; }
+  .xui-connection-grid > .el-form-item { grid-column: 1; }
   .xui-dialog-full { grid-column: auto; }
   .socks-management-page { gap: 14px; }
   .socks-page-header h1 { font-size: 18px; }

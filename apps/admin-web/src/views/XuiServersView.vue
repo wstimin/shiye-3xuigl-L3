@@ -74,8 +74,10 @@ const clearPassword = ref(false);
 const clearToken = ref(false);
 const form = reactive({
   name: '',
-  baseUrl: '',
-  basePath: '',
+  protocol: 'https' as 'http' | 'https',
+  host: '',
+  port: 2053,
+  basePath: '/',
   shareHost: '',
   username: '',
   password: '',
@@ -94,6 +96,7 @@ const form = reactive({
 const enabledServerCount = computed(() => servers.value.filter((server) => server.enabled).length);
 const passwordServerCount = computed(() => servers.value.filter((server) => server.hasPassword).length);
 const tokenServerCount = computed(() => servers.value.filter((server) => server.hasToken).length);
+const baseConnectionReady = computed(() => Boolean(form.name.trim() && form.host.trim() && form.port >= 1 && form.port <= 65535));
 const hasActiveFilters = computed(() => Boolean(searchQuery.value.trim() || selectedStatus.value || selectedCredential.value));
 const filteredServers = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase();
@@ -310,13 +313,16 @@ function openDialog() {
 }
 
 function editServer(server: XuiServer) {
+  const connection = splitServerBaseUrl(server.baseUrl);
   editingId.value = server.id;
   clearPassword.value = false;
   clearToken.value = false;
   Object.assign(form, {
     name: server.name,
-    baseUrl: server.baseUrl,
-    basePath: server.basePath || '',
+    protocol: connection.protocol,
+    host: connection.host,
+    port: connection.port,
+    basePath: normalizeBasePathForForm(server.basePath),
     shareHost: server.config?.shareHost || '',
     username: server.username || '',
     password: '',
@@ -431,8 +437,10 @@ function resetForm() {
   clearToken.value = false;
   Object.assign(form, {
     name: '',
-    baseUrl: '',
-    basePath: '',
+    protocol: 'https',
+    host: '',
+    port: 2053,
+    basePath: '/',
     shareHost: '',
     username: '',
     password: '',
@@ -452,8 +460,8 @@ function resetForm() {
 function cleanFormBody() {
   const body = {
     name: form.name.trim(),
-    baseUrl: form.baseUrl.trim(),
-    basePath: form.basePath.trim() || undefined,
+    baseUrl: buildServerBaseUrl(),
+    basePath: normalizeBasePathForApi(form.basePath),
     username: form.username.trim() || undefined,
     password: clearPassword.value ? '' : form.password || undefined,
     token: clearToken.value ? '' : form.token || undefined,
@@ -469,6 +477,35 @@ function cleanFormBody() {
     remark: form.remark.trim() || undefined
   };
   return body;
+}
+
+function buildServerBaseUrl() {
+  const rawHost = form.host.trim();
+  const normalizedHost = rawHost.includes(':') && !rawHost.startsWith('[') && !rawHost.endsWith(']') ? '[' + rawHost + ']' : rawHost;
+  return form.protocol + '://' + normalizedHost + ':' + form.port;
+}
+
+function splitServerBaseUrl(baseUrl: string) {
+  try {
+    const parsed = new URL(baseUrl);
+    const protocol: 'http' | 'https' = parsed.protocol === 'http:' ? 'http' : 'https';
+    const defaultPort = protocol === 'https' ? 443 : 80;
+    return { protocol, host: parsed.hostname, port: Number(parsed.port || defaultPort) };
+  } catch {
+    return { protocol: 'https' as const, host: baseUrl.replace(/^https?:\/\//i, '').split('/')[0] || '', port: 2053 };
+  }
+}
+
+function normalizeBasePathForForm(basePath?: string | null) {
+  const value = String(basePath || '').trim();
+  if (!value || value === '/') return '/';
+  return '/' + value.replace(/^\/+|\/+$/g, '');
+}
+
+function normalizeBasePathForApi(basePath: string) {
+  const value = basePath.trim();
+  if (!value || value === '/') return undefined;
+  return value.replace(/^\/+|\/+$/g, '');
 }
 
 function connectionStatus(server: XuiServer) {
@@ -732,12 +769,22 @@ onMounted(loadServers);
 
     <el-form :model="form" label-position="top" class="xui-dialog-form">
       <section class="xui-dialog-section">
-        <header><strong>基础连接</strong><span>面板名称、完整 URL、Web 基础路径和启用状态</span></header>
-        <div class="xui-dialog-grid">
-          <el-form-item label="面板名称"><el-input v-model="form.name" maxlength="100" placeholder="输入面板名称" /></el-form-item>
-          <el-form-item label="面板地址"><el-input v-model="form.baseUrl" placeholder="https://xui.example.com" /></el-form-item>
-          <el-form-item label="基础路径"><el-input v-model="form.basePath" maxlength="120" placeholder="根路径留空，例如 /panel" /></el-form-item>
-          <el-form-item label="启用连接" class="xui-switch-item"><el-switch v-model="form.enabled" /></el-form-item>
+        <header><strong>连接设置</strong><span>填写远程面板地址与 API 令牌，现有接口字段保持不变</span></header>
+        <div class="xui-dialog-grid xui-connection-grid">
+          <el-form-item label="名称" class="xui-connection-name" required><el-input v-model="form.name" maxlength="100" placeholder="例如：de-frankfurt-1" /></el-form-item>
+          <el-form-item label="备注" class="xui-connection-remark"><el-input v-model="form.remark" maxlength="500" placeholder="可选" /></el-form-item>
+          <el-form-item label="协议" class="xui-connection-protocol">
+            <el-select v-model="form.protocol" style="width: 100%">
+              <el-option label="https" value="https" />
+              <el-option label="http" value="http" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="地址" class="xui-connection-host" required><el-input v-model="form.host" maxlength="255" placeholder="panel.example.com 或 1.2.3.4" /></el-form-item>
+          <el-form-item label="端口" class="xui-connection-port" required><el-input-number v-model="form.port" :min="1" :max="65535" :controls="false" style="width: 100%" /></el-form-item>
+          <el-form-item label="基础路径" class="xui-connection-path"><el-input v-model="form.basePath" maxlength="120" placeholder="/" /></el-form-item>
+          <el-form-item label="已启用" class="xui-switch-item xui-connection-enabled">
+            <div class="xui-enabled-control"><el-switch v-model="form.enabled" /><span>保存后启用</span></div>
+          </el-form-item>
         </div>
       </section>
 
@@ -773,7 +820,7 @@ onMounted(loadServers);
           <el-form-item label="证书文件"><el-input v-model="form.tlsCertFile" maxlength="500" placeholder="例如 /root/cert/fullchain.pem" /></el-form-item>
           <el-form-item label="私钥文件"><el-input v-model="form.tlsKeyFile" maxlength="500" placeholder="例如 /root/cert/privkey.pem" /></el-form-item>
           <el-form-item label="从面板读取" class="xui-dialog-full">
-            <el-button class="xui-secondary-button" :loading="testingCertForm" :disabled="!form.name || !form.baseUrl" @click="testFormCerts"><FileKey2 :size="15" />读取 3x-ui 证书配置</el-button>
+            <el-button class="xui-secondary-button" :loading="testingCertForm" :disabled="!baseConnectionReady" @click="testFormCerts"><FileKey2 :size="15" />读取 3x-ui 证书配置</el-button>
           </el-form-item>
         </div>
       </section>
@@ -788,18 +835,12 @@ onMounted(loadServers);
         </div>
       </section>
 
-      <section class="xui-dialog-section xui-dialog-section-last">
-        <header><strong>备注</strong><span>记录连接用途、机房或维护信息</span></header>
-        <div class="xui-dialog-grid">
-          <el-form-item label="备注" class="xui-dialog-full"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="500" placeholder="输入面板连接备注" /></el-form-item>
-        </div>
-      </section>
     </el-form>
 
     <template #footer>
-      <el-button class="xui-secondary-button" :loading="testingForm" :disabled="!form.name || !form.baseUrl" @click="testForm"><Wifi :size="15" />测试连接</el-button>
+      <el-button class="xui-secondary-button" :loading="testingForm" :disabled="!baseConnectionReady" @click="testForm"><Wifi :size="15" />测试连接</el-button>
       <el-button class="xui-secondary-button" @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!form.name.trim() || !form.baseUrl.trim()" @click="saveServer">{{ editingId ? '保存修改' : '添加面板' }}</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!baseConnectionReady" @click="saveServer">{{ editingId ? '保存修改' : '添加面板' }}</el-button>
     </template>
   </el-dialog>
 </template>
