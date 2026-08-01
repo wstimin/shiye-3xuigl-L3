@@ -7,6 +7,22 @@
     <style>
       html, body, #app { min-height: 100%; background: #08090c; }
     </style>
+    <script>
+      (() => {
+        const key = 'shiye:asset-recovery';
+        const recover = () => {
+          const last = Number(sessionStorage.getItem(key) || 0);
+          if (Date.now() - last < 30000) return;
+          sessionStorage.setItem(key, String(Date.now()));
+          window.location.reload();
+        };
+        window.addEventListener('error', (event) => {
+          const target = event.target;
+          const source = target && ('src' in target ? target.src : 'href' in target ? target.href : '');
+          if (source && /\/assets\//.test(source)) recover();
+        }, true);
+      })();
+    </script>
     <title>十夜管理后台</title>
   </head>
   <body>

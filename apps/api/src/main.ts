@@ -9,6 +9,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './modules/app.module.js';
 import { HttpExceptionFilter } from './shared/http-exception.filter.js';
 import { ResponseInterceptor } from './shared/response.interceptor.js';
+import { setHtmlNoStore, setStaticAssetHeaders } from './web-cache.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true, bodyParser: false });
@@ -33,10 +34,11 @@ function serveWebApps(server: express.Express) {
   const rootDir = findRuntimeRoot();
   const userWebDir = join(rootDir, 'dist/user-web');
   const adminWebDir = join(rootDir, 'dist/admin-web');
-  const adminStatic = express.static(adminWebDir, { index: false });
+  const staticOptions = { index: false, setHeaders: setStaticAssetHeaders };
+  const adminStatic = express.static(adminWebDir, staticOptions);
 
   if (existsSync(userWebDir)) {
-    server.use(express.static(userWebDir, { index: false }));
+    server.use(express.static(userWebDir, staticOptions));
   }
 
   if (existsSync(adminWebDir)) {
@@ -64,12 +66,14 @@ function serveWebApps(server: express.Express) {
     }
     const indexFile = join(adminWebDir, 'index.html');
     if (!existsSync(indexFile)) return next();
+    setHtmlNoStore(response);
     return response.type('html').send(renderAdminIndex(indexFile, adminPath));
   });
 
   server.get(/^\/(?!api(?:\/|$)).*$/, (_request, response, next) => {
     const indexFile = join(userWebDir, 'index.html');
     if (!existsSync(indexFile)) return next();
+    setHtmlNoStore(response);
     return response.sendFile(indexFile);
   });
 }

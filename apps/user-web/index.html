@@ -3,6 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        const key = 'shiye:asset-recovery';
+        const recover = () => {
+          const last = Number(sessionStorage.getItem(key) || 0);
+          if (Date.now() - last < 30000) return;
+          sessionStorage.setItem(key, String(Date.now()));
+          window.location.reload();
+        };
+        window.addEventListener('error', (event) => {
+          const target = event.target;
+          const source = target && ('src' in target ? target.src : 'href' in target ? target.href : '');
+          if (source && /\/assets\//.test(source)) recover();
+        }, true);
+      })();
+    </script>
     <title>十夜用户中心</title>
   </head>
   <body>

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { cancelPendingReadRequests } from './api';
 import HomeView from './views/HomeView.vue';
 import NodesView from './views/NodesView.vue';
 import FinanceView from './views/FinanceView.vue';
@@ -14,4 +15,9 @@ export const router = createRouter({
     { path: '/profile', component: ProfileView },
     { path: '/payment/result', component: PaymentResultView }
   ]
+});
+
+router.beforeEach(() => {
+  cancelPendingReadRequests();
+  return true;
 });

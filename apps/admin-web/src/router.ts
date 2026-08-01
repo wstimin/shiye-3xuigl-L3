@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { cancelPendingReadRequests } from './api';
 import DashboardView from './views/DashboardView.vue';
 import CustomersView from './views/CustomersView.vue';
 import NodesView from './views/NodesView.vue';
@@ -26,6 +27,11 @@ export const router = createRouter({
     { path: '/payments', component: PaymentsView },
     { path: '/settings', component: SettingsView }
   ]
+});
+
+router.beforeEach(() => {
+  cancelPendingReadRequests();
+  return true;
 });
 
 function adminBasePath() {
