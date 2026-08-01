@@ -616,7 +616,7 @@ onMounted(loadServers);
     </div>
 
     <div v-loading="loading" class="xui-panel-grid">
-      <article v-for="server in filteredServers" :key="server.id" class="xui-panel-card">
+      <article v-for="server in filteredServers" :key="server.id" class="xui-panel-card entity-runtime-card" :class="connectionStatus(server).className === 'is-online' ? 'runtime-state-online' : connectionStatus(server).className === 'is-error' ? 'runtime-state-error' : server.enabled ? 'runtime-state-unknown' : 'runtime-state-disabled'">
         <header class="xui-panel-card-header">
           <div class="xui-panel-identity">
             <span class="xui-panel-icon"><Network :size="20" /></span>
@@ -639,11 +639,15 @@ onMounted(loadServers);
           </el-tooltip>
         </div>
 
-        <div class="xui-panel-meta">
-          <div><span>基础路径</span><strong>{{ server.basePath || '/' }}</strong></div>
-          <div><span>登录账号</span><strong :title="server.username || ''">{{ server.username || '-' }}</strong></div>
-          <div><span>TLS 证书</span><strong>{{ hasTlsConfig(server) ? '已配置' : '未配置' }}</strong></div>
-          <div><span>分享主机</span><strong :title="server.config?.shareHost || ''">{{ server.config?.shareHost || '使用面板域名' }}</strong></div>
+        <div class="xui-panel-meta runtime-metric-grid">
+          <div class="runtime-metric tone-indigo"><span>访问凭据</span><strong>{{ credentialLabel(server) }}</strong></div>
+          <div class="runtime-metric" :class="hasTlsConfig(server) ? 'tone-emerald' : 'tone-neutral'"><span>TLS 证书</span><strong>{{ hasTlsConfig(server) ? '已配置' : '未配置' }}</strong></div>
+          <div class="runtime-metric tone-amber"><span>入站数量</span><strong>{{ connectionTests[server.id]?.state === 'success' ? (connectionTests[server.id]?.inboundCount ?? 0) : '未测试' }}</strong></div>
+        </div>
+
+        <div class="runtime-info-line xui-runtime-info">
+          <span><KeyRound :size="13" />{{ server.username || '未保存登录账号' }}</span>
+          <span><ShieldCheck :size="13" />{{ server.config?.shareHost || '使用面板域名分享' }}</span>
         </div>
 
         <div class="xui-panel-tags">
@@ -656,16 +660,26 @@ onMounted(loadServers);
 
         <p class="xui-panel-remark" :class="{ 'is-empty': !server.remark }">{{ server.remark || '暂无备注' }}</p>
 
-        <footer class="xui-panel-actions">
-          <el-button type="primary" plain @click="editServer(server)"><Edit3 :size="14" />编辑</el-button>
+        <footer class="xui-panel-actions runtime-card-footer">
+          <span class="runtime-footer-label"><Network :size="13" />路径 {{ server.basePath || '/' }}</span>
+          <div class="runtime-action-group">
+          <el-tooltip content="测试连接" placement="top">
+            <el-button class="runtime-icon-button" :loading="testingIds.has(server.id)" aria-label="测试连接" @click="testSaved(server)"><Wifi :size="15" /></el-button>
+          </el-tooltip>
+          <el-tooltip content="同步节点" placement="top">
           <el-button
-            class="xui-sync-button"
+            class="xui-sync-button runtime-icon-button"
             :loading="syncingIds.has(server.id)"
             :disabled="!server.enabled"
+            aria-label="同步节点"
             @click="syncServer(server)"
-          ><RefreshCw :size="14" />同步节点</el-button>
+          ><RefreshCw :size="15" /></el-button>
+          </el-tooltip>
+          <el-tooltip content="编辑连接" placement="top">
+            <el-button class="runtime-icon-button" aria-label="编辑连接" @click="editServer(server)"><Edit3 :size="15" /></el-button>
+          </el-tooltip>
           <el-dropdown trigger="click" @command="(command: string) => handleServerCommand(server, command)">
-            <el-button class="xui-more-button" aria-label="更多面板操作"><MoreHorizontal :size="16" /></el-button>
+            <el-button class="xui-more-button runtime-icon-button" aria-label="更多面板操作"><MoreHorizontal :size="16" /></el-button>
             <template #dropdown>
               <el-dropdown-menu class="xui-action-menu">
                 <el-dropdown-item command="test" :disabled="testingIds.has(server.id)"><Wifi :size="14" />测试连接</el-dropdown-item>
@@ -682,6 +696,7 @@ onMounted(loadServers);
               </el-dropdown-menu>
             </template>
           </el-dropdown>
+          </div>
         </footer>
       </article>
 

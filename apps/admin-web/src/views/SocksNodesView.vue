@@ -378,7 +378,7 @@ onMounted(loadNodes);
     </div>
 
     <div v-loading="loading" class="socks-card-grid">
-      <article v-for="node in filteredNodes" :key="node.id" class="socks-outbound-card">
+      <article v-for="node in filteredNodes" :key="node.id" class="socks-outbound-card entity-runtime-card" :class="node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="socks-card-header">
           <div class="socks-card-identity">
             <span class="socks-card-icon"><Network :size="20" /></span>
@@ -401,10 +401,15 @@ onMounted(loadNodes);
           </el-tooltip>
         </div>
 
-        <div class="socks-card-meta">
-          <div><span>认证方式</span><strong>{{ hasAuthentication(node) ? '账号或密码' : '无认证' }}</strong></div>
-          <div><span>登录账号</span><strong :title="node.username || ''">{{ node.username || '-' }}</strong></div>
-          <div><span>路由引用</span><strong>{{ usageCount(node.id) }} 个节点</strong></div>
+        <div class="socks-card-meta runtime-metric-grid">
+          <div class="runtime-metric tone-indigo"><span>认证方式</span><strong>{{ hasAuthentication(node) ? '已配置' : '无认证' }}</strong></div>
+          <div class="runtime-metric tone-cyan"><span>路由引用</span><strong>{{ usageCount(node.id) }} 个</strong></div>
+          <div class="runtime-metric" :class="isImportedNode(node) ? 'tone-amber' : 'tone-emerald'"><span>节点来源</span><strong>{{ isImportedNode(node) ? '远端导入' : '本地创建' }}</strong></div>
+        </div>
+
+        <div class="runtime-info-line socks-runtime-info">
+          <span><KeyRound :size="13" />{{ node.username || '未设置登录账号' }}</span>
+          <span><Link2 :size="13" />{{ usageCount(node.id) ? '正在被路由引用' : '暂未被引用' }}</span>
         </div>
 
         <div class="socks-card-tags">
@@ -420,16 +425,22 @@ onMounted(loadNodes);
         </div>
         <p class="socks-card-remark" :class="{ 'is-empty': !node.remark }">{{ node.remark || '暂无备注' }}</p>
 
-        <footer class="socks-card-actions">
-          <el-button type="primary" plain @click="editNode(node)"><Edit3 :size="14" />编辑</el-button>
-          <el-button class="socks-toggle-button" :loading="togglingIds.has(node.id)" @click="toggleNodeEnabled(node)">
+        <footer class="socks-card-actions runtime-card-footer">
+          <span class="runtime-footer-label"><Network :size="13" />{{ isImportedNode(node) ? (serverName(node.sourceServerId) || '远端面板') : '本地配置' }}</span>
+          <div class="runtime-action-group">
+          <el-tooltip content="编辑出站" placement="top">
+            <el-button class="runtime-icon-button" aria-label="编辑出站" @click="editNode(node)"><Edit3 :size="15" /></el-button>
+          </el-tooltip>
+          <el-tooltip :content="node.enabled ? '停用出站' : '启用出站'" placement="top">
+          <el-button class="socks-toggle-button runtime-icon-button" :loading="togglingIds.has(node.id)" :aria-label="node.enabled ? '停用出站' : '启用出站'" @click="toggleNodeEnabled(node)">
             <CircleSlash2 v-if="node.enabled" :size="14" />
             <CheckCircle2 v-else :size="14" />
-            {{ node.enabled ? '停用' : '启用' }}
           </el-button>
-          <el-tooltip content="删除出站节点" placement="top">
-            <el-button class="socks-delete-button" :loading="deletingIds.has(node.id)" aria-label="删除出站节点" @click="removeNode(node)"><Trash2 :size="15" /></el-button>
           </el-tooltip>
+          <el-tooltip content="删除出站节点" placement="top">
+            <el-button class="socks-delete-button runtime-icon-button" :loading="deletingIds.has(node.id)" aria-label="删除出站节点" @click="removeNode(node)"><Trash2 :size="15" /></el-button>
+          </el-tooltip>
+          </div>
         </footer>
       </article>
 

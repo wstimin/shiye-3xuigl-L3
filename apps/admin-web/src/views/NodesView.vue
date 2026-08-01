@@ -582,7 +582,7 @@ watch(() => form.transport, () => {
     </div>
 
     <div v-loading="loading" class="node-card-grid">
-      <article v-for="node in filteredNodes" :key="node.id" class="route-node-card">
+      <article v-for="node in filteredNodes" :key="node.id" class="route-node-card entity-runtime-card" :class="node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="route-node-card-header">
           <div class="route-node-identity">
             <span class="route-node-icon" :class="`protocol-${node.protocol}`">
@@ -607,11 +607,15 @@ watch(() => form.transport, () => {
           </el-tooltip>
         </div>
 
-        <div class="route-node-meta">
-          <div><span>面板连接</span><strong :title="node.server?.name || ''">{{ node.server?.name || '-' }}</strong></div>
-          <div><span>入站 ID</span><strong>{{ node.inboundId ?? '-' }}</strong></div>
-          <div><span>月价格</span><strong>¥ {{ node.priceMonthly }}</strong></div>
-          <div><span>流量额度</span><strong>{{ node.trafficLimitGb }} GB</strong></div>
+        <div class="route-node-meta runtime-metric-grid">
+          <div class="runtime-metric tone-cyan"><span>入站 ID</span><strong>{{ node.inboundId ?? '未绑定' }}</strong></div>
+          <div class="runtime-metric tone-indigo"><span>月价格</span><strong>¥ {{ node.priceMonthly }}</strong></div>
+          <div class="runtime-metric tone-emerald"><span>流量额度</span><strong>{{ node.trafficLimitGb }} GB</strong></div>
+        </div>
+
+        <div class="runtime-info-line route-node-runtime-info">
+          <span><Server :size="13" />{{ node.server?.name || '未关联面板' }}</span>
+          <span><Waypoints :size="13" />{{ remoteModeLabel(node) }}</span>
         </div>
 
         <div class="route-node-tags">
@@ -625,16 +629,23 @@ watch(() => form.transport, () => {
 
         <p class="route-node-remark" :class="{ 'is-empty': !node.remark }">{{ node.remark || '暂无备注' }}</p>
 
-        <footer class="route-node-actions">
-          <el-button type="primary" plain @click="editNode(node)"><Edit3 :size="14" />编辑</el-button>
+        <footer class="route-node-actions runtime-card-footer">
+          <span class="runtime-footer-label"><RadioTower :size="13" />{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }}</span>
+          <div class="runtime-action-group">
+          <el-tooltip content="编辑节点" placement="top">
+            <el-button class="runtime-icon-button" aria-label="编辑节点" @click="editNode(node)"><Edit3 :size="15" /></el-button>
+          </el-tooltip>
+          <el-tooltip content="同步出站" placement="top">
           <el-button
-            class="node-sync-button"
+            class="node-sync-button runtime-icon-button"
             :loading="syncingConfigIds.has(node.id)"
             :disabled="!node.inboundId"
+            aria-label="同步出站"
             @click="syncRemoteConfig(node)"
-          ><UploadCloud :size="14" />同步出站</el-button>
+          ><UploadCloud :size="15" /></el-button>
+          </el-tooltip>
           <el-dropdown trigger="click" @command="(command: string) => handleNodeCommand(node, command)">
-            <el-button class="node-more-button" aria-label="更多节点操作"><MoreHorizontal :size="16" /></el-button>
+            <el-button class="node-more-button runtime-icon-button" aria-label="更多节点操作"><MoreHorizontal :size="16" /></el-button>
             <template #dropdown>
               <el-dropdown-menu class="node-action-menu">
                 <el-dropdown-item command="traffic-limit" :disabled="!node.inboundId || syncingTrafficLimitIds.has(node.id)"><Gauge :size="14" />同步流量额度</el-dropdown-item>
@@ -648,6 +659,7 @@ watch(() => form.transport, () => {
               </el-dropdown-menu>
             </template>
           </el-dropdown>
+          </div>
         </footer>
       </article>
 

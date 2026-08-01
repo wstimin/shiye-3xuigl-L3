@@ -665,7 +665,7 @@ onMounted(loadCustomers);
     </section>
 
     <section v-loading="loading" class="customer-user-grid">
-      <article v-for="customer in customers" :key="customer.id" class="customer-user-card">
+      <article v-for="customer in customers" :key="customer.id" class="customer-user-card entity-runtime-card" :class="customer.status === 'active' ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="customer-card-header">
           <div class="customer-card-identity">
             <span class="customer-card-avatar" :style="customerAvatarStyle(customer)">{{ customerInitial(customer) }}</span>
@@ -677,26 +677,34 @@ onMounted(loadCustomers);
           <span class="customer-status-chip" :class="customer.status === 'active' ? 'is-active' : 'is-disabled'"><i></i>{{ customer.status === 'active' ? '启用' : '禁用' }}</span>
         </header>
 
-        <div class="customer-contact-line"><UserRound :size="14" />{{ customer.email || customer.phone || '未填写联系方式' }}</div>
-
-        <div class="customer-card-meta">
-          <div><span>账户余额</span><strong>¥ {{ Number(customer.balance).toFixed(2) }}</strong></div>
-          <div><span>绑定节点</span><strong>{{ customer.nodes?.length || 0 }} 个</strong></div>
-          <div><span>最近到期</span><strong>{{ formatShortDate(customerNearestExpiry(customer)) }}</strong></div>
-          <div><span>创建时间</span><strong>{{ formatShortDate(customer.createdAt) }}</strong></div>
+        <div class="customer-card-meta runtime-metric-grid">
+          <div class="runtime-metric tone-indigo"><span>账户余额</span><strong>¥ {{ Number(customer.balance).toFixed(2) }}</strong></div>
+          <div class="runtime-metric tone-cyan"><span>绑定节点</span><strong>{{ customer.nodes?.length || 0 }} 个</strong></div>
+          <div class="runtime-metric" :class="'tone-' + customerExpiryState(customer).tone"><span>最近到期</span><strong>{{ formatShortDate(customerNearestExpiry(customer)) }}</strong></div>
         </div>
 
-        <div class="customer-service-line">
+        <div class="runtime-info-line customer-runtime-info">
+          <span><UserRound :size="13" />{{ customer.email || customer.phone || '未填写联系方式' }}</span>
+          <span><CalendarClock :size="13" />创建于 {{ formatShortDate(customer.createdAt) }}</span>
+        </div>
+
+        <div class="customer-service-line runtime-tag-line">
           <span class="customer-expiry-chip" :class="`is-${customerExpiryState(customer).tone}`"><i></i>{{ customerExpiryState(customer).label }}</span>
           <span v-if="customer.remark" class="customer-card-remark" :title="customer.remark">{{ customer.remark }}</span>
           <span v-else class="customer-card-remark is-empty">暂无备注</span>
         </div>
 
-        <footer class="customer-card-actions">
-          <el-button type="primary" plain @click="openCustomerNodesDialog(customer)"><Link2 :size="14" />节点详情</el-button>
-          <el-button class="customer-secondary-button" @click="editCustomer(customer)"><Edit3 :size="14" />编辑</el-button>
+        <footer class="customer-card-actions runtime-card-footer">
+          <span class="runtime-footer-label"><Activity :size="13" />{{ customer.nodes?.length || 0 }} 个绑定，{{ (customer.nodes || []).filter((node) => node.status === 'active').length }} 个启用</span>
+          <div class="runtime-action-group">
+          <el-tooltip content="节点详情" placement="top">
+            <el-button class="runtime-icon-button" aria-label="节点详情" @click="openCustomerNodesDialog(customer)"><Link2 :size="15" /></el-button>
+          </el-tooltip>
+          <el-tooltip content="编辑用户" placement="top">
+            <el-button class="runtime-icon-button" aria-label="编辑用户" @click="editCustomer(customer)"><Edit3 :size="15" /></el-button>
+          </el-tooltip>
           <el-dropdown trigger="click" placement="bottom-end" @command="(command: string) => handleCustomerCommand(customer, command)">
-            <el-button class="customer-more-button" aria-label="更多操作" title="更多操作"><MoreHorizontal :size="17" /></el-button>
+            <el-button class="customer-more-button runtime-icon-button" aria-label="更多操作" title="更多操作"><MoreHorizontal :size="17" /></el-button>
             <template #dropdown>
               <el-dropdown-menu class="customer-action-menu">
                 <el-dropdown-item command="edit"><Edit3 :size="14" />编辑用户</el-dropdown-item>
@@ -707,6 +715,7 @@ onMounted(loadCustomers);
               </el-dropdown-menu>
             </template>
           </el-dropdown>
+          </div>
         </footer>
       </article>
       <div v-if="!customers.length && !loading" class="customer-empty-state"><Users :size="30" /><strong>暂无用户数据</strong><span>调整筛选条件或新增用户后再查看。</span></div>
