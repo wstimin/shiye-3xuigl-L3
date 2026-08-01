@@ -562,7 +562,7 @@ export class XuiService {
         streamSettings
       }),
       id: input.inboundId,
-      settings: this.mergeInboundSettings(input.protocol, currentSettings),
+      settings: this.mergeInboundSettings(input.protocol, String(currentInbound.protocol || ''), currentSettings, nextSecurity),
       up: Number(currentInbound.up || 0),
       down: Number(currentInbound.down || 0),
       total: Number(currentInbound.total || 0)
@@ -1506,12 +1506,37 @@ export class XuiService {
     return { clients: [] };
   }
 
-  private mergeInboundSettings(protocol: string, currentSettings: Record<string, unknown>) {
+  private mergeInboundSettings(protocol: string, currentProtocol: string, currentSettings: Record<string, unknown>, encryption = 'none') {
     const next = this.xuiObject(this.defaultInboundSettings(protocol));
-    if (Array.isArray(currentSettings.clients)) next.clients = currentSettings.clients;
-    if (Array.isArray(currentSettings.accounts)) next.accounts = currentSettings.accounts;
-    for (const key of ['method', 'password', 'network', 'auth', 'ip', 'udp']) {
-      if (currentSettings[key] !== undefined) next[key] = currentSettings[key];
+    const protocolChanged = currentProtocol.trim().toLowerCase() !== protocol.trim().toLowerCase();
+    const clients = Array.isArray(currentSettings.clients) ? currentSettings.clients : [];
+    if (clients.length) {
+      next.clients = protocolChanged
+        ? clients.map((item) => this.convertInboundClient(item, protocol, encryption))
+        : clients;
+    }
+    if (!protocolChanged && Array.isArray(currentSettings.accounts)) next.accounts = currentSettings.accounts;
+    if (!protocolChanged) {
+      for (const key of ['method', 'password', 'network', 'auth', 'ip', 'udp']) {
+        if (currentSettings[key] !== undefined) next[key] = currentSettings[key];
+      }
+    }
+    return next;
+  }
+
+  private convertInboundClient(item: unknown, protocol: string, encryption: string) {
+    const current = this.xuiObject(item);
+    const uuid = this.clientUuidOf(current) || randomUUID();
+    const email = this.clientEmailOf(current) || 'client-' + uuid.slice(0, 8) + '@shiye.local';
+    const subId = this.clientSubIdOf(current) || this.subscriptionId(uuid);
+    const next: Record<string, unknown> = { ...current, email, subId };
+    for (const key of ['id', 'uuid', 'password', 'auth', 'security', 'flow']) delete next[key];
+    if (protocol === 'trojan' || protocol === 'shadowsocks') next.password = uuid;
+    else if (protocol === 'hysteria' || protocol === 'hysteria2') next.auth = uuid;
+    else {
+      next.id = uuid;
+      if (protocol === 'vmess') next.security = 'auto';
+      if (protocol === 'vless') next.flow = this.clientFlowForProtocol(protocol, encryption);
     }
     return next;
   }

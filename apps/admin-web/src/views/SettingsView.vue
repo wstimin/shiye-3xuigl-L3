@@ -141,7 +141,21 @@ async function refreshSettings() {
 
 async function updateSettings(payload: SettingsUpdatePayload) {
   await api<AdminSettings>('/api/admin/settings', { method: 'PUT', body: payload });
-  return fetchSettings();
+  const settings = await fetchSettings();
+  assertSettingsMatch(payload, settings);
+  return settings;
+}
+
+function assertSettingsMatch(payload: SettingsUpdatePayload, settings: AdminSettings) {
+  if (payload.brand && (settings.brand?.brandName !== payload.brand.brandName || settings.brand?.logoDataUrl !== payload.brand.logoDataUrl)) {
+    throw new Error('品牌设置未保存');
+  }
+  if (payload.business && settings.business?.cardPurchaseUrl !== payload.business.cardPurchaseUrl) {
+    throw new Error('业务设置未保存');
+  }
+  if (payload.runtime && settings.runtime?.adminPath !== normalizeAdminPathPreview(payload.runtime.adminPath)) {
+    throw new Error('管理路径未保存');
+  }
 }
 
 async function saveBrand() {
@@ -329,9 +343,10 @@ function validateAdminPath(value: string) {
   return '';
 }
 
-function showError(_err: unknown, fallback: string) {
-  error.value = fallback;
-  ElMessage.error(fallback);
+function showError(err: unknown, fallback: string) {
+  const message = err instanceof Error && err.message ? err.message : fallback;
+  error.value = message;
+  ElMessage.error(message);
 }
 
 function imageToDataUrl(file: File, maxSize: number) {

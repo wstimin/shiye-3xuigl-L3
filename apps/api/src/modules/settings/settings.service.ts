@@ -26,8 +26,11 @@ export class SettingsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async publicBranding(): Promise<BrandSettings> {
-    const row = await this.prisma.systemSetting.findUnique({ where: { key: 'brand' } });
-    const value = settingObject<BrandSettings>(row?.value);
+    const [customRow, defaultRow] = await Promise.all([
+      this.prisma.systemSetting.findUnique({ where: { key: 'brand:custom' } }),
+      this.prisma.systemSetting.findUnique({ where: { key: 'brand' } })
+    ]);
+    const value = settingObject<BrandSettings>(customRow?.value ?? defaultRow?.value);
     return {
       brandName: value.brandName || process.env.APP_NAME || '十夜管理系统',
       logoDataUrl: value.logoDataUrl || ''
@@ -52,11 +55,19 @@ export class SettingsService {
 
   async updateSettings(input: SettingsUpdateInput) {
     if (input.brand) {
-      await this.prisma.systemSetting.upsert({
-        where: { key: 'brand' },
-        create: { key: 'brand', value: toJsonValue(input.brand) },
-        update: { value: toJsonValue(input.brand) }
-      });
+      const value = toJsonValue(input.brand);
+      await this.prisma.$transaction([
+        this.prisma.systemSetting.upsert({
+          where: { key: 'brand' },
+          create: { key: 'brand', value },
+          update: { value }
+        }),
+        this.prisma.systemSetting.upsert({
+          where: { key: 'brand:custom' },
+          create: { key: 'brand:custom', value },
+          update: { value }
+        })
+      ]);
     }
 
     if (input.business) {

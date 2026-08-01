@@ -8,6 +8,7 @@ type SettingRow = { key: string; value: unknown };
 function settingsFixture(initial: SettingRow[] = []) {
   const rows = new Map(initial.map((row) => [row.key, row]));
   const prisma = {
+    $transaction: async (operations: Array<Promise<unknown>>) => Promise.all(operations),
     systemSetting: {
       findUnique: async ({ where }: any) => rows.get(where.key) || null,
       upsert: async ({ where, create, update }: any) => {
@@ -34,6 +35,17 @@ test('system settings remain available after saving and creating a fresh service
   assert.equal(settings.brand.brandName, '自定义面板');
   assert.equal(settings.brand.logoDataUrl, 'data:image/png;base64,AA==');
   assert.equal(settings.business.cardPurchaseUrl, 'https://example.com/cards');
+  assert.deepEqual(rows.get('brand:custom')?.value, { brandName: '自定义面板', logoDataUrl: 'data:image/png;base64,AA==' });
+});
+
+test('custom branding takes priority over the installer default after reload', async () => {
+  const { service } = settingsFixture([
+    { key: 'brand', value: { brandName: '默认品牌', logoDataUrl: '' } },
+    { key: 'brand:custom', value: { brandName: '用户品牌', logoDataUrl: 'data:image/png;base64,BB==' } }
+  ]);
+  const settings = await service.adminSettings();
+  assert.equal(settings.brand.brandName, '用户品牌');
+  assert.equal(settings.brand.logoDataUrl, 'data:image/png;base64,BB==');
 });
 
 test('saved runtime path is read from the database instead of a stale process value', async () => {
@@ -56,5 +68,6 @@ test('settings endpoints and frontend reads explicitly bypass caches', async () 
   const settingsView = await readFile(new URL('../apps/admin-web/src/views/SettingsView.vue', import.meta.url), 'utf8');
   assert.match(controller, /Cache-Control', 'no-store, no-cache, must-revalidate/);
   assert.match(adminApi, /cache: safeRead \? 'no-store'/);
-  assert.ok(settingsView.includes("await api<AdminSettings>('/api/admin/settings', { method: 'PUT', body: payload });\n  return fetchSettings();"));
+  assert.ok(settingsView.includes("await api<AdminSettings>('/api/admin/settings', { method: 'PUT', body: payload });"));
+  assert.match(settingsView, /const settings = await fetchSettings\(\);\s*assertSettingsMatch\(payload, settings\);/);
 });

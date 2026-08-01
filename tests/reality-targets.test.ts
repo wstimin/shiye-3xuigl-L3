@@ -164,3 +164,82 @@ test('full Reality inbound update preserves credentials and verifies the remote 
   assert.deepEqual(submitted.streamSettings.realitySettings.shortIds, ['a1b2c3d4']);
   assert.equal(submitted.streamSettings.realitySettings.settings.shortId, 'a1b2c3d4');
 });
+
+
+test('protocol changes convert existing inbound clients to the target credential field', () => {
+  const current = {
+    clients: [{
+      id: '11111111-2222-4333-8444-555555555555',
+      email: 'user@example.com',
+      subId: 'existing-sub',
+      enable: true,
+      expiryTime: 123456,
+      totalGB: 987654,
+      flow: 'xtls-rprx-vision'
+    }]
+  };
+
+  const trojan = service.mergeInboundSettings('trojan', 'vless', current, 'tls');
+  assert.equal(trojan.clients[0].password, '11111111-2222-4333-8444-555555555555');
+  assert.equal(trojan.clients[0].id, undefined);
+  assert.equal(trojan.clients[0].email, 'user@example.com');
+  assert.equal(trojan.clients[0].subId, 'existing-sub');
+  assert.equal(trojan.clients[0].expiryTime, 123456);
+  assert.equal(trojan.clients[0].totalGB, 987654);
+
+  const vmess = service.mergeInboundSettings('vmess', 'trojan', trojan, 'none');
+  assert.equal(vmess.clients[0].id, '11111111-2222-4333-8444-555555555555');
+  assert.equal(vmess.clients[0].password, undefined);
+  assert.equal(vmess.clients[0].security, 'auto');
+});
+
+test('same-protocol inbound updates preserve existing client fields unchanged', () => {
+  const client = { id: 'client-id', email: 'user@example.com', flow: 'custom-flow', extra: 'keep-me' };
+  const result = service.mergeInboundSettings('vless', 'vless', { clients: [client], decryption: 'none' }, 'reality');
+  assert.deepEqual(result.clients, [client]);
+});
+
+
+test('remote inbound protocol update sends converted client credentials and verifies the new protocol', async () => {
+  let submitted: any;
+  const originalInbound = {
+    id: 12,
+    up: 10,
+    down: 20,
+    total: 30,
+    remark: '旧节点',
+    enable: true,
+    port: 24443,
+    protocol: 'vless',
+    settings: JSON.stringify({ clients: [{ id: '11111111-2222-4333-8444-555555555555', email: 'user@example.com', subId: 'sub-1', enable: true }] }),
+    streamSettings: JSON.stringify({ network: 'tcp', security: 'none', tcpSettings: { acceptProxyProtocol: false, header: { type: 'none' } } }),
+    sniffing: JSON.stringify({ enabled: true }),
+    tag: 'inbound-12'
+  };
+  const client = {
+    getInbound: async () => ({ success: true, obj: submitted ? { ...submitted, settings: JSON.stringify(submitted.settings), streamSettings: JSON.stringify(submitted.streamSettings) } : originalInbound }),
+    updateInbound: async (_id: number, body: any) => { submitted = body; return { success: true }; }
+  };
+  const protocolService = new XuiService({
+    xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://panel.example.com', config: {} }) },
+    syncLog: { create: async () => ({}) }
+  } as never, {} as never) as any;
+  protocolService.createAuthenticatedClient = async () => client;
+
+  await protocolService.updateServiceNodeInbound({
+    serverId: 'server-1',
+    inboundId: 12,
+    name: '新节点',
+    remark: '新节点',
+    protocol: 'trojan',
+    encryption: 'none',
+    transport: 'tcp',
+    enabled: true,
+    port: 24443
+  });
+
+  assert.equal(submitted.protocol, 'trojan');
+  assert.equal(submitted.settings.clients[0].password, '11111111-2222-4333-8444-555555555555');
+  assert.equal(submitted.settings.clients[0].id, undefined);
+  assert.equal(submitted.settings.clients[0].email, 'user@example.com');
+});
