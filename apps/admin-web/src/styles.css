@@ -4512,6 +4512,439 @@ input:-webkit-autofill:active {
   .runtime-footer-label { padding-top: 0; }
 }
 
+/* Keep route, panel and outbound cards aligned with the customer-card scale. */
+:is(.node-card-grid, .xui-panel-grid, .socks-card-grid) {
+  grid-template-columns: repeat(auto-fill, minmax(310px, 360px));
+  gap: 14px;
+}
+
+:is(.route-node-card, .xui-panel-card, .socks-outbound-card) {
+  gap: 9px;
+  padding: 14px;
+  border-radius: 8px;
+}
+
+:is(.route-node-card-header, .xui-panel-card-header, .socks-card-header) {
+  min-height: 38px;
+  align-items: center;
+  gap: 9px;
+}
+
+:is(.route-node-identity, .xui-panel-identity, .socks-card-identity) {
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+:is(.route-node-identity, .xui-panel-identity, .socks-card-identity) > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+:is(.route-node-icon, .xui-panel-icon, .socks-card-icon).entity-name-avatar {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 23px;
+  font-weight: 900;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 52%), 0 0 6px rgb(255 255 255 / 16%);
+}
+
+:is(.route-node-identity strong, .xui-panel-identity strong, .socks-card-identity strong) {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+:is(.route-node-identity span, .xui-panel-identity span, .socks-card-identity span) {
+  font-size: 10.5px;
+  line-height: 1.25;
+}
+
+:is(.node-status-chip, .xui-status-chip, .socks-status-chip) {
+  min-height: 22px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+:is(.route-node-address, .xui-panel-address, .socks-endpoint) {
+  min-height: 34px;
+  grid-template-columns: 13px minmax(0, 1fr) 25px;
+  gap: 6px;
+  padding: 4px 6px 4px 8px;
+  border-radius: 7px;
+}
+
+:is(.route-node-address strong, .xui-panel-address strong, .socks-endpoint strong) {
+  font-size: 10.5px;
+  line-height: 1.2;
+}
+
+:is(.node-copy-button, .xui-copy-button, .socks-copy-button) {
+  width: 25px;
+  height: 25px;
+  border-radius: 6px;
+}
+
+:is(.route-node-card, .xui-panel-card, .socks-outbound-card) .runtime-metric-grid {
+  gap: 6px;
+}
+
+:is(.route-node-card, .xui-panel-card, .socks-outbound-card) .runtime-metric-grid > .runtime-metric {
+  min-height: 52px;
+  gap: 4px;
+  padding: 7px 8px;
+}
+
+:is(.route-node-card, .xui-panel-card, .socks-outbound-card) .runtime-metric-grid > .runtime-metric::after {
+  inset: auto 8px 6px;
+}
+
+:is(.route-node-card, .xui-panel-card, .socks-outbound-card) .runtime-metric-grid > .runtime-metric span {
+  font-size: 9.5px;
+}
+
+:is(.route-node-card, .xui-panel-card, .socks-outbound-card) .runtime-metric-grid > .runtime-metric strong {
+  padding-bottom: 5px;
+  font-size: 11.5px;
+}
+
+:is(.route-node-runtime-info, .xui-runtime-info, .socks-runtime-info) {
+  min-height: 16px;
+  gap: 9px;
+  font-size: 9.5px;
+}
+
+:is(.route-node-tags, .xui-panel-tags, .socks-card-tags) {
+  min-height: 18px;
+  max-height: 19px;
+  gap: 4px;
+}
+
+:is(.route-node-tag, .xui-panel-tag, .socks-card-tag) {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+:is(.route-node-remark, .xui-panel-remark, .socks-card-remark) {
+  min-height: 0;
+  max-height: 15px;
+  margin: 0;
+  font-size: 9.5px;
+  line-height: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:is(.route-node-card, .xui-panel-card, .socks-outbound-card) .runtime-card-footer {
+  min-height: 39px;
+  gap: 8px;
+  padding-top: 9px;
+}
+
+:is(.route-node-card, .xui-panel-card, .socks-outbound-card) .runtime-footer-label {
+  font-size: 9px;
+}
+
+.runtime-action-group {
+  gap: 5px;
+}
+
+.runtime-action-group .runtime-icon-button,
+.runtime-action-group .el-dropdown .runtime-icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 7px;
+}
+
+.runtime-toggle-switch {
+  --el-switch-on-color: #6366f1;
+  --el-switch-off-color: #2a2f3a;
+  width: 38px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 2.8%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
+  transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.runtime-toggle-switch .el-switch__core {
+  min-width: 30px;
+  width: 30px;
+  height: 17px;
+  border: 1px solid rgb(255 255 255 / 7%);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 28%);
+}
+
+.runtime-toggle-switch .el-switch__action {
+  width: 13px;
+  height: 13px;
+  background: #f8fafc;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 42%);
+}
+
+.runtime-toggle-switch:hover {
+  transform: translateY(-1px);
+  border-color: rgb(var(--runtime-accent) / 34%);
+  background: rgb(var(--runtime-accent) / 8%);
+}
+
+.runtime-toggle-switch.is-checked {
+  border-color: rgb(99 102 241 / 34%);
+  background: rgb(99 102 241 / 10%);
+  box-shadow: 0 0 14px rgb(99 102 241 / 10%), inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+
+.runtime-toggle-switch.is-checked .el-switch__core {
+  box-shadow: 0 0 13px rgb(99 102 241 / 32%), inset 0 1px 1px rgb(255 255 255 / 12%);
+}
+
+.runtime-toggle-switch:active:not(.is-disabled) {
+  transform: scale(.94);
+}
+
+.runtime-toggle-switch.is-disabled {
+  transform: none;
+  opacity: .72;
+}
+
+@media (max-width: 760px) {
+  :is(.node-card-grid, .xui-panel-grid, .socks-card-grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :is(.route-node-card, .xui-panel-card, .socks-outbound-card) {
+    padding: 13px;
+  }
+}
+
+/* Page-level calibration for route nodes and panel connections. */
+.node-card-grid,
+.xui-panel-grid {
+  align-items: start;
+}
+
+.route-node-card,
+.xui-panel-card {
+  width: 100%;
+  max-width: 360px;
+  min-height: 0;
+  align-self: start;
+}
+
+.route-node-card-header,
+.xui-panel-card-header {
+  min-width: 0;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.route-node-identity,
+.xui-panel-identity {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.route-node-icon.entity-name-avatar,
+.xui-panel-icon.entity-name-avatar {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+  font-size: 23px;
+}
+
+.node-status-chip,
+.xui-status-chip {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.route-node-address,
+.xui-panel-address {
+  min-height: 34px;
+}
+
+.route-node-meta.runtime-metric-grid,
+.xui-panel-meta.runtime-metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.route-node-actions.runtime-card-footer,
+.xui-panel-actions.runtime-card-footer {
+  min-height: 39px;
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.route-node-actions .runtime-action-group,
+.xui-panel-actions .runtime-action-group {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.route-node-actions .runtime-toggle-switch,
+.xui-panel-actions .runtime-toggle-switch {
+  flex: 0 0 38px;
+}
+
+@media (max-width: 760px) {
+  .route-node-card,
+  .xui-panel-card {
+    max-width: none;
+  }
+
+  .route-node-card-header,
+  .xui-panel-card-header {
+    display: flex;
+  }
+
+  .route-node-meta.runtime-metric-grid,
+  .xui-panel-meta.runtime-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .route-node-actions.runtime-card-footer,
+  .xui-panel-actions.runtime-card-footer {
+    align-items: center;
+  }
+}
+
+/* Stabilize runtime-card buttons across normal, loading and disabled states. */
+.runtime-action-group {
+  min-height: 30px;
+  align-items: center;
+}
+
+.runtime-action-group > .el-dropdown,
+.runtime-action-group > .el-tooltip__trigger,
+.runtime-action-group > .runtime-icon-button {
+  flex: 0 0 auto;
+}
+
+.runtime-action-group .el-dropdown {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+.runtime-action-group .runtime-icon-button,
+.runtime-action-group .el-dropdown .runtime-icon-button,
+.runtime-action-group .customer-more-button,
+.runtime-action-group .node-more-button,
+.runtime-action-group .xui-more-button,
+.runtime-action-group .socks-delete-button {
+  position: relative;
+  width: 30px !important;
+  min-width: 30px !important;
+  max-width: 30px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  max-height: 30px !important;
+  flex: 0 0 30px;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 1;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.runtime-action-group .runtime-icon-button > span {
+  width: 100%;
+  height: 100%;
+  display: inline-grid;
+  place-items: center;
+  margin: 0 !important;
+  line-height: 1;
+  transition: opacity 120ms ease;
+}
+
+.runtime-action-group .runtime-icon-button > span > svg,
+.runtime-action-group .runtime-icon-button > svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex: 0 0 14px;
+  margin: 0;
+}
+
+.runtime-action-group .runtime-icon-button.is-loading {
+  transform: none;
+  cursor: wait;
+}
+
+.runtime-action-group .runtime-icon-button.is-loading::before {
+  inset: 0;
+  border-radius: 6px;
+  background: rgb(8 10 15 / 22%);
+}
+
+.runtime-action-group .runtime-icon-button.is-loading > span {
+  opacity: 0;
+}
+
+.runtime-action-group .runtime-icon-button.is-loading > .el-icon.is-loading {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  margin: 0 !important;
+  color: #c7d2fe;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.runtime-action-group .runtime-icon-button.is-loading > .el-icon.is-loading svg {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.runtime-action-group .runtime-icon-button.is-disabled,
+.runtime-action-group .runtime-icon-button:disabled {
+  transform: none;
+  opacity: .58;
+}
+
+.runtime-action-group .runtime-icon-button.is-disabled:hover,
+.runtime-action-group .runtime-icon-button:disabled:hover,
+.runtime-action-group .runtime-icon-button.is-loading:hover {
+  transform: none;
+}
+
+.runtime-action-group .runtime-toggle-switch {
+  width: 38px;
+  min-width: 38px;
+  max-width: 38px;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  flex: 0 0 38px;
+  margin: 0;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
 /* System settings console. */
 .settings-console-page {
   --settings-surface: #12141c;
