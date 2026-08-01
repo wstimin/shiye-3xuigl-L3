@@ -16,6 +16,8 @@ type ServiceNodeConfig = {
   grpcAuthority?: string;
   grpcMultiMode?: boolean;
   xhttpMode?: string;
+  realityTarget?: string;
+  realityServerName?: string;
   socksRelayEnabled?: boolean;
   socksNodeId?: string | null;
   remoteMode?: 'create' | 'bind';
@@ -122,7 +124,7 @@ export class NodesService {
     await this.ensureServer(input.serverId);
     const remoteMode = input.remoteMode || 'create';
     let inboundId = input.inboundId || null;
-    let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[] } | null = null;
+    let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[]; realityTarget?: string; realityServerName?: string } | null = null;
     let remoteClient: { email?: string; uuid?: string; subId?: string } | null = null;
     let remoteValidation: Awaited<ReturnType<XuiService['validateServiceNodeInbound']>> | null = null;
     let localCreated = false;
@@ -149,6 +151,8 @@ export class NodesService {
         grpcAuthority: input.grpcAuthority,
         grpcMultiMode: input.grpcMultiMode,
         xhttpMode: input.xhttpMode,
+        realityTarget: input.realityTarget,
+        realityServerName: input.realityServerName,
         enabled: input.enabled,
         port: input.inboundPort,
         remark: input.name,
@@ -175,7 +179,9 @@ export class NodesService {
         remoteClientEmail: remoteCreated.remoteClientEmail,
         remoteClientUuid: remoteCreated.remoteClientUuid,
         remoteClientSubId: remoteCreated.remoteClientSubId,
-        remoteClientLinks: remoteCreated.links
+        remoteClientLinks: remoteCreated.links,
+        realityTarget: remoteCreated.realityTarget,
+        realityServerName: remoteCreated.realityServerName
       } : {
         remoteMode,
         remoteManaged: false,
@@ -233,7 +239,7 @@ export class NodesService {
     const previousConfig = jsonObject(current.config) as ServiceNodeConfig;
     const remoteMode = input.remoteMode || previousConfig.remoteMode || (current.inboundId ? 'bind' : 'create');
     let inboundId = input.inboundId === undefined ? current.inboundId : input.inboundId || null;
-    let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[] } | null = null;
+    let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[]; realityTarget?: string; realityServerName?: string } | null = null;
     let remoteClient: { email?: string; uuid?: string; subId?: string } | null = null;
     let remoteValidation: Awaited<ReturnType<XuiService['validateServiceNodeInbound']>> | null = null;
     let localUpdated = false;
@@ -286,6 +292,8 @@ export class NodesService {
         grpcAuthority: input.grpcAuthority === undefined ? previousConfig.grpcAuthority : input.grpcAuthority,
         grpcMultiMode: input.grpcMultiMode === undefined ? previousConfig.grpcMultiMode : input.grpcMultiMode,
         xhttpMode: input.xhttpMode || previousConfig.xhttpMode || 'auto',
+        realityTarget: input.realityTarget === undefined ? previousConfig.realityTarget : input.realityTarget,
+        realityServerName: input.realityServerName === undefined ? previousConfig.realityServerName : input.realityServerName,
         enabled: nextEnabled,
         port: input.inboundPort,
         remark: nextRemoteRemark,
@@ -312,7 +320,9 @@ export class NodesService {
         remoteClientEmail: remoteCreated.remoteClientEmail,
         remoteClientUuid: remoteCreated.remoteClientUuid,
         remoteClientSubId: remoteCreated.remoteClientSubId,
-        remoteClientLinks: remoteCreated.links
+        remoteClientLinks: remoteCreated.links,
+        realityTarget: remoteCreated.realityTarget,
+        realityServerName: remoteCreated.realityServerName
       } : {
         remoteMode,
         remoteManaged: remoteMode === 'create' ? Boolean(previousConfig.remoteManaged) : false,
@@ -339,6 +349,8 @@ export class NodesService {
         (input.grpcAuthority !== undefined && input.grpcAuthority !== (previousConfig.grpcAuthority || '')) ||
         (input.grpcMultiMode !== undefined && input.grpcMultiMode !== Boolean(previousConfig.grpcMultiMode)) ||
         (input.xhttpMode !== undefined && input.xhttpMode !== (previousConfig.xhttpMode || 'auto')) ||
+        (input.realityTarget !== undefined && input.realityTarget !== (previousConfig.realityTarget || '')) ||
+        (input.realityServerName !== undefined && input.realityServerName !== (previousConfig.realityServerName || '')) ||
         nextEnabled !== current.enabled ||
         (remoteMode === 'create' && previousConfig.remoteInboundRemark !== nextRemoteRemark) ||
         (input.inboundPort !== undefined && nextRemotePort !== previousConfig.remoteInboundPort)
@@ -392,12 +404,15 @@ export class NodesService {
           await this.failSyncTask('service-node', id, 'service-inbound', error, { remoteEnableOnlyChanged });
         }
       }
-      const remoteClientShouldSync = Boolean(updated.inboundId && (remoteInboundChanged || trafficLimitChanged));
+      const clientIdentityChanged = nextProtocol !== current.protocol || nextEncryption !== (previousConfig.encryption || 'none');
+      const remoteClientShouldSync = Boolean(updated.inboundId && (trafficLimitChanged || clientIdentityChanged));
       if (remoteClientShouldSync) {
-        await this.prisma.customerNode.updateMany({
-          where: { serviceNodeId: id },
-          data: { trafficLimitGb: updated.trafficLimitGb }
-        });
+        if (trafficLimitChanged) {
+          await this.prisma.customerNode.updateMany({
+            where: { serviceNodeId: id },
+            data: { trafficLimitGb: updated.trafficLimitGb }
+          });
+        }
         try {
           const syncResult = await this.xui.syncServiceNodeTrafficLimit(id);
           if (!syncResult.synced) throw new BadGatewayException('部分客户端同步失败');
@@ -802,6 +817,8 @@ export class NodesService {
       grpcAuthority: config.grpcAuthority,
       grpcMultiMode: config.grpcMultiMode,
       xhttpMode: config.xhttpMode,
+      realityTarget: config.realityTarget,
+      realityServerName: config.realityServerName,
       enabled: node.enabled,
       port: config.remoteInboundPort,
       remark: node.name
@@ -845,7 +862,7 @@ export class NodesService {
   }
 
   private async failSyncTask(entityType: string, entityId: string, action: SyncTaskAction, error: unknown, detail?: unknown) {
-    const message = this.shortSyncMessage(error);
+    const message = this.shortSyncMessage(error, action);
     return this.prisma.syncTask.upsert({
       where: { entityType_entityId_action: { entityType, entityId, action } },
       create: {
@@ -876,15 +893,34 @@ export class NodesService {
     });
   }
 
-  private shortSyncMessage(error: unknown) {
+  private shortSyncMessage(error: unknown, action?: SyncTaskAction) {
     const message = this.errorMessage(error);
-    if (/timeout|超时/i.test(message)) return '远端请求超时';
+    const prefix = action === 'service-inbound'
+      ? '入站'
+      : action === 'service-clients'
+        ? '用户'
+        : action === 'service-config'
+          ? '出站'
+          : '远端';
+    if (/timeout|超时/i.test(message)) return `${prefix}同步超时`;
     if (/disabled|停用/i.test(message)) return '远端面板已停用';
-    if (/not found|不存在|missing/i.test(message)) return '远端数据不存在';
-    return '远端同步失败';
+    if (/not found|不存在|missing/i.test(message)) return `${prefix}数据不存在`;
+    if (/port.*exist|端口.*占用/i.test(message)) return '远端端口已占用';
+    if (/reality/i.test(message)) return 'Reality 配置同步失败';
+    if (/protocol|协议/i.test(message)) return '远端协议同步失败';
+    if (/transport|传输/i.test(message)) return '远端传输同步失败';
+    return `${prefix}同步失败`;
   }
 
   private errorMessage(error: unknown) {
+    if (error && typeof error === 'object') {
+      const payload = (error as { payload?: unknown }).payload;
+      if (payload && typeof payload === 'object') {
+        const record = payload as Record<string, unknown>;
+        const remoteMessage = record.msg || record.message || record.error;
+        if (remoteMessage) return String(remoteMessage);
+      }
+    }
     return error instanceof Error ? error.message : String(error);
   }
 
@@ -1003,6 +1039,8 @@ export class NodesService {
       grpcAuthority: input.grpcAuthority === undefined ? previous.grpcAuthority || '' : input.grpcAuthority || '',
       grpcMultiMode: input.grpcMultiMode === undefined ? Boolean(previous.grpcMultiMode) : input.grpcMultiMode,
       xhttpMode: input.xhttpMode === undefined ? previous.xhttpMode || 'auto' : input.xhttpMode,
+      realityTarget: input.realityTarget === undefined ? previous.realityTarget || '' : input.realityTarget || '',
+      realityServerName: input.realityServerName === undefined ? previous.realityServerName || '' : input.realityServerName || '',
       socksRelayEnabled: input.socksRelayEnabled === undefined ? Boolean(previous.socksRelayEnabled) : input.socksRelayEnabled,
       socksNodeId: input.socksNodeId === undefined ? previous.socksNodeId || null : input.socksNodeId || null
     };

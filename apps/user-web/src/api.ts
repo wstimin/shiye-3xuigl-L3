@@ -26,6 +26,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
         credentials: 'include',
         ...requestOptions,
         method,
+        cache: safeRead ? 'no-store' : requestOptions.cache,
         signal: controller.signal,
         headers: {
           'content-type': 'application/json',

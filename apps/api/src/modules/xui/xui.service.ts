@@ -73,6 +73,8 @@ type CreateServiceInboundInput = {
   grpcAuthority?: string;
   grpcMultiMode?: boolean;
   xhttpMode?: string;
+  realityTarget?: string;
+  realityServerName?: string;
   enabled: boolean;
   port?: number;
   remark?: string | null;
@@ -103,6 +105,7 @@ type ClientMatch = {
 type RealityTargetInfo = {
   target: string;
   serverName: string;
+  source: 'scan' | 'configured' | 'preset';
   scan?: Record<string, unknown> | null;
 };
 
@@ -131,6 +134,15 @@ type RemoteSocksRouteState = {
 
 const SHIYE_ROUTE_MARK = 'shiye-service-node';
 const SHARE_LINK_PROTOCOLS = new Set(['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria', 'hysteria2']);
+const REALITY_TARGET_CANDIDATES = [
+  { target: 'www.amazon.com:443', serverName: 'www.amazon.com' },
+  { target: 'aws.amazon.com:443', serverName: 'aws.amazon.com' },
+  { target: 'www.oracle.com:443', serverName: 'www.oracle.com' },
+  { target: 'www.nvidia.com:443', serverName: 'www.nvidia.com' },
+  { target: 'www.amd.com:443', serverName: 'www.amd.com' },
+  { target: 'www.intel.com:443', serverName: 'www.intel.com' },
+  { target: 'www.sony.com:443', serverName: 'www.sony.com' }
+] as const;
 
 @Injectable()
 export class XuiService {
@@ -348,7 +360,13 @@ export class XuiService {
     if (usedPorts.has(port)) throw new BadRequestException(`3x-ui 入站端口 ${port} 已被占用`);
 
     const tag = this.serviceInboundTag();
-    const serverConfig = { ...this.xuiObject(server.config), baseUrl: server.baseUrl };
+    const serverConfig: Record<string, unknown> = { ...this.xuiObject(server.config), baseUrl: server.baseUrl };
+    if ((input.encryption || 'none') === 'reality') {
+      delete serverConfig.realityTarget;
+      delete serverConfig.realityServerName;
+      if (input.realityTarget) serverConfig.realityTarget = input.realityTarget;
+      if (input.realityServerName) serverConfig.realityServerName = input.realityServerName;
+    }
     const streamSettings = await this.defaultStreamSettings(client, input.encryption || 'none', serverConfig, input);
     const payload = this.buildInboundPayload({ ...input, port, tag, streamSettings });
     const response = await client.addInbound(payload);
@@ -411,7 +429,20 @@ export class XuiService {
         response: this.toJsonValue(response),
         clientResponse: this.toJsonValue(clientResponse)
       }, true);
-      return { inboundId, port, tag, remark: String(payload.remark), remoteClientEmail, remoteClientUuid, remoteClientSubId, links, response };
+      const reality = this.realityLogDetail(streamSettings);
+      return {
+        inboundId,
+        port,
+        tag,
+        remark: String(payload.remark),
+        remoteClientEmail,
+        remoteClientUuid,
+        remoteClientSubId,
+        links,
+        realityTarget: reality?.target,
+        realityServerName: reality?.serverName,
+        response
+      };
     } catch (error) {
       if (!inboundId) {
         const cleanupPayload = await client.listInbounds().catch(() => undefined);
@@ -427,6 +458,19 @@ export class XuiService {
       });
       throw error;
     }
+  }
+
+  async detectRealityTarget(serverId: string) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId } });
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
+    if (!server.enabled) throw new BadRequestException('3x-ui 服务器已停用');
+    const client = await this.createAuthenticatedClient(server);
+    const serverConfig = { ...this.xuiObject(server.config) };
+    delete serverConfig.realityTarget;
+    delete serverConfig.realityServerName;
+    delete serverConfig.tlsServerName;
+    const detected = await this.resolveRealityTarget(client, serverConfig);
+    return { target: detected.target, serverName: detected.serverName, source: detected.source };
   }
 
   async validateServiceNodeInbound(serverId: string, inboundId: number) {
@@ -462,7 +506,13 @@ export class XuiService {
     const currentInbound = this.remoteInboundFromPayload(currentPayload);
     if (!this.inboundIdOf(currentInbound)) throw new BadRequestException(`3x-ui inbound ${input.inboundId} does not exist`);
 
-    const serverConfig = { ...this.xuiObject(server.config), baseUrl: server.baseUrl };
+    const serverConfig: Record<string, unknown> = { ...this.xuiObject(server.config), baseUrl: server.baseUrl };
+    if ((input.encryption || 'none') === 'reality') {
+      delete serverConfig.realityTarget;
+      delete serverConfig.realityServerName;
+      if (input.realityTarget) serverConfig.realityTarget = input.realityTarget;
+      if (input.realityServerName) serverConfig.realityServerName = input.realityServerName;
+    }
     const currentStreamSettings = this.xuiObject(this.parseMaybeJson(currentInbound.streamSettings));
     const currentSecurity = String(currentStreamSettings.security || 'none').trim() || 'none';
     const nextSecurity = input.encryption || 'none';
@@ -479,9 +529,20 @@ export class XuiService {
     const transportUnchanged = requestedTransport === currentTransport.transport && (
       !selectableTransport || this.sameTransportConfig(currentTransport, nextTransport)
     );
-    const streamSettings = currentSecurity === nextSecurity && transportUnchanged
-      ? currentStreamSettings
-      : await this.defaultStreamSettings(client, nextSecurity, serverConfig, nextTransport);
+    const currentReality = this.realityLogDetail(currentStreamSettings);
+    const nextRealityTarget = input.realityTarget || currentReality?.target;
+    const nextRealityServerName = input.realityServerName || currentReality?.serverName;
+    let streamSettings: Record<string, unknown>;
+    if (currentSecurity === 'reality' && nextSecurity === 'reality' && nextRealityTarget && nextRealityServerName) {
+      const realityBase = transportUnchanged
+        ? currentStreamSettings
+        : { ...currentStreamSettings, ...this.transportStreamSettings(nextTransport) };
+      streamSettings = this.patchRealityStreamSettings(realityBase, nextRealityTarget, nextRealityServerName);
+    } else if (currentSecurity === nextSecurity && transportUnchanged) {
+      streamSettings = currentStreamSettings;
+    } else {
+      streamSettings = await this.defaultStreamSettings(client, nextSecurity, serverConfig, nextTransport);
+    }
     const currentSettings = this.xuiObject(this.parseMaybeJson(currentInbound.settings));
     const port = input.port || this.positiveInteger(currentInbound.port);
     if (!port) throw new BadRequestException('3x-ui inbound is missing a valid port');
@@ -509,6 +570,10 @@ export class XuiService {
 
     const response = await client.updateInbound(input.inboundId, payload);
     this.assertXuiSuccess(response);
+    const verifiedPayload = await client.getInbound(input.inboundId);
+    this.assertXuiSuccess(verifiedPayload);
+    const verifiedInbound = this.remoteInboundFromPayload(verifiedPayload);
+    this.assertServiceInboundUpdateApplied(verifiedInbound, input, port, streamSettings);
     await this.writeSyncLog(server.id, 'service-node-inbound-update', 'success', `Updated inbound ${input.inboundId} for ${input.name}`, {
       inboundId: input.inboundId,
       port,
@@ -1688,6 +1753,14 @@ export class XuiService {
   private async resolveRealityTarget(client: XuiClient, serverConfig: Record<string, unknown>): Promise<RealityTargetInfo> {
     const configuredTarget = String(serverConfig.realityTarget || '').trim();
 
+    if (configuredTarget) {
+      const targetSeed = this.normalizeRealityTarget(configuredTarget);
+      const single = await this.scanRealityTarget(client, targetSeed).catch(() => null);
+      const info = this.realityInfoFromScan(single, serverConfig, targetSeed);
+      if (info) return info;
+      return { target: targetSeed, serverName: this.realityServerName(serverConfig, targetSeed), source: 'configured', scan: null };
+    }
+
     const scanned = await this.scanRealityTargets(client).catch(() => null);
     const discovered = this.bestRealityScanResult(scanned);
     if (discovered) {
@@ -1695,16 +1768,16 @@ export class XuiService {
       if (info) return info;
     }
 
-    if (configuredTarget) {
-      const targetSeed = this.normalizeRealityTarget(configuredTarget);
-      const single = await this.scanRealityTarget(client, targetSeed).catch(() => null);
-      const info = this.realityInfoFromScan(single, serverConfig, targetSeed);
+    const start = randomBytes(1).readUInt8(0) % REALITY_TARGET_CANDIDATES.length;
+    for (let offset = 0; offset < REALITY_TARGET_CANDIDATES.length; offset += 1) {
+      const candidate = REALITY_TARGET_CANDIDATES[(start + offset) % REALITY_TARGET_CANDIDATES.length]!;
+      const single = await this.scanRealityTarget(client, candidate.target).catch(() => null);
+      if (!single || (single.feasible !== true && !this.realityTargetFromScan(single))) continue;
+      const info = this.realityInfoFromScan(single, { ...serverConfig, realityServerName: candidate.serverName }, candidate.target);
       if (info) return info;
-      return { target: targetSeed, serverName: this.realityServerName(serverConfig, targetSeed), scan: null };
     }
 
-    const target = this.realityTarget(serverConfig);
-    return { target, serverName: this.realityServerName(serverConfig, target), scan: null };
+    return this.defaultRealityTarget();
   }
 
   private async scanRealityTarget(client: XuiClient, target: string) {
@@ -1716,59 +1789,114 @@ export class XuiService {
   private async scanRealityTargets(client: XuiClient, targets?: string) {
     const payload = await client.scanRealityTargets(targets);
     this.assertXuiSuccess(payload);
-    return this.xuiArray(payload).map((item) => this.xuiObject(item));
+    const root = this.xuiObject(payload);
+    const nested = root.obj ?? root.data ?? root.result ?? payload;
+    return this.xuiArray(nested).map((item) => this.xuiObject(item));
   }
 
   private bestRealityScanResult(results: unknown) {
     const candidates = Array.isArray(results) ? results.map((item) => this.xuiObject(item)) : [];
-    return candidates.find((item) => item.feasible === true && this.stringValue(item.target))
-      || candidates.find((item) => item.feasible !== false && this.stringValue(item.target));
+    const hasTarget = (item: Record<string, unknown>) => this.realityTargetFromScan(item);
+    return candidates.find((item) => item.feasible === true && hasTarget(item))
+      || candidates.find((item) => item.feasible !== false && hasTarget(item));
   }
 
   private realityInfoFromScan(scan: Record<string, unknown> | null | undefined, serverConfig: Record<string, unknown>, fallbackTarget?: string): RealityTargetInfo | null {
     if (!scan) return null;
     if (scan.feasible === false) return null;
-    const targetValue = this.stringValue(scan.target) || fallbackTarget;
+    const targetValue = this.realityTargetFromScan(scan) || fallbackTarget;
     if (!targetValue) return null;
     const target = this.normalizeRealityTarget(targetValue);
     const serverName = this.realityServerNameFromScan(serverConfig, target, scan);
-    return { target, serverName, scan };
+    return { target, serverName, source: 'scan', scan };
   }
 
   private realityServerNameFromScan(serverConfig: Record<string, unknown>, target: string, scan?: Record<string, unknown>) {
-    const serverNames = Array.isArray(scan?.serverNames) ? scan.serverNames.map((item) => String(item).trim()).filter(Boolean) : [];
-    const scannedName = serverNames.find((item) => !item.startsWith('*.') && !this.isIpAddress(item)) || this.stringValue(scan?.host);
+    const rawServerNames = Array.isArray(scan?.serverNames)
+      ? scan.serverNames
+      : String(scan?.serverNames || '').split(',');
+    const serverNames = rawServerNames.map((item) => String(item).trim()).filter(Boolean);
+    const scannedName = serverNames.find((item) => !item.startsWith('*.') && !this.isIpAddress(item))
+      || this.stringValue(scan?.serverName)
+      || this.stringValue(scan?.sni)
+      || this.stringValue(scan?.host);
     if (scannedName && !this.isIpAddress(scannedName)) return scannedName;
+    const configured = String(serverConfig.realityServerName || '').trim();
+    if (configured && !this.isIpAddress(configured)) return configured;
     const host = this.hostFromTarget(target);
     if (host && !this.isIpAddress(host)) return host;
-    const configured = String(serverConfig.realityServerName || '').trim();
-    if (configured) return configured;
-    throw new BadRequestException('Reality requires a domain SNI. Set Reality SNI or use a scan result with a domain.');
+    throw new BadRequestException('Reality 检测结果缺少可用 SNI');
   }
 
-  private realityTarget(serverConfig: Record<string, unknown>) {
-    const target = String(serverConfig.realityTarget || '').trim();
-    if (target) return this.normalizeRealityTarget(target);
-    const host = this.hostFromUrl(String(serverConfig.baseUrl || ''));
-    if (host && !this.isIpAddress(host)) return `${host}:443`;
+  private defaultRealityTarget(): RealityTargetInfo {
+    const index = randomBytes(1).readUInt8(0) % REALITY_TARGET_CANDIDATES.length;
+    const selected = REALITY_TARGET_CANDIDATES[index]!;
+    return { ...selected, source: 'preset', scan: null };
+  }
 
-    throw new BadRequestException('Reality 自动创建需要 3x-ui 面板地址使用域名，或在服务器配置里填写 Reality 目标，例如 example.com:443');
+  private realityTargetFromScan(scan: Record<string, unknown>) {
+    return this.stringValue(scan.target)
+      || this.stringValue(scan.dest)
+      || this.stringValue(scan.address)
+      || this.stringValue(scan.destination);
   }
 
   private realityServerName(serverConfig: Record<string, unknown>, target: string) {
     const configured = String(serverConfig.realityServerName || '').trim();
-    if (configured) return configured;
+    if (configured && !this.isIpAddress(configured)) return configured;
     const host = this.hostFromTarget(target);
     if (host && !this.isIpAddress(host)) return host;
-    throw new BadRequestException('Reality 自动创建需要可用域名作为 SNI，请使用域名面板地址或填写 Reality SNI');
+    throw new BadRequestException('Reality 目标缺少可用域名 SNI，请重新自动检测');
+  }
+
+  private patchRealityStreamSettings(streamSettings: Record<string, unknown>, targetValue: string, serverNameValue: string) {
+    const target = this.normalizeRealityTarget(targetValue);
+    const serverName = serverNameValue.trim();
+    if (!serverName || this.isIpAddress(serverName)) throw new BadRequestException('Reality SNI 必须是有效域名');
+    const currentReality = this.xuiObject(streamSettings.realitySettings);
+    const nested = this.xuiObject(currentReality.settings);
+    const realitySettings: Record<string, unknown> = { ...currentReality, serverNames: [serverName] };
+    if ('dest' in currentReality) realitySettings.dest = target;
+    if ('target' in currentReality || !('dest' in currentReality)) realitySettings.target = target;
+    if ('serverName' in currentReality) realitySettings.serverName = serverName;
+    if (Object.keys(nested).length) realitySettings.settings = { ...nested, serverName };
+    return { ...streamSettings, security: 'reality', realitySettings };
+  }
+
+  private assertServiceInboundUpdateApplied(
+    inbound: Record<string, unknown>,
+    input: UpdateServiceInboundInput,
+    port: number,
+    expectedStreamSettings: Record<string, unknown>
+  ) {
+    if (this.inboundIdOf(inbound) !== input.inboundId) throw new BadGatewayException('远端入站回读失败');
+    if (String(inbound.protocol || '').trim() !== input.protocol) throw new BadGatewayException('远端协议未更新');
+    if (this.positiveInteger(inbound.port) !== port) throw new BadGatewayException('远端端口未更新');
+    if (this.booleanValue(inbound.enable, true) !== input.enabled) throw new BadGatewayException('远端启用状态未更新');
+    if (String(inbound.remark || '').trim() !== String(input.remark || input.name).trim()) throw new BadGatewayException('远端节点名称未更新');
+
+    const actualStreamSettings = this.xuiObject(this.parseMaybeJson(inbound.streamSettings));
+    const expectedSecurity = String(expectedStreamSettings.security || 'none');
+    if (String(actualStreamSettings.security || 'none') !== expectedSecurity) throw new BadGatewayException('远端安全配置未更新');
+    if (!this.sameTransportConfig(this.transportConfigFromStream(actualStreamSettings), this.transportConfigFromStream(expectedStreamSettings))) {
+      throw new BadGatewayException('远端传输配置未更新');
+    }
+    if (expectedSecurity === 'reality') {
+      const expectedReality = this.realityLogDetail(expectedStreamSettings);
+      const actualReality = this.realityLogDetail(actualStreamSettings);
+      if (!expectedReality || !actualReality || expectedReality.target !== actualReality.target || expectedReality.serverName !== actualReality.serverName) {
+        throw new BadGatewayException('远端 Reality 配置未更新');
+      }
+    }
   }
 
   private realityLogDetail(streamSettings: Record<string, unknown>) {
     if (String(streamSettings.security || '') !== 'reality') return undefined;
     const settings = this.xuiObject(streamSettings.realitySettings);
+    const nested = this.xuiObject(settings.settings);
     return {
       target: this.stringValue(settings.dest) || this.stringValue(settings.target),
-      serverName: this.stringValue(settings.serverName) || this.xuiArray(settings.serverNames).map((item) => String(item)).find(Boolean) || '',
+      serverName: this.stringValue(settings.serverName) || this.xuiArray(settings.serverNames).map((item) => String(item)).find(Boolean) || this.stringValue(nested.serverName) || '',
       alpn: this.xuiArray(settings.alpn).map((item) => String(item)).filter(Boolean)
     };
   }

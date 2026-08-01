@@ -128,3 +128,60 @@ test('panel deletion is rejected while route nodes still reference it', async ()
   await assert.rejects(() => service.deleteServer('server-1'), /请先删除关联路由节点/);
   assert.equal(deleted, 0);
 });
+
+
+test('editing only the node name syncs the inbound without resyncing remote clients', async () => {
+  let inboundSyncs = 0;
+  let clientSyncs = 0;
+  const current = {
+    id: 'node-1',
+    serverId: 'server-1',
+    name: '旧名称',
+    protocol: 'vless',
+    inboundId: 12,
+    enabled: true,
+    trafficLimitGb: 100,
+    remark: null,
+    config: {
+      remoteMode: 'create',
+      remoteManaged: true,
+      remoteInboundRemark: '旧名称',
+      remoteInboundPort: 24443,
+      encryption: 'none',
+      transport: 'tcp',
+      tcpHeaderType: 'none',
+      transportHost: '',
+      transportPath: '/',
+      grpcServiceName: '',
+      grpcAuthority: '',
+      grpcMultiMode: false,
+      xhttpMode: 'auto'
+    }
+  };
+  let stored = { ...current };
+  const prisma = {
+    serviceNode: {
+      findUnique: async () => stored,
+      findFirst: async () => null,
+      update: async ({ data }: any) => {
+        stored = {
+          ...stored,
+          ...Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)),
+          config: data.config || stored.config
+        };
+        return { ...stored, server: { id: 'server-1', name: '面板', baseUrl: 'https://panel.example.com', enabled: true } };
+      }
+    },
+    customerNode: { updateMany: async () => ({ count: 0 }) },
+    syncTask: { updateMany: async () => ({ count: 0 }), upsert: async () => ({}) }
+  } as any;
+  const xui = {
+    updateServiceNodeInbound: async () => { inboundSyncs += 1; return { updated: true }; },
+    syncServiceNodeTrafficLimit: async () => { clientSyncs += 1; return { synced: true, failed: 0 }; }
+  } as any;
+  const service = new NodesService(prisma, encryption(), xui);
+  const result = await service.updateServiceNode('node-1', { name: '新名称' });
+  assert.equal(result.state, 'success');
+  assert.equal(inboundSyncs, 1);
+  assert.equal(clientSyncs, 0);
+});

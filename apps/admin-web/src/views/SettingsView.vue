@@ -97,16 +97,7 @@ async function loadSettings() {
   loading.value = true;
   error.value = '';
   try {
-    const settings = await api<AdminSettings>('/api/admin/settings');
-    const brand = settings.brand || { brandName: '十夜管理系统', logoDataUrl: '' };
-    const business = settings.business || { cardPurchaseUrl: '' };
-    const runtime = settings.runtime || defaultRuntime;
-    Object.assign(brandForm, brand);
-    Object.assign(businessForm, business);
-    Object.assign(runtimeForm, runtime);
-    savedBrand.value = { ...brand };
-    savedBusiness.value = { ...business };
-    savedRuntime.value = { ...runtime };
+    applySettings(await fetchSettings());
     return true;
   } catch (err) {
     showError(err, '加载系统配置失败');
@@ -114,6 +105,22 @@ async function loadSettings() {
   } finally {
     loading.value = false;
   }
+}
+
+function fetchSettings() {
+  return api<AdminSettings>('/api/admin/settings', { cache: 'no-store' });
+}
+
+function applySettings(settings: AdminSettings) {
+  const brand = settings.brand || { brandName: '十夜管理系统', logoDataUrl: '' };
+  const business = settings.business || { cardPurchaseUrl: '' };
+  const runtime = settings.runtime || defaultRuntime;
+  Object.assign(brandForm, brand);
+  Object.assign(businessForm, business);
+  Object.assign(runtimeForm, runtime);
+  savedBrand.value = { ...brand };
+  savedBusiness.value = { ...business };
+  savedRuntime.value = { ...runtime };
 }
 
 async function refreshSettings() {
@@ -133,7 +140,8 @@ async function refreshSettings() {
 }
 
 async function updateSettings(payload: SettingsUpdatePayload) {
-  return api<AdminSettings>('/api/admin/settings', { method: 'PUT', body: payload });
+  await api<AdminSettings>('/api/admin/settings', { method: 'PUT', body: payload });
+  return fetchSettings();
 }
 
 async function saveBrand() {

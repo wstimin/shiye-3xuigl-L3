@@ -39,6 +39,11 @@ export class XuiController {
   @Roles('admin')
   testStoredServer(@Param('id') id: string) { return this.xui.testStoredServer(id); }
 
+  @Post('admin/xui-servers/:id/reality-detect')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  detectReality(@Param('id') id: string) { return this.xui.detectRealityTarget(id); }
+
   @Get('admin/xui-servers/:id/certs')
   @UseGuards(AuthGuard)
   @Roles('admin')

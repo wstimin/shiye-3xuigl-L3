@@ -41,6 +41,7 @@ import { entityAvatarStyle, entityInitial } from '../entity-avatar';
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
 type SyncTask = { id: string; action: string; status: string; message?: string | null; attemptCount: number; updatedAt: string };
 type OperationResult = { state?: 'success' | 'partial' | 'failed'; message?: string; pendingActions?: string[] };
+type RealityDetection = { target: string; serverName: string; source: 'scan' | 'configured' | 'preset' };
 type SocksNode = { id: string; name: string; host: string; port: number; enabled: boolean };
 type ServiceNodeConfig = {
   encryption?: string;
@@ -52,6 +53,8 @@ type ServiceNodeConfig = {
   grpcAuthority?: string;
   grpcMultiMode?: boolean;
   xhttpMode?: string;
+  realityTarget?: string;
+  realityServerName?: string;
   socksRelayEnabled?: boolean;
   socksNodeId?: string | null;
   remoteMode?: 'create' | 'bind';
@@ -128,6 +131,9 @@ const resettingTrafficIds = ref<Set<string>>(new Set());
 const togglingIds = ref<Set<string>>(new Set());
 const deletingIds = ref<Set<string>>(new Set());
 const retryingIds = ref<Set<string>>(new Set());
+const detectingReality = ref(false);
+const realityDetectionRequestId = ref(0);
+const realityDetectionError = ref('');
 const error = ref('');
 const searchQuery = ref('');
 const selectedServerId = ref('');
@@ -152,6 +158,8 @@ const form = reactive({
   grpcAuthority: '',
   grpcMultiMode: false,
   xhttpMode: 'auto',
+  realityTarget: '',
+  realityServerName: '',
   priceMonthly: 0,
   trafficLimitGb: 0,
   enabled: true,
@@ -226,6 +234,10 @@ async function loadNodes() {
 
 async function saveNode() {
   if (saving.value) return;
+  if (form.remoteMode === 'create' && form.encryption === 'reality' && (!form.realityTarget || !form.realityServerName)) {
+    const detected = await detectReality();
+    if (!detected) return;
+  }
   saving.value = true;
   error.value = '';
   try {
@@ -320,6 +332,38 @@ async function resetRemoteTraffic(node: ServiceNode) {
   }
 }
 
+async function detectReality() {
+  if (!form.serverId) return false;
+  const serverId = form.serverId;
+  const requestId = ++realityDetectionRequestId.value;
+  detectingReality.value = true;
+  realityDetectionError.value = '';
+  try {
+    const result = await api<RealityDetection>(`/api/admin/xui-servers/${serverId}/reality-detect`, { method: 'POST' });
+    if (requestId !== realityDetectionRequestId.value || form.serverId !== serverId) return false;
+    form.realityTarget = result.target;
+    form.realityServerName = result.serverName;
+    ElMessage.success('Reality 检测成功');
+    return true;
+  } catch {
+    if (requestId !== realityDetectionRequestId.value || form.serverId !== serverId) return false;
+    form.realityTarget = '';
+    form.realityServerName = '';
+    realityDetectionError.value = 'Reality 自动检测失败';
+    ElMessage.error(realityDetectionError.value);
+    return false;
+  } finally {
+    if (requestId === realityDetectionRequestId.value) detectingReality.value = false;
+  }
+}
+
+function handleServerChange() {
+  if (form.remoteMode !== 'create' || form.encryption !== 'reality') return;
+  form.realityTarget = '';
+  form.realityServerName = '';
+  void detectReality();
+}
+
 function openDialog() {
   resetForm();
   dialogVisible.value = true;
@@ -344,6 +388,8 @@ function editNode(node: ServiceNode) {
     grpcAuthority: config.grpcAuthority || '',
     grpcMultiMode: Boolean(config.grpcMultiMode),
     xhttpMode: config.xhttpMode || 'auto',
+    realityTarget: config.realityTarget || '',
+    realityServerName: config.realityServerName || '',
     priceMonthly: Number(node.priceMonthly),
     trafficLimitGb: Number(node.trafficLimitGb),
     enabled: node.enabled,
@@ -351,6 +397,7 @@ function editNode(node: ServiceNode) {
     socksNodeId: config.socksNodeId || '',
     remark: node.remark || ''
   });
+  realityDetectionError.value = '';
   dialogVisible.value = true;
 }
 
@@ -403,16 +450,16 @@ async function toggleNodeEnabled(node: ServiceNode, enabled = !node.enabled) {
 async function retryNodeTasks(node: ServiceNode) {
   if (retryingIds.value.has(node.id) || !node.syncTasks?.length) return;
   retryingIds.value = addPendingId(retryingIds.value, node.id);
-  let failed = 0;
+  const failed: string[] = [];
   const priority: Record<string, number> = { 'service-inbound': 1, 'service-config': 2, 'service-clients': 3, 'service-delete-check': 4 };
   for (const task of [...node.syncTasks].sort((left, right) => (priority[left.action] || 9) - (priority[right.action] || 9))) {
     try {
       await api(`/api/admin/sync-tasks/${task.id}/retry`, { method: 'POST' });
     } catch {
-      failed += 1;
+      failed.push(syncTaskLabel(task.action));
     }
   }
-  if (failed) ElMessage.warning('部分同步失败');
+  if (failed.length) ElMessage.warning(`${failed.join('、')}失败`);
   else ElMessage.success('同步成功');
   retryingIds.value = removePendingId(retryingIds.value, node.id);
   await loadNodes();
@@ -453,6 +500,9 @@ function resetFilters() {
 
 function resetForm() {
   editingId.value = '';
+  realityDetectionRequestId.value += 1;
+  detectingReality.value = false;
+  realityDetectionError.value = '';
   Object.assign(form, {
     name: '',
     serverId: servers.value[0]?.id || '',
@@ -469,6 +519,8 @@ function resetForm() {
     grpcAuthority: '',
     grpcMultiMode: false,
     xhttpMode: 'auto',
+    realityTarget: '',
+    realityServerName: '',
     priceMonthly: 0,
     trafficLimitGb: 0,
     enabled: true,
@@ -499,6 +551,20 @@ function transportLabel(transport?: string) {
     quic: 'QUIC'
   };
   return transportOptions.find((item) => item.value === transport)?.label || knownLabels[String(transport || '').toLowerCase()] || String(transport || 'tcp').toUpperCase();
+}
+
+function syncTaskLabel(action: string) {
+  const labels: Record<string, string> = {
+    'service-inbound': '入站待同步',
+    'service-clients': '用户待同步',
+    'service-config': '出站待同步',
+    'service-delete-check': '删除待确认'
+  };
+  return labels[action] || '待同步';
+}
+
+function syncTaskSummary(node: ServiceNode) {
+  return (node.syncTasks || []).map((task) => `${syncTaskLabel(task.action)}：${task.message || '同步失败'}`).join('；');
 }
 
 function nodeRegion(node: ServiceNode) {
@@ -552,7 +618,12 @@ watch(() => form.protocol, (protocol) => {
 });
 
 watch(() => form.encryption, (encryption) => {
-  if (encryption === 'reality') form.transport = 'tcp';
+  if (encryption === 'reality') {
+    form.transport = 'tcp';
+    if (form.remoteMode === 'create' && form.serverId && (!form.realityTarget || !form.realityServerName)) void detectReality();
+  } else {
+    realityDetectionError.value = '';
+  }
 });
 
 watch(() => form.transport, () => {
@@ -648,7 +719,7 @@ watch(() => form.transport, () => {
             <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
             <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
             <span v-if="node.config?.socksRelayEnabled" class="route-node-tag relay" :title="socksLabel(node.config.socksNodeId)">SOCKS 中转</span>
-            <span v-if="node.syncTasks?.length" class="route-node-tag sync-pending" :title="node.syncTasks.map((task) => task.message || task.action).join('；')">待同步 {{ node.syncTasks.length }}</span>
+            <span v-for="task in node.syncTasks || []" :key="task.id" class="route-node-tag sync-pending" :title="syncTaskSummary(node)">{{ syncTaskLabel(task.action) }}</span>
           </div>
           <span class="runtime-summary-note" :title="[node.server?.name || '未关联面板', remoteModeLabel(node), node.remark].filter(Boolean).join(' · ')"><Server :size="12" />{{ node.server?.name || '未关联面板' }} · {{ remoteModeLabel(node) }}<template v-if="node.remark"> · {{ node.remark }}</template></span>
         </div>
@@ -725,7 +796,7 @@ watch(() => form.transport, () => {
         <div class="node-dialog-grid">
           <el-form-item label="节点名称"><el-input v-model="form.name" maxlength="100" placeholder="输入节点名称" /></el-form-item>
           <el-form-item label="面板连接">
-            <el-select v-model="form.serverId" placeholder="选择面板连接" style="width: 100%">
+            <el-select v-model="form.serverId" placeholder="选择面板连接" style="width: 100%" @change="handleServerChange">
               <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id" />
             </el-select>
           </el-form-item>
@@ -757,6 +828,18 @@ watch(() => form.transport, () => {
               <el-option v-for="item in selectableEncryptionOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
+          <template v-if="form.remoteMode === 'create' && form.encryption === 'reality'">
+            <el-form-item label="Reality 目标">
+              <el-input v-model="form.realityTarget" readonly placeholder="自动检测后填写" />
+            </el-form-item>
+            <el-form-item label="Reality SNI">
+              <el-input v-model="form.realityServerName" readonly placeholder="自动检测后填写" />
+            </el-form-item>
+            <el-form-item class="node-dialog-full">
+              <el-button class="node-secondary-button" :loading="detectingReality" :disabled="!form.serverId" @click="detectReality"><RefreshCw :size="15" />重新检测</el-button>
+              <span v-if="realityDetectionError" class="node-reality-error">{{ realityDetectionError }}</span>
+            </el-form-item>
+          </template>
         </div>
       </section>
 
@@ -826,7 +909,7 @@ watch(() => form.transport, () => {
       <el-button
         type="primary"
         :loading="saving"
-        :disabled="!form.name || !form.serverId || (form.remoteMode === 'bind' && !form.inboundId) || (form.socksRelayEnabled && !form.socksNodeId)"
+        :disabled="!form.name || !form.serverId || (form.remoteMode === 'bind' && !form.inboundId) || (form.remoteMode === 'create' && form.encryption === 'reality' && (detectingReality || !form.realityTarget || !form.realityServerName)) || (form.socksRelayEnabled && !form.socksNodeId)"
         @click="saveNode"
       >{{ editingId ? '保存修改' : '创建节点' }}</el-button>
     </template>

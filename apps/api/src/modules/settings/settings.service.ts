@@ -15,6 +15,10 @@ type BusinessSettings = {
   cardPurchaseUrl: string;
 };
 
+type RuntimeSettings = {
+  adminPath: string;
+};
+
 type SettingsUpdateInput = z.infer<typeof settingsUpdateSchema>;
 
 @Injectable()
@@ -23,7 +27,7 @@ export class SettingsService {
 
   async publicBranding(): Promise<BrandSettings> {
     const row = await this.prisma.systemSetting.findUnique({ where: { key: 'brand' } });
-    const value = row?.value && typeof row.value === 'object' ? row.value as Partial<BrandSettings> : {};
+    const value = settingObject<BrandSettings>(row?.value);
     return {
       brandName: value.brandName || process.env.APP_NAME || '十夜管理系统',
       logoDataUrl: value.logoDataUrl || ''
@@ -32,7 +36,7 @@ export class SettingsService {
 
   async publicBusiness(): Promise<BusinessSettings> {
     const row = await this.prisma.systemSetting.findUnique({ where: { key: 'business' } });
-    const value = row?.value && typeof row.value === 'object' ? row.value as Partial<BusinessSettings> : {};
+    const value = settingObject<BusinessSettings>(row?.value);
     return { cardPurchaseUrl: value.cardPurchaseUrl || '' };
   }
 
@@ -42,8 +46,8 @@ export class SettingsService {
   }
 
   async adminSettings() {
-    const [brand, business] = await Promise.all([this.publicBranding(), this.publicBusiness()]);
-    return { brand, business, runtime: this.runtimeSettings() };
+    const [brand, business, runtime] = await Promise.all([this.publicBranding(), this.publicBusiness(), this.runtimeSettings()]);
+    return { brand, business, runtime };
   }
 
   async updateSettings(input: SettingsUpdateInput) {
@@ -64,14 +68,24 @@ export class SettingsService {
     }
 
     if (input.runtime) {
-      this.updateRuntimeSettings(input.runtime);
+      const runtime = { adminPath: normalizeAdminPath(input.runtime.adminPath) };
+      this.updateRuntimeEnv(runtime);
+      await this.prisma.systemSetting.upsert({
+        where: { key: 'runtime' },
+        create: { key: 'runtime', value: toJsonValue(runtime) },
+        update: { value: toJsonValue(runtime) }
+      });
     }
 
-    return this.adminSettings();
+    const saved = await this.adminSettings();
+    this.assertSettingsSaved(input, saved);
+    return saved;
   }
 
-  private runtimeSettings() {
-    const adminPath = normalizeAdminPath(process.env.ADMIN_PATH || '/admin');
+  private async runtimeSettings() {
+    const row = await this.prisma.systemSetting.findUnique({ where: { key: 'runtime' } });
+    const value = settingObject<RuntimeSettings>(row?.value);
+    const adminPath = normalizeAdminPath(value.adminPath || process.env.ADMIN_PATH || '/admin');
     return {
       adminPath,
       activeAdminPath: adminPath,
@@ -79,13 +93,29 @@ export class SettingsService {
     };
   }
 
-  private updateRuntimeSettings(input: { adminPath: string }) {
+  private updateRuntimeEnv(input: RuntimeSettings) {
     const adminPath = normalizeAdminPath(input.adminPath);
     const envPath = findEnvPath();
     if (!envPath) throw new InternalServerErrorException('未找到 .env 文件，无法保存管理路径');
     setEnvValue(envPath, 'ADMIN_PATH', adminPath);
     process.env.ADMIN_PATH = adminPath;
   }
+
+  private assertSettingsSaved(input: SettingsUpdateInput, saved: Awaited<ReturnType<SettingsService['adminSettings']>>) {
+    if (input.brand && (saved.brand.brandName !== input.brand.brandName || saved.brand.logoDataUrl !== input.brand.logoDataUrl)) {
+      throw new InternalServerErrorException('品牌设置保存失败');
+    }
+    if (input.business && saved.business.cardPurchaseUrl !== input.business.cardPurchaseUrl) {
+      throw new InternalServerErrorException('业务设置保存失败');
+    }
+    if (input.runtime && saved.runtime.adminPath !== normalizeAdminPath(input.runtime.adminPath)) {
+      throw new InternalServerErrorException('管理路径保存失败');
+    }
+  }
+}
+
+function settingObject<T extends object>(value: unknown): Partial<T> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Partial<T> : {};
 }
 
 function toJsonValue(value: unknown): Prisma.InputJsonValue {

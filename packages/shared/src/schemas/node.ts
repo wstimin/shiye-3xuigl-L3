@@ -75,6 +75,8 @@ export const serviceNodeUpsertSchema = z.object({
   grpcAuthority: z.string().trim().max(255).optional().or(z.literal('')),
   grpcMultiMode: z.boolean().default(false),
   xhttpMode: serviceNodeXhttpModeSchema.default('auto'),
+  realityTarget: z.string().trim().max(255).optional().or(z.literal('')),
+  realityServerName: z.string().trim().max(255).optional().or(z.literal('')),
   socksRelayEnabled: z.boolean().default(false),
   socksNodeId: z.string().trim().optional().or(z.literal('')),
   priceMonthly: z.coerce.number().finite().min(0).default(0),
