@@ -5,6 +5,7 @@ import { ArrowRight, CalendarClock, CircleAlert, CircleUserRound, Gauge, Home, L
 import { api, onSessionExpired } from './api';
 import { userAvatarStyle, userInitial } from './avatar';
 import { onNotify, type NotifyPayload } from './notify';
+import { preloadRoute, routeLoadError, routeLoading } from './router';
 
 type SessionUser = { role: string; username: string };
 type Branding = { brandName: string; logoDataUrl: string };
@@ -146,6 +147,10 @@ function closeNotice(id: number) {
   notices.value = notices.value.filter((notice) => notice.id !== id);
 }
 
+function reloadPage() {
+  window.location.reload();
+}
+
 onMounted(async () => {
   stopNotify = onNotify(pushNotice);
   stopSessionExpired = onSessionExpired(handleSessionExpired);
@@ -270,7 +275,7 @@ watch(() => route.fullPath, () => {
         <button class="mobile-nav-close" type="button" title="关闭导航" @click="mobileNavOpen = false"><X :size="18" /></button>
       </div>
       <nav class="user-nav">
-        <router-link v-for="item in nav" :key="item.to" :to="item.to" class="nav-link">
+        <router-link v-for="item in nav" :key="item.to" :to="item.to" class="nav-link" @mouseenter="preloadRoute(item.to)" @focus="preloadRoute(item.to)">
           <component :is="item.icon" :size="18" />
           <span>{{ item.label }}</span>
         </router-link>
@@ -298,8 +303,19 @@ watch(() => route.fullPath, () => {
           <router-link to="/finance" class="topbar-button primary"><WalletCards :size="16" />余额充值</router-link>
         </div>
       </header>
-      <main class="user-main">
-        <router-view />
+      <main class="user-main route-stage">
+        <div class="route-progress" :class="{ active: routeLoading }" aria-hidden="true"><span></span></div>
+        <div v-if="routeLoadError" class="route-load-error" role="alert">
+          <CircleAlert :size="20" />
+          <div><strong>页面加载失败</strong><span>{{ routeLoadError }}</span></div>
+          <button type="button" @click="reloadPage">刷新重试</button>
+        </div>
+        <router-view v-else v-slot="{ Component }">
+          <Suspense>
+            <component :is="Component" />
+            <template #fallback><div class="route-loading-panel"><span></span><strong>正在加载页面</strong></div></template>
+          </Suspense>
+        </router-view>
       </main>
     </div>
   </div>

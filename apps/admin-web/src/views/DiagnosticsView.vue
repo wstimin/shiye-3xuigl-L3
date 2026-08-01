@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/dialog/style/css';
+import 'element-plus/es/components/empty/style/css';
+import 'element-plus/es/components/table/style/css';
+import 'element-plus/es/components/table-column/style/css';
+import 'element-plus/es/components/tag/style/css';
+import 'element-plus/es/components/tooltip/style/css';
 import { computed, onMounted, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElAlert, ElButton, ElDialog, ElEmpty, ElMessage, ElTable as ElTableComponent, ElTableColumn as ElTableColumnComponent, ElTag, ElTooltip } from 'element-plus';
+const ElTable = ElTableComponent as any;
+const ElTableColumn = ElTableColumnComponent as any;
 import {
   Activity,
   CircleCheckBig,

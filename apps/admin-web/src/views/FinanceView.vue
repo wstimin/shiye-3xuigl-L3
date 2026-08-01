@@ -1,6 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/collapse/style/css';
+import 'element-plus/es/components/collapse-item/style/css';
+import 'element-plus/es/components/date-picker/style/css';
+import 'element-plus/es/components/empty/style/css';
+import 'element-plus/es/components/input/style/css';
+import 'element-plus/es/components/option/style/css';
+import 'element-plus/es/components/pagination/style/css';
+import 'element-plus/es/components/select/style/css';
+import 'element-plus/es/components/table/style/css';
+import 'element-plus/es/components/table-column/style/css';
+import 'element-plus/es/components/tag/style/css';
+import { ElAlert, ElButton, ElCollapse, ElCollapseItem, ElDatePicker, ElEmpty, ElInput, ElMessage, ElMessageBox, ElOption, ElPagination, ElSelect, ElTable, ElTableColumn, ElTag } from 'element-plus';
 import { CircleCheckBig, Landmark, ReceiptText, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, WalletCards } from 'lucide-vue-next';
 import { api } from '../api';
 

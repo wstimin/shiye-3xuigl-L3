@@ -1,6 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/date-picker/style/css';
+import 'element-plus/es/components/dialog/style/css';
+import 'element-plus/es/components/dropdown/style/css';
+import 'element-plus/es/components/dropdown-item/style/css';
+import 'element-plus/es/components/dropdown-menu/style/css';
+import 'element-plus/es/components/form/style/css';
+import 'element-plus/es/components/form-item/style/css';
+import 'element-plus/es/components/input/style/css';
+import 'element-plus/es/components/input-number/style/css';
+import 'element-plus/es/components/option/style/css';
+import 'element-plus/es/components/pagination/style/css';
+import 'element-plus/es/components/select/style/css';
+import 'element-plus/es/components/switch/style/css';
+import 'element-plus/es/components/tag/style/css';
+import 'element-plus/es/components/tooltip/style/css';
+import { ElAlert, ElButton, ElDatePicker, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElForm, ElFormItem, ElInput, ElInputNumber, ElMessage, ElMessageBox, ElOption, ElPagination, ElSelect, ElSwitch, ElTag as ElTagComponent, ElTooltip } from 'element-plus';
+const ElTag = ElTagComponent as any;
 import { Activity, CalendarClock, CircleCheckBig, Edit3, KeyRound, Link2, MoreHorizontal, Plus, RefreshCw, RotateCcw, Search, ServerOff, Trash2, Unlink, UserRound, Users, Wallet } from 'lucide-vue-next';
 import { api } from '../api';
 

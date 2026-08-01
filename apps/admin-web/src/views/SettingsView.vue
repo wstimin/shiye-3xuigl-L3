@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, type Component } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/form/style/css';
+import 'element-plus/es/components/form-item/style/css';
+import 'element-plus/es/components/input/style/css';
+import { ElAlert, ElButton, ElForm, ElFormItem, ElInput, ElMessage, ElMessageBox } from 'element-plus';
 import {
   AlertTriangle,
   ChevronRight,

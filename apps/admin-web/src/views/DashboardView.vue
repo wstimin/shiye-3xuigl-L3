@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/switch/style/css';
+import { ElAlert, ElMessage, ElMessageBox, ElSwitch } from 'element-plus';
 import {
   Activity,
   Banknote,

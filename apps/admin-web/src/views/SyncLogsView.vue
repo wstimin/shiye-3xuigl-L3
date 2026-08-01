@@ -1,6 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/dialog/style/css';
+import 'element-plus/es/components/empty/style/css';
+import 'element-plus/es/components/input-number/style/css';
+import 'element-plus/es/components/option/style/css';
+import 'element-plus/es/components/select/style/css';
+import 'element-plus/es/components/table/style/css';
+import 'element-plus/es/components/table-column/style/css';
+import 'element-plus/es/components/tag/style/css';
+import { ElAlert, ElButton, ElDialog, ElEmpty, ElInputNumber, ElMessage, ElOption, ElSelect, ElTable as ElTableComponent, ElTableColumn as ElTableColumnComponent, ElTag } from 'element-plus';
+const ElTable = ElTableComponent as any;
+const ElTableColumn = ElTableColumnComponent as any;
 import { AlertTriangle, CheckCircle2, Copy, ListChecks, RefreshCw, RotateCcw, Search, Split } from 'lucide-vue-next';
 import { api } from '../api';
 

@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ArrowRight, CircleAlert, ClipboardList, CreditCard, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
 import { api, onSessionExpired } from './api';
+import { preloadRoute, routeLoadError, routeLoading } from './router';
 
 type SessionUser = { role: string; username: string };
 type Branding = { brandName: string; logoDataUrl: string };
@@ -159,6 +160,10 @@ function handleBrandingUpdated(event: Event) {
   applyBrowserBranding(branding);
 }
 
+function reloadPage() {
+  window.location.reload();
+}
+
 onMounted(async () => {
   stopSessionExpired = onSessionExpired(handleSessionExpired);
   window.addEventListener(brandingUpdatedEvent, handleBrandingUpdated);
@@ -266,7 +271,7 @@ onUnmounted(() => {
       <nav class="sidebar-scroll">
         <section v-for="section in navSections" :key="section.label" class="nav-section">
           <div class="nav-section-title">{{ section.label }}</div>
-          <router-link v-for="item in section.items" :key="item.to" :to="item.to" class="nav-item" :title="item.label">
+          <router-link v-for="item in section.items" :key="item.to" :to="item.to" class="nav-item" :title="item.label" @mouseenter="preloadRoute(item.to)" @focus="preloadRoute(item.to)">
             <component :is="item.icon" :size="18" />
             <span>{{ item.label }}</span>
           </router-link>
@@ -294,8 +299,19 @@ onUnmounted(() => {
         <div v-if="isDarkAdminRoute" class="topbar-user-badge"><i></i>{{ user.username }}</div>
         <el-tag v-else size="small" type="success">{{ user.username }}</el-tag>
       </el-header>
-      <el-main>
-        <router-view />
+      <el-main class="route-stage">
+        <div class="route-progress" :class="{ active: routeLoading }" aria-hidden="true"><span></span></div>
+        <div v-if="routeLoadError" class="route-load-error" role="alert">
+          <CircleAlert :size="20" />
+          <div><strong>页面加载失败</strong><span>{{ routeLoadError }}</span></div>
+          <button type="button" @click="reloadPage">刷新重试</button>
+        </div>
+        <router-view v-else v-slot="{ Component }">
+          <Suspense>
+            <component :is="Component" />
+            <template #fallback><div class="route-loading-panel"><span></span><strong>正在加载页面</strong></div></template>
+          </Suspense>
+        </router-view>
       </el-main>
     </el-container>
   </el-container>

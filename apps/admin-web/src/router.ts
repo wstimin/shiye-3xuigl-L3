@@ -1,38 +1,49 @@
+import { ref, type Component } from 'vue';
 import { createRouter, createWebHistory } from 'vue-router';
 import { cancelPendingReadRequests } from './api';
-import DashboardView from './views/DashboardView.vue';
-import CustomersView from './views/CustomersView.vue';
-import NodesView from './views/NodesView.vue';
-import XuiServersView from './views/XuiServersView.vue';
-import SocksNodesView from './views/SocksNodesView.vue';
-import SyncLogsView from './views/SyncLogsView.vue';
-import DiagnosticsView from './views/DiagnosticsView.vue';
-import FinanceView from './views/FinanceView.vue';
-import CardsView from './views/CardsView.vue';
-import PaymentsView from './views/PaymentsView.vue';
-import SettingsView from './views/SettingsView.vue';
+
+const viewLoaders: Record<string, () => Promise<{ default: Component }>> = {
+  '/': () => import('./views/DashboardView.vue'),
+  '/customers': () => import('./views/CustomersView.vue'),
+  '/xui-servers': () => import('./views/XuiServersView.vue'),
+  '/nodes': () => import('./views/NodesView.vue'),
+  '/socks-nodes': () => import('./views/SocksNodesView.vue'),
+  '/sync-logs': () => import('./views/SyncLogsView.vue'),
+  '/diagnostics': () => import('./views/DiagnosticsView.vue'),
+  '/finance': () => import('./views/FinanceView.vue'),
+  '/cards': () => import('./views/CardsView.vue'),
+  '/payments': () => import('./views/PaymentsView.vue'),
+  '/settings': () => import('./views/SettingsView.vue')
+};
+
+export const routeLoading = ref(false);
+export const routeLoadError = ref('');
 
 export const router = createRouter({
   history: createWebHistory(adminBasePath()),
-  routes: [
-    { path: '/', component: DashboardView },
-    { path: '/customers', component: CustomersView },
-    { path: '/xui-servers', component: XuiServersView },
-    { path: '/nodes', component: NodesView },
-    { path: '/socks-nodes', component: SocksNodesView },
-    { path: '/sync-logs', component: SyncLogsView },
-    { path: '/diagnostics', component: DiagnosticsView },
-    { path: '/finance', component: FinanceView },
-    { path: '/cards', component: CardsView },
-    { path: '/payments', component: PaymentsView },
-    { path: '/settings', component: SettingsView }
-  ]
+  routes: Object.entries(viewLoaders).map(([path, component]) => ({ path, component }))
 });
 
 router.beforeEach(() => {
   cancelPendingReadRequests();
+  routeLoading.value = true;
+  routeLoadError.value = '';
   return true;
 });
+
+router.afterEach(() => {
+  routeLoading.value = false;
+});
+
+router.onError((error) => {
+  routeLoading.value = false;
+  routeLoadError.value = '页面加载失败，请刷新重试';
+  console.error('Admin route loading failed', error);
+});
+
+export function preloadRoute(path: string) {
+  void viewLoaders[path]?.().catch(() => undefined);
+}
 
 function adminBasePath() {
   const runtimeBase = (window as Window & { __SHIYE_ADMIN_BASE__?: string }).__SHIYE_ADMIN_BASE__;
