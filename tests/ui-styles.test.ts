@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const adminStyles = readFileSync('apps/admin-web/src/styles.css', 'utf8');
 const userStyles = readFileSync('apps/user-web/src/styles.css', 'utf8');
 const financeView = readFileSync('apps/admin-web/src/views/FinanceView.vue', 'utf8');
+const adminMain = readFileSync('apps/admin-web/src/main.ts', 'utf8');
 
 test('runtime-generated UI classes keep their visual rules', () => {
   for (const selector of [
@@ -61,4 +62,15 @@ test('lazy Element Plus styles cannot expand desktop management filters', () => 
   assert.equal(adminStyles.includes('--el-select-width: 136px'), true);
   assert.equal(adminStyles.includes('--el-select-width: 168px'), true);
   assert.equal(financeView.includes('尚未启用在线支付方式；用户仍可使用卡密兑换，管理员也可手工调整余额。'), false);
+});
+
+test('message boxes load their base layout and stay viewport-centered', () => {
+  const baseStyle = "import 'element-plus/es/components/message-box/style/css';";
+  assert.equal(adminMain.includes(baseStyle), true);
+  assert.equal(adminMain.indexOf(baseStyle) < adminMain.indexOf("import './styles.css';"), true);
+  assert.equal(adminStyles.includes('.is-message-box .el-overlay-message-box {'), true);
+  assert.equal(adminStyles.includes('align-items: center;'), true);
+  assert.equal(adminStyles.includes('justify-content: center;'), true);
+  assert.equal(adminStyles.includes('.is-message-box .el-overlay-message-box::after'), true);
+  assert.equal(adminStyles.includes('max-height: calc(100vh - 48px);'), true);
 });

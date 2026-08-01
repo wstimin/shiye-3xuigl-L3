@@ -3156,6 +3156,18 @@ input:-webkit-autofill:active {
   transform: translateY(-1px);
 }
 
+.is-message-box .el-overlay-message-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+}
+
+.is-message-box .el-overlay-message-box::after {
+  display: none;
+}
+
 :is(
   .customer-dark-message-box,
   .node-dark-message-box,
@@ -3165,6 +3177,8 @@ input:-webkit-autofill:active {
 ) {
   --admin-message-border: rgb(255 255 255 / 7%);
   width: min(430px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  margin: auto;
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--admin-message-border);
@@ -3429,6 +3443,10 @@ input:-webkit-autofill:active {
 }
 
 @media (max-width: 600px) {
+  .is-message-box .el-overlay-message-box {
+    padding: 12px;
+  }
+
   :is(
     .customer-dark-dialog,
     .node-dark-dialog,
