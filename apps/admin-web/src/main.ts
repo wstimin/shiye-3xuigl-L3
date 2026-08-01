@@ -17,4 +17,6 @@ for (const component of [ElAside, ElButton, ElContainer, ElHeader, ElMain, ElTag
   app.component(component.name!, component);
 }
 
-app.use(ElLoading).use(router).mount('#app');
+app.use(ElLoading).use(router);
+
+void router.isReady().then(() => app.mount('#app'));

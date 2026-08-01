@@ -24,6 +24,10 @@ test('frontend entrypoints avoid unused stores and full Element Plus installatio
   assert.equal(adminMain.includes('.use(ElementPlus)'), false);
   assert.doesNotMatch(userMain, /createPinia|pinia/);
   assert.equal(adminMain.includes('app.use(ElLoading).use(router)'), true);
+  for (const source of [adminMain, userMain]) {
+    assert.match(source, /router\.isReady\(\)\.then\(\(\) => app\.mount\('#app'\)\)/);
+    assert.equal(source.indexOf('router.isReady()'), source.lastIndexOf('router.isReady()'));
+  }
 });
 
 test('frontend builds keep stable vendor chunks', () => {

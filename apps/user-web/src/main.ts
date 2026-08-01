@@ -6,4 +6,6 @@ import { router } from './router';
 
 installAssetRecovery();
 
-createApp(App).use(router).mount('#app');
+const app = createApp(App).use(router);
+
+void router.isReady().then(() => app.mount('#app'));
