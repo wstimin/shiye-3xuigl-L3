@@ -376,12 +376,13 @@ async function removeServer(server: XuiServer) {
 }
 
 async function toggleServerEnabled(server: XuiServer, enabled = !server.enabled) {
+  if (togglingIds.value.has(server.id)) return;
   const previous = server.enabled;
+  server.enabled = enabled;
   togglingIds.value = addPendingId(togglingIds.value, server.id);
   error.value = '';
   try {
     await api(`/api/admin/xui-servers/${server.id}`, { method: 'PATCH', body: { enabled } });
-    server.enabled = enabled;
     ElMessage.success(enabled ? '面板连接已启用' : '面板连接已停用');
   } catch (err) {
     server.enabled = previous;

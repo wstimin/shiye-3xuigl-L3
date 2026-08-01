@@ -454,13 +454,14 @@ async function handleCustomerCommand(customer: Customer, command: string) {
 }
 
 async function toggleCustomerStatus(customer: Customer, enabled: boolean | string | number) {
+  if (togglingCustomerIds.value.has(customer.id)) return;
   const previous = customer.status;
   const nextStatus: Customer['status'] = Boolean(enabled) ? 'active' : 'disabled';
+  customer.status = nextStatus;
   togglingCustomerIds.value = new Set(togglingCustomerIds.value).add(customer.id);
   error.value = '';
   try {
     await api(`/api/admin/customers/${customer.id}`, { method: 'PATCH', body: { status: nextStatus } });
-    customer.status = nextStatus;
     ElMessage.success(nextStatus === 'active' ? '用户已启用' : '用户已禁用');
   } catch {
     customer.status = previous;

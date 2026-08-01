@@ -355,12 +355,13 @@ async function removeNode(node: ServiceNode) {
 }
 
 async function toggleNodeEnabled(node: ServiceNode, enabled = !node.enabled) {
+  if (togglingIds.value.has(node.id)) return;
   const previous = node.enabled;
+  node.enabled = enabled;
   togglingIds.value = addPendingId(togglingIds.value, node.id);
   error.value = '';
   try {
     await api(`/api/admin/service-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
-    node.enabled = enabled;
     ElMessage.success(enabled ? '路由节点已启用' : '路由节点已停用');
   } catch {
     node.enabled = previous;

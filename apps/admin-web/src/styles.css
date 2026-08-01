@@ -4217,6 +4217,29 @@ input:-webkit-autofill:active {
   color: #dce4ef;
 }
 
+.runtime-action-group .runtime-icon-button:active {
+  transform: translateY(0) scale(.94);
+  border-color: rgb(var(--runtime-accent) / 42%);
+  background: rgb(var(--runtime-accent) / 15%);
+}
+
+.runtime-action-group .runtime-icon-button:focus-visible {
+  outline: 2px solid rgb(var(--runtime-accent) / 42%);
+  outline-offset: 2px;
+}
+
+.runtime-action-group .runtime-icon-button.is-disabled,
+.runtime-action-group .runtime-icon-button:disabled {
+  transform: none;
+  cursor: not-allowed;
+}
+
+.runtime-action-group .runtime-icon-button.is-loading { cursor: wait; }
+
+.runtime-action-group .runtime-icon-button.is-loading svg {
+  opacity: .78;
+}
+
 .runtime-action-group .socks-delete-button:hover {
   border-color: rgb(248 113 113 / 32%);
   background: rgb(248 113 113 / 9%);
@@ -4411,6 +4434,17 @@ input:-webkit-autofill:active {
   background: rgb(99 102 241 / 8%);
 }
 
+.runtime-toggle-switch:active:not(.is-disabled) {
+  transform: scale(.95);
+  border-color: rgb(99 102 241 / 42%);
+  background: rgb(99 102 241 / 12%);
+}
+
+.runtime-toggle-switch:focus-within {
+  outline: 2px solid rgb(99 102 241 / 38%);
+  outline-offset: 2px;
+}
+
 .runtime-toggle-switch .el-switch__core {
   min-width: 28px;
   height: 16px;
@@ -4428,7 +4462,19 @@ input:-webkit-autofill:active {
   box-shadow: 0 0 12px rgb(99 102 241 / 28%);
 }
 
-.runtime-toggle-switch.is-disabled { opacity: .68; }
+.runtime-toggle-switch.is-disabled {
+  opacity: .82;
+  cursor: wait;
+}
+
+.runtime-toggle-switch.is-disabled .el-switch__core {
+  filter: saturate(.9);
+}
+
+.runtime-toggle-switch .el-loading-mask {
+  border-radius: 7px;
+  background: rgb(13 16 23 / 32%);
+}
 
 .customer-user-card,
 .route-node-card,

@@ -209,12 +209,13 @@ async function removeNode(node: SocksNode) {
 }
 
 async function toggleNodeEnabled(node: SocksNode, enabled = !node.enabled) {
+  if (togglingIds.value.has(node.id)) return;
   const previous = node.enabled;
+  node.enabled = enabled;
   togglingIds.value = addPendingId(togglingIds.value, node.id);
   error.value = '';
   try {
     await api(`/api/admin/socks-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
-    node.enabled = enabled;
     ElMessage.success(enabled ? '出站节点已启用' : '出站节点已停用');
   } catch (err) {
     node.enabled = previous;
