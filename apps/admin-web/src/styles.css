@@ -4945,6 +4945,162 @@ input:-webkit-autofill:active {
   vertical-align: middle;
 }
 
+/* Equal-height five-row skeleton shared by all operational cards. */
+:is(.customer-user-card, .route-node-card, .xui-panel-card, .socks-outbound-card) {
+  height: 231px;
+  min-height: 231px;
+  max-height: 231px;
+  display: grid;
+  grid-template-rows: 38px 52px 16px 22px 39px;
+  gap: 9px;
+  align-content: start;
+}
+
+:is(.customer-card-header, .route-node-card-header, .xui-panel-card-header, .socks-card-header) {
+  min-height: 38px;
+  height: 38px;
+}
+
+:is(.customer-card-meta, .route-node-meta, .xui-panel-meta, .socks-card-meta).runtime-metric-grid {
+  height: 52px;
+}
+
+:is(.customer-card-meta, .route-node-meta, .xui-panel-meta, .socks-card-meta).runtime-metric-grid > .runtime-metric {
+  height: 52px;
+  min-height: 52px;
+}
+
+.runtime-endpoint-line {
+  min-width: 0;
+  min-height: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.runtime-endpoint-value {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: #8491a4;
+}
+
+.runtime-endpoint-value svg {
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+.runtime-endpoint-value strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #9aa7b8;
+  font: 10px/1.2 Consolas, Monaco, monospace;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-endpoint-line.is-missing .runtime-endpoint-value strong {
+  color: #64748b;
+  font-family: inherit;
+}
+
+.runtime-inline-copy {
+  width: 20px !important;
+  min-width: 20px !important;
+  max-width: 20px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  max-height: 20px !important;
+  flex: 0 0 20px;
+  display: inline-grid;
+  place-items: center;
+  margin: -2px 0;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 6%);
+  border-radius: 5px;
+  background: rgb(255 255 255 / 2.5%);
+  color: #718096;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.runtime-inline-copy:hover {
+  transform: translateY(-1px);
+  border-color: rgb(var(--runtime-accent) / 30%);
+  background: rgb(var(--runtime-accent) / 9%);
+  color: #d6deea;
+}
+
+.runtime-inline-copy:active {
+  transform: scale(.92);
+}
+
+.runtime-summary-line {
+  min-width: 0;
+  min-height: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+}
+
+.runtime-summary-line :is(.route-node-tags, .xui-panel-tags, .socks-card-tags) {
+  min-width: 0;
+  max-width: 54%;
+  height: 22px;
+  min-height: 22px;
+  max-height: 22px;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.runtime-summary-note {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  overflow: hidden;
+  color: #718096;
+  font-size: 9px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-summary-note svg {
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+:is(.customer-card-actions, .route-node-actions, .xui-panel-actions, .socks-card-actions).runtime-card-footer {
+  min-height: 39px;
+  height: 39px;
+  margin-top: 0;
+  padding-top: 9px;
+}
+
+@media (max-width: 760px) {
+  :is(.customer-user-card, .route-node-card, .xui-panel-card, .socks-outbound-card) {
+    height: 231px;
+    min-height: 231px;
+    max-height: 231px;
+  }
+
+  .runtime-summary-line :is(.route-node-tags, .xui-panel-tags, .socks-card-tags) {
+    max-width: 48%;
+  }
+}
+
 /* System settings console. */
 .settings-console-page {
   --settings-surface: #12141c;

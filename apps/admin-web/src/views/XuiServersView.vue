@@ -679,37 +679,29 @@ onMounted(loadServers);
           <span class="xui-status-chip" :class="connectionStatus(server).className"><i></i>{{ connectionStatus(server).label }}</span>
         </header>
 
-        <div class="xui-panel-address">
-          <Network :size="14" />
-          <div>
-            <small>面板接口地址</small>
-            <strong :title="serverEndpoint(server)">{{ serverEndpoint(server) }}</strong>
-          </div>
-          <el-tooltip content="复制面板接口地址" placement="top">
-            <button type="button" class="xui-copy-button" aria-label="复制面板接口地址" @click="copyServerAddress(server)"><Clipboard :size="14" /></button>
-          </el-tooltip>
-        </div>
-
         <div class="xui-panel-meta runtime-metric-grid">
           <div class="runtime-metric tone-indigo"><span>访问凭据</span><strong>{{ credentialLabel(server) }}</strong></div>
           <div class="runtime-metric" :class="hasTlsConfig(server) ? 'tone-emerald' : 'tone-neutral'"><span>TLS 证书</span><strong>{{ hasTlsConfig(server) ? '已配置' : '未配置' }}</strong></div>
           <div class="runtime-metric tone-amber"><span>入站数量</span><strong>{{ connectionTests[server.id]?.state === 'success' ? (connectionTests[server.id]?.inboundCount ?? 0) : '未测试' }}</strong></div>
         </div>
 
-        <div class="runtime-info-line xui-runtime-info">
-          <span><KeyRound :size="13" />{{ server.username || '未保存登录账号' }}</span>
-          <span><ShieldCheck :size="13" />{{ server.config?.shareHost || '使用面板域名分享' }}</span>
+        <div class="runtime-info-line runtime-endpoint-line xui-runtime-info">
+          <span class="runtime-endpoint-value"><Network :size="13" /><strong :title="serverEndpoint(server)">{{ serverEndpoint(server) }}</strong></span>
+          <el-tooltip content="复制面板接口地址" placement="top">
+            <button type="button" class="runtime-inline-copy xui-copy-button" aria-label="复制面板接口地址" @click="copyServerAddress(server)"><Clipboard :size="12" /></button>
+          </el-tooltip>
         </div>
 
-        <div class="xui-panel-tags">
-          <span v-if="server.hasToken" class="xui-panel-tag token">Token</span>
-          <span v-if="server.hasPassword" class="xui-panel-tag password">密码</span>
-          <span v-if="server.config?.tlsServerName" class="xui-panel-tag tls" :title="server.config.tlsServerName">TLS {{ server.config.tlsServerName }}</span>
-          <span class="xui-panel-tag reality">Reality {{ hasRealityCandidate(server) ? '候选已配置' : '自动探测' }}</span>
-          <span v-if="connectionTests[server.id]?.state === 'success'" class="xui-panel-tag inbound">入站 {{ connectionTests[server.id]?.inboundCount ?? 0 }}</span>
+        <div class="runtime-summary-line xui-panel-summary">
+          <div class="xui-panel-tags">
+            <span v-if="server.hasToken" class="xui-panel-tag token">Token</span>
+            <span v-if="server.hasPassword" class="xui-panel-tag password">密码</span>
+            <span v-if="server.config?.tlsServerName" class="xui-panel-tag tls" :title="server.config.tlsServerName">TLS {{ server.config.tlsServerName }}</span>
+            <span class="xui-panel-tag reality">Reality {{ hasRealityCandidate(server) ? '候选已配置' : '自动探测' }}</span>
+            <span v-if="connectionTests[server.id]?.state === 'success'" class="xui-panel-tag inbound">入站 {{ connectionTests[server.id]?.inboundCount ?? 0 }}</span>
+          </div>
+          <span class="runtime-summary-note" :title="[server.username || '未保存登录账号', server.config?.shareHost || '使用面板域名分享', server.remark].filter(Boolean).join(' · ')"><KeyRound :size="12" />{{ server.username || '未保存登录账号' }} · {{ server.config?.shareHost || '使用面板域名分享' }}<template v-if="server.remark"> · {{ server.remark }}</template></span>
         </div>
-
-        <p v-if="server.remark" class="xui-panel-remark">{{ server.remark }}</p>
 
         <footer class="xui-panel-actions runtime-card-footer">
           <span class="runtime-footer-label"><Network :size="13" />路径 {{ server.basePath || '/' }}</span>

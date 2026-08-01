@@ -421,37 +421,29 @@ onMounted(loadNodes);
           <span class="socks-status-chip" :class="node.syncTasks?.length ? 'is-pending' : node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.syncTasks?.length ? '待同步' : node.enabled ? '已启用' : '已停用' }}</span>
         </header>
 
-        <div class="socks-endpoint">
-          <Server :size="14" />
-          <div>
-            <small>SOCKS 连接地址</small>
-            <strong :title="`${node.host}:${node.port}`">{{ node.host }}:{{ node.port }}</strong>
-          </div>
-          <el-tooltip content="复制 SOCKS 地址" placement="top">
-            <button type="button" class="socks-copy-button" aria-label="复制 SOCKS 地址" @click="copyEndpoint(node)"><Clipboard :size="14" /></button>
-          </el-tooltip>
-        </div>
-
         <div class="socks-card-meta runtime-metric-grid">
           <div class="runtime-metric tone-indigo"><span>认证方式</span><strong>{{ hasAuthentication(node) ? '已配置' : '无认证' }}</strong></div>
           <div class="runtime-metric tone-cyan"><span>路由引用</span><strong>{{ usageCount(node.id) }} 个</strong></div>
           <div class="runtime-metric" :class="isImportedNode(node) ? 'tone-amber' : 'tone-emerald'"><span>节点来源</span><strong>{{ isImportedNode(node) ? '远端导入' : '本地创建' }}</strong></div>
         </div>
 
-        <div class="runtime-info-line socks-runtime-info">
-          <span><KeyRound :size="13" />{{ node.username || '未设置登录账号' }}</span>
-          <span><Link2 :size="13" />{{ usageCount(node.id) ? '正在被路由引用' : '暂未被引用' }}</span>
+        <div class="runtime-info-line runtime-endpoint-line socks-runtime-info">
+          <span class="runtime-endpoint-value"><Server :size="13" /><strong :title="node.host + ':' + node.port">{{ node.host }}:{{ node.port }}</strong></span>
+          <el-tooltip content="复制 SOCKS 地址" placement="top">
+            <button type="button" class="runtime-inline-copy socks-copy-button" aria-label="复制 SOCKS 地址" @click="copyEndpoint(node)"><Clipboard :size="12" /></button>
+          </el-tooltip>
         </div>
 
-        <div class="socks-card-tags">
-          <span class="socks-card-tag protocol">SOCKS</span>
-          <span class="socks-card-tag" :class="isImportedNode(node) ? 'imported' : 'manual'">{{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
-          <span v-if="node.hasPassword" class="socks-card-tag password">已保存密码</span>
-          <span v-if="node.remoteOutboundTag" class="socks-card-tag outbound" :title="node.remoteOutboundTag">{{ node.remoteOutboundTag }}</span>
-          <span v-if="node.syncTasks?.length" class="socks-card-tag sync-pending" :title="node.syncTasks.map((task) => task.message || task.action).join('；')">待同步 {{ node.syncTasks.length }}</span>
+        <div class="runtime-summary-line socks-card-summary">
+          <div class="socks-card-tags">
+            <span class="socks-card-tag protocol">SOCKS</span>
+            <span class="socks-card-tag" :class="isImportedNode(node) ? 'imported' : 'manual'">{{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
+            <span v-if="node.hasPassword" class="socks-card-tag password">已保存密码</span>
+            <span v-if="node.remoteOutboundTag" class="socks-card-tag outbound" :title="node.remoteOutboundTag">{{ node.remoteOutboundTag }}</span>
+            <span v-if="node.syncTasks?.length" class="socks-card-tag sync-pending" :title="node.syncTasks.map((task) => task.message || task.action).join('；')">待同步 {{ node.syncTasks.length }}</span>
+          </div>
+          <span class="runtime-summary-note" :title="[node.username || '未设置登录账号', usageCount(node.id) ? '正在被路由引用' : '暂未被引用', node.remark].filter(Boolean).join(' · ')"><KeyRound :size="12" />{{ node.username || '未设置登录账号' }} · {{ usageCount(node.id) ? '正在被路由引用' : '暂未被引用' }}<template v-if="node.remark"> · {{ node.remark }}</template></span>
         </div>
-
-        <p v-if="node.remark" class="socks-card-remark">{{ node.remark }}</p>
 
         <footer class="socks-card-actions runtime-card-footer">
           <span class="runtime-footer-label"><Network :size="13" />{{ isImportedNode(node) ? (serverName(node.sourceServerId) || '远端面板') : '本地配置' }}</span>

@@ -613,38 +613,30 @@ watch(() => form.transport, () => {
           <span class="node-status-chip" :class="node.syncTasks?.length ? 'is-pending' : node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.syncTasks?.length ? '待同步' : node.enabled ? '已启用' : '已停用' }}</span>
         </header>
 
-        <div class="route-node-address" :class="{ 'is-missing': !node.server?.baseUrl }">
-          <Network :size="14" />
-          <div>
-            <small>面板地址</small>
-            <strong :title="node.server?.baseUrl || ''">{{ node.server?.baseUrl || '未返回面板地址' }}</strong>
-          </div>
-          <el-tooltip v-if="node.server?.baseUrl" content="复制面板地址" placement="top">
-            <button type="button" class="node-copy-button" aria-label="复制面板地址" @click="copyPanelAddress(node)"><Clipboard :size="14" /></button>
-          </el-tooltip>
-        </div>
-
         <div class="route-node-meta runtime-metric-grid">
           <div class="runtime-metric tone-cyan"><span>入站 ID</span><strong>{{ node.inboundId ?? '未绑定' }}</strong></div>
           <div class="runtime-metric tone-indigo"><span>月价格</span><strong>¥ {{ node.priceMonthly }}</strong></div>
           <div class="runtime-metric tone-emerald"><span>流量额度</span><strong>{{ node.trafficLimitGb }} GB</strong></div>
         </div>
 
-        <div class="runtime-info-line route-node-runtime-info">
-          <span><Server :size="13" />{{ node.server?.name || '未关联面板' }}</span>
-          <span><Waypoints :size="13" />{{ remoteModeLabel(node) }}</span>
+        <div class="runtime-info-line runtime-endpoint-line route-node-runtime-info" :class="{ 'is-missing': !node.server?.baseUrl }">
+          <span class="runtime-endpoint-value"><Network :size="13" /><strong :title="node.server?.baseUrl || ''">{{ node.server?.baseUrl || '未返回面板地址' }}</strong></span>
+          <el-tooltip v-if="node.server?.baseUrl" content="复制面板地址" placement="top">
+            <button type="button" class="runtime-inline-copy node-copy-button" aria-label="复制面板地址" @click="copyPanelAddress(node)"><Clipboard :size="12" /></button>
+          </el-tooltip>
         </div>
 
-        <div class="route-node-tags">
-          <span v-if="nodeRegion(node)" class="route-node-tag region">{{ nodeRegion(node)?.label }}</span>
-          <span class="route-node-tag transport">{{ transportLabel(node.config?.transport) }}</span>
-          <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
-          <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
-          <span v-if="node.config?.socksRelayEnabled" class="route-node-tag relay" :title="socksLabel(node.config.socksNodeId)">SOCKS 中转</span>
-          <span v-if="node.syncTasks?.length" class="route-node-tag sync-pending" :title="node.syncTasks.map((task) => task.message || task.action).join('；')">待同步 {{ node.syncTasks.length }}</span>
+        <div class="runtime-summary-line route-node-summary">
+          <div class="route-node-tags">
+            <span v-if="nodeRegion(node)" class="route-node-tag region">{{ nodeRegion(node)?.label }}</span>
+            <span class="route-node-tag transport">{{ transportLabel(node.config?.transport) }}</span>
+            <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
+            <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
+            <span v-if="node.config?.socksRelayEnabled" class="route-node-tag relay" :title="socksLabel(node.config.socksNodeId)">SOCKS 中转</span>
+            <span v-if="node.syncTasks?.length" class="route-node-tag sync-pending" :title="node.syncTasks.map((task) => task.message || task.action).join('；')">待同步 {{ node.syncTasks.length }}</span>
+          </div>
+          <span class="runtime-summary-note" :title="[node.server?.name || '未关联面板', remoteModeLabel(node), node.remark].filter(Boolean).join(' · ')"><Server :size="12" />{{ node.server?.name || '未关联面板' }} · {{ remoteModeLabel(node) }}<template v-if="node.remark"> · {{ node.remark }}</template></span>
         </div>
-
-        <p v-if="node.remark" class="route-node-remark">{{ node.remark }}</p>
 
         <footer class="route-node-actions runtime-card-footer">
           <span class="runtime-footer-label"><RadioTower :size="13" />{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }}</span>
