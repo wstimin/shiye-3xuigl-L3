@@ -31,6 +31,7 @@
     "prisma:dev": "prisma migrate dev --schema prisma/schema.prisma",
     "db:deploy": "npm run prisma:generate && npm run prisma:migrate && npm run db:seed",
     "db:seed": "node scripts/sync-admin.mjs",
+    "pretest": "npm run build:packages",
     "test": "tsx --test tests/*.test.ts",
     "verify:release": "npm run test && npm run typecheck && npm run build:clean && npm run build && npm run deploy:check && npm run release:stage && npm --prefix .release/package run deploy:check"
   },
