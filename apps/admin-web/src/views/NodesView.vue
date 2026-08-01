@@ -7,8 +7,6 @@ import {
   CloudCog,
   Edit3,
   Gauge,
-  Layers3,
-  LockKeyhole,
   MoreHorizontal,
   Network,
   Plus,
@@ -18,13 +16,12 @@ import {
   Router,
   Search,
   Server,
-  ShieldCheck,
   Trash2,
   UploadCloud,
-  Waypoints,
-  Zap
+  Waypoints
 } from 'lucide-vue-next';
 import { api } from '../api';
+import { entityAvatarStyle, entityInitial } from '../entity-avatar';
 
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
 type SocksNode = { id: string; name: string; host: string; port: number; enabled: boolean };
@@ -457,15 +454,6 @@ function transportLabel(transport?: string) {
   return transportOptions.find((item) => item.value === transport)?.label || knownLabels[String(transport || '').toLowerCase()] || String(transport || 'tcp').toUpperCase();
 }
 
-function protocolIcon(protocol: string) {
-  if (protocol === 'vless') return ShieldCheck;
-  if (protocol === 'vmess') return RadioTower;
-  if (protocol === 'trojan') return LockKeyhole;
-  if (protocol === 'shadowsocks') return Layers3;
-  if (protocol === 'hysteria') return Zap;
-  return Router;
-}
-
 function nodeRegion(node: ServiceNode) {
   const text = [node.name, node.remark, node.server?.name, node.server?.baseUrl].filter(Boolean).join(' ').toLowerCase();
   return regionDefinitions.find((region) => {
@@ -584,9 +572,7 @@ watch(() => form.transport, () => {
       <article v-for="node in filteredNodes" :key="node.id" class="route-node-card entity-runtime-card" :class="node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="route-node-card-header">
           <div class="route-node-identity">
-            <span class="route-node-icon" :class="`protocol-${node.protocol}`">
-              <component :is="protocolIcon(node.protocol)" :size="20" />
-            </span>
+            <span class="route-node-icon entity-name-avatar" :style="entityAvatarStyle(node.name, node.id)">{{ entityInitial(node.name, '节') }}</span>
             <div>
               <strong :title="node.name">{{ node.name }}</strong>
               <span>{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }} · {{ node.config?.encryption || 'none' }}</span>

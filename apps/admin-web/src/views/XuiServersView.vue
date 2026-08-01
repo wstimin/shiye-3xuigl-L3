@@ -22,6 +22,7 @@ import {
   Wifi
 } from 'lucide-vue-next';
 import { api } from '../api';
+import { entityAvatarStyle, entityInitial } from '../entity-avatar';
 
 type XuiServer = {
   id: string;
@@ -618,7 +619,7 @@ onMounted(loadServers);
       <article v-for="server in filteredServers" :key="server.id" class="xui-panel-card entity-runtime-card" :class="connectionStatus(server).className === 'is-online' ? 'runtime-state-online' : connectionStatus(server).className === 'is-error' ? 'runtime-state-error' : server.enabled ? 'runtime-state-unknown' : 'runtime-state-disabled'">
         <header class="xui-panel-card-header">
           <div class="xui-panel-identity">
-            <span class="xui-panel-icon"><Network :size="20" /></span>
+            <span class="xui-panel-icon entity-name-avatar" :style="entityAvatarStyle(server.name, server.id)">{{ entityInitial(server.name, '面') }}</span>
             <div>
               <strong :title="server.name">{{ server.name }}</strong>
               <span>3x-ui · {{ credentialLabel(server) }}</span>

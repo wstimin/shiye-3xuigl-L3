@@ -19,6 +19,7 @@ import {
   Trash2
 } from 'lucide-vue-next';
 import { api } from '../api';
+import { entityAvatarStyle, entityInitial } from '../entity-avatar';
 
 type SocksNode = {
   id: string;
@@ -380,7 +381,7 @@ onMounted(loadNodes);
       <article v-for="node in filteredNodes" :key="node.id" class="socks-outbound-card entity-runtime-card" :class="node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="socks-card-header">
           <div class="socks-card-identity">
-            <span class="socks-card-icon"><Network :size="20" /></span>
+            <span class="socks-card-icon entity-name-avatar" :style="entityAvatarStyle(node.name, node.id)">{{ entityInitial(node.name, '出') }}</span>
             <div>
               <strong :title="node.name">{{ node.name }}</strong>
               <span>SOCKS 出站 · {{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
