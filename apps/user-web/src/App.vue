@@ -284,7 +284,7 @@ watch(() => route.fullPath, () => {
           </span>
         </div>
         <button class="logout-button" type="button" @click="logout"><LogOut :size="16" />退出登录</button>
-        <span class="user-version">Version 1.0.1</span>
+        <span class="user-version">Version 1.0.2</span>
       </div>
     </aside>
     <div class="user-workspace">

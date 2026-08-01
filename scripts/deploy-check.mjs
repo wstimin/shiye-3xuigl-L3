@@ -11,6 +11,9 @@ const userIndex = readRequiredFile('dist/user-web/index.html');
 const nginxConfig = readRequiredFile('infra/nginx/shiye.conf');
 const prismaSchema = readRequiredFile('prisma/schema.prisma');
 const syncTaskMigration = readRequiredFile('prisma/migrations/20260801010000_sync_tasks/migration.sql');
+const installerScript = readRequiredFile('install.sh');
+const migrationCheckScript = readRequiredFile('scripts/check-update-migrations.mjs');
+const packageMetadata = JSON.parse(readRequiredFile('package.json') || '{}');
 
 if (adminIndex) {
   requireMatch(adminIndex, /src="\.\/assets\//, 'Admin build must load JS from relative ./assets/ so ADMIN_PATH can change at runtime.');
@@ -32,6 +35,18 @@ if (syncTaskMigration) {
   requireMatch(syncTaskMigration, /CREATE TABLE[^\n]*sync_tasks/, 'Sync task migration must create the sync_tasks table.');
   requireMatch(syncTaskMigration, /sync_tasks_entityType_entityId_action_key/, 'Sync task migration must enforce one task per entity action.');
 }
+
+if (installerScript) {
+  requireMatch(installerScript, /prepare_atomic_update()/, 'Installer must prepare updates before stopping the current service.');
+  requireMatch(installerScript, /activate_atomic_update()/, 'Installer must activate prepared updates with a short directory switch.');
+  requireMatch(installerScript, /rollback_atomic_update()/, 'Installer must restore the previous runtime after failed health checks.');
+  requireMatch(installerScript, /assert_migrations_are_rollback_compatible()/, 'Installer must reject destructive migrations before automatic switching.');
+  requireMatch(installerScript, /node scripts\/check-update-migrations\.mjs/, 'Installer must check only pending database migrations before switching.');
+}
+
+if (migrationCheckScript) requireMatch(migrationCheckScript, /_prisma_migrations/, 'Migration safety check must read Prisma migration history.');
+
+if (packageMetadata.version !== '1.0.2') errors.push('Release package version must be 1.0.2.');
 
 if (nginxConfig) {
   requireMatch(nginxConfig, /location\s+\/\s*{/, 'Nginx must proxy the whole site from /.');

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-trap 'status=$?; echo "ERROR: install failed at line ${LINENO}: ${BASH_COMMAND}" >&2; exit ${status}' ERR
+trap 'status=$?; if [ -n "${ATOMIC_STAGE:-}" ] && [ -d "${ATOMIC_STAGE:-}" ] && { [ -z "${ATOMIC_BACKUP:-}" ] || [ ! -d "${ATOMIC_BACKUP:-}" ]; }; then rm -rf "${ATOMIC_STAGE}"; fi; echo "ERROR: install failed at line ${LINENO}: ${BASH_COMMAND}" >&2; exit ${status}' ERR
 
 APP_NAME="${APP_NAME:-shiye-api}"
 APP_DIR="${APP_DIR:-/opt/shiye}"
+PORT_WAS_SET="${PORT+x}"
 PORT="${PORT:-3388}"
 DEFAULT_REPO_URL="${DEFAULT_REPO_URL:-https://github.com/wstimin/shiye-3xuigl-L3.git}"
 DEFAULT_PACKAGE_URL="${DEFAULT_PACKAGE_URL:-https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip}"
@@ -21,6 +22,9 @@ MYSQL_USER="${MYSQL_USER:-shiye}"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
 
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
+ATOMIC_UPDATE="${ATOMIC_UPDATE:-yes}"
+ATOMIC_STAGE=""
+ATOMIC_BACKUP=""
 
 log() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -180,9 +184,13 @@ load_existing_env_defaults() {
   log "Existing deployment detected. ${env_file} will be preserved; application files will be refreshed."
 
   existing_database_url="$(grep -E '^DATABASE_URL=' "${env_file}" | tail -n 1 | cut -d= -f2- || true)"
-  if [ -z "${DATABASE_URL:-}" ] && [ -n "${existing_database_url}" ]; then
-    DATABASE_URL="${existing_database_url}"
-  fi
+  existing_public_url="$(grep -E '^PUBLIC_WEB_URL=' "${env_file}" | tail -n 1 | cut -d= -f2- || true)"
+  existing_admin_path="$(grep -E '^ADMIN_PATH=' "${env_file}" | tail -n 1 | cut -d= -f2- || true)"
+  existing_port="$(grep -E '^PORT=' "${env_file}" | tail -n 1 | cut -d= -f2- || true)"
+  if [ -z "${DATABASE_URL:-}" ] && [ -n "${existing_database_url}" ]; then DATABASE_URL="${existing_database_url}"; fi
+  if [ -z "${PUBLIC_WEB_URL:-}" ] && [ -n "${existing_public_url}" ]; then PUBLIC_WEB_URL="${existing_public_url}"; fi
+  if [ -z "${ADMIN_PATH:-}" ] && [ -n "${existing_admin_path}" ]; then ADMIN_PATH="${existing_admin_path}"; fi
+  if [ -z "${PORT_WAS_SET}" ] && [ -n "${existing_port}" ]; then PORT="${existing_port}"; fi
 
   return 0
 }
@@ -192,6 +200,27 @@ stop_existing_service_for_update() {
     log "Stopping existing service ${APP_NAME} before refreshing files"
     systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
   fi
+}
+
+is_existing_runtime_install() {
+  [ -f "${APP_DIR}/.env" ] \
+    && [ -f "${APP_DIR}/apps/api/dist/main.js" ] \
+    && [ -f "${APP_DIR}/dist/user-web/index.html" ] \
+    && [ -f "${APP_DIR}/dist/admin-web/index.html" ] \
+    && command -v systemctl >/dev/null 2>&1 \
+    && systemctl list-unit-files "${APP_NAME}.service" >/dev/null 2>&1
+}
+
+should_use_atomic_update() {
+  is_yes "${ATOMIC_UPDATE}" && is_existing_runtime_install && [ ! -d "${APP_DIR}/.git" ]
+}
+
+assert_migrations_are_rollback_compatible() {
+  target_dir="$1"
+  (
+    cd "${target_dir}"
+    node scripts/check-update-migrations.mjs
+  ) || die "Update contains an unsafe pending database migration or the migration check failed."
 }
 
 install_node() {
@@ -336,10 +365,11 @@ install_local_mysql_if_needed() {
   DATABASE_URL="mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@127.0.0.1:${MYSQL_PORT}/${MYSQL_DATABASE}"
 }
 
-install_app_files() {
+install_app_files_to() {
+  target_dir="$1"
   normalize_app_dir
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  mkdir -p "${APP_DIR}"
+  mkdir -p "${target_dir}"
 
   if is_project_dir "${SCRIPT_DIR}"; then
     if is_prebuilt_project_dir "${SCRIPT_DIR}"; then
@@ -347,15 +377,15 @@ install_app_files() {
     else
       INSTALL_SOURCE_USED="local-source"
     fi
-    if [ "${SCRIPT_DIR}" != "${APP_DIR}" ]; then
-      find "${APP_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
-      find "${SCRIPT_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' ! -name 'node_modules' -exec cp -a {} "${APP_DIR}/" \;
+    if [ "${SCRIPT_DIR}" != "${target_dir}" ]; then
+      find "${target_dir}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+      find "${SCRIPT_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' ! -name 'node_modules' -exec cp -a {} "${target_dir}/" \;
     fi
   elif [ "${INSTALL_SOURCE}" != "source" ] && [ -n "${PACKAGE_URL}" ]; then
     tmp_dir="$(mktemp -d)"
     if project_root="$(download_prebuilt_package "${tmp_dir}")"; then
-      find "${APP_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
-      cp -a "${project_root}/." "${APP_DIR}/"
+      find "${target_dir}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+      cp -a "${project_root}/." "${target_dir}/"
       rm -rf "${tmp_dir}"
       INSTALL_SOURCE_USED="prebuilt-package"
     else
@@ -366,16 +396,16 @@ install_app_files() {
       log "Prebuilt package is unavailable; falling back to source deployment"
       tmp_dir="$(mktemp -d)"
       clone_repo "${DEFAULT_REPO_URL}" "${tmp_dir}/app"
-      find "${APP_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
-      cp -a "${tmp_dir}/app/." "${APP_DIR}/"
+      find "${target_dir}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+      cp -a "${tmp_dir}/app/." "${target_dir}/"
       rm -rf "${tmp_dir}"
       INSTALL_SOURCE_USED="source-repo"
     fi
   elif [ -n "${DEFAULT_REPO_URL}" ]; then
     tmp_dir="$(mktemp -d)"
     clone_repo "${DEFAULT_REPO_URL}" "${tmp_dir}/app"
-    find "${APP_DIR}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
-    cp -a "${tmp_dir}/app/." "${APP_DIR}/"
+    find "${target_dir}" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+    cp -a "${tmp_dir}/app/." "${target_dir}/"
     rm -rf "${tmp_dir}"
     INSTALL_SOURCE_USED="source-repo"
   else
@@ -385,13 +415,18 @@ install_app_files() {
   log "Project source: ${INSTALL_SOURCE_USED:-unknown}"
 }
 
-write_env_file() {
-  cd "${APP_DIR}"
+install_app_files() {
+  install_app_files_to "${APP_DIR}"
+}
+
+write_env_file_in() {
+  target_dir="$1"
+  cd "${target_dir}"
   public_url="$(resolve_public_url)"
   admin_path="$(resolve_admin_path)"
 
   if [ -f .env ]; then
-    log "Keeping existing ${APP_DIR}/.env"
+    log "Keeping existing ${target_dir}/.env"
     set_env_value NODE_ENV production
     set_env_value PORT "${PORT}"
     set_env_value PUBLIC_WEB_URL "${public_url}"
@@ -418,36 +453,62 @@ ENV
   chmod 600 .env
 }
 
-install_dependencies_and_build() {
-  cd "${APP_DIR}"
+write_env_file() {
+  write_env_file_in "${APP_DIR}"
+}
+
+install_dependencies_and_build_in() {
+  target_dir="$1"
+  cd "${target_dir}"
   if [ -f package-lock.json ]; then
     npm ci
   else
     npm install
   fi
+  npm run install:check
+  npm run prisma:generate
   case "${INSTALL_SOURCE_USED:-}" in
-    prebuilt-package|local-prebuilt) SHIYE_PREBUILT=1 npm run install:prod ;;
-    *) npm run install:prod ;;
-  esac
+  prebuilt-package|local-prebuilt)
+    npm run deploy:check
+    ;;
+  *)
+    npm run build
+    npm run typecheck
+    npm run deploy:check
+    ;;
+esac
+}
+
+install_dependencies_and_build() {
+  install_dependencies_and_build_in "${APP_DIR}"
+  cd "${APP_DIR}"
+  npm run prisma:migrate
+  npm run admin:sync
   npm prune --omit=dev
 }
 
-verify_runtime_files() {
-  cd "${APP_DIR}"
+verify_runtime_files_in() {
+  target_dir="$1"
+  cd "${target_dir}"
   required_files="apps/api/dist/main.js packages/shared/dist/index.js packages/xui-client/dist/index.js packages/payment-core/dist/index.js dist/user-web/index.html dist/admin-web/index.html"
   for file in ${required_files}; do
-    [ -f "${file}" ] || die "Required runtime file is missing: ${APP_DIR}/${file}. Build did not complete correctly."
+    [ -f "${file}" ] || die "Required runtime file is missing: ${target_dir}/${file}. Build did not complete correctly."
   done
 }
 
-cleanup_runtime_files() {
-  if [ "${SCRIPT_DIR:-}" = "${APP_DIR}" ] && [ -d "${APP_DIR}/.git" ]; then
-    log "Skipping runtime cleanup because ${APP_DIR} is the source checkout"
+verify_runtime_files() {
+  verify_runtime_files_in "${APP_DIR}"
+}
+
+cleanup_runtime_files_in() {
+  target_dir="$1"
+  if [ "${SCRIPT_DIR:-}" = "${target_dir}" ] && [ -d "${target_dir}/.git" ]; then
+    log "Skipping runtime cleanup because ${target_dir} is the source checkout"
     return
   fi
 
-  cd "${APP_DIR}"
-  log "Removing build-only source files from ${APP_DIR}"
+  cd "${target_dir}"
+  log "Removing build-only source files from ${target_dir}"
 
   rm -rf .git .github .vscode infra apps/admin-web apps/user-web
   rm -f README.md DEPLOY.md ARCHITECTURE.md UNINSTALL.md install.sh uninstall.sh docker-compose.yml .env.example tsconfig.base.json
@@ -472,6 +533,83 @@ cleanup_runtime_files() {
   fi
 }
 
+cleanup_runtime_files() {
+  cleanup_runtime_files_in "${APP_DIR}"
+}
+
+prepare_atomic_update() {
+  parent_dir="$(dirname "${APP_DIR}")"
+  base_name="$(basename "${APP_DIR}")"
+  release_id="$(date +%Y%m%d%H%M%S)-$$"
+  ATOMIC_STAGE="${parent_dir}/.${base_name}.next.${release_id}"
+  ATOMIC_BACKUP="${parent_dir}/.${base_name}.previous.${release_id}"
+  mkdir -p "${ATOMIC_STAGE}"
+  log "Preparing new release while the current service stays online: ${ATOMIC_STAGE}"
+  install_app_files_to "${ATOMIC_STAGE}"
+  cp -a "${APP_DIR}/.env" "${ATOMIC_STAGE}/.env"
+  write_env_file_in "${ATOMIC_STAGE}"
+  install_dependencies_and_build_in "${ATOMIC_STAGE}"
+  assert_migrations_are_rollback_compatible "${ATOMIC_STAGE}"
+  verify_runtime_files_in "${ATOMIC_STAGE}"
+  cd "${ATOMIC_STAGE}"
+  log "Applying rollback-compatible database migrations before the short switch"
+  npm run prisma:migrate
+  npm run admin:sync
+  npm prune --omit=dev
+  cleanup_runtime_files_in "${ATOMIC_STAGE}"
+  verify_runtime_files_in "${ATOMIC_STAGE}"
+  chown -R shiye:shiye "${ATOMIC_STAGE}" 2>/dev/null || true
+}
+
+rollback_atomic_update() {
+  log "New release failed health checks; restoring the previous version"
+  systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
+  failed_dir="${ATOMIC_BACKUP}.failed"
+  if [ -d "${APP_DIR}" ]; then mv "${APP_DIR}" "${failed_dir}"; fi
+  if [ -d "${ATOMIC_BACKUP}" ]; then mv "${ATOMIC_BACKUP}" "${APP_DIR}"; fi
+  systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
+  if wait_for_api_health_soft 30 && verify_web_routes_soft; then
+    rm -rf "${failed_dir}"
+    die "Update failed and the previous version was restored successfully."
+  fi
+  echo "Automatic rollback failed. Inspect ${APP_DIR}, ${failed_dir} and system logs immediately." >&2
+  return 1
+}
+
+activate_atomic_update() {
+  log "New release is ready. Starting the short service switch"
+  systemctl stop "${APP_NAME}"
+  if ! mv "${APP_DIR}" "${ATOMIC_BACKUP}"; then
+    systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
+    die "Unable to preserve the current runtime; the service was restarted without changing files."
+  fi
+  if ! mv "${ATOMIC_STAGE}" "${APP_DIR}"; then
+    mv "${ATOMIC_BACKUP}" "${APP_DIR}"
+    systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
+    die "Unable to activate the prepared release; the previous version is still installed."
+  fi
+  systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
+  if ! wait_for_api_health_soft 30 || ! verify_web_routes_soft; then
+    rollback_atomic_update
+    return 1
+  fi
+  log "New release passed API and web checks"
+  if [ "${KEEP_PREVIOUS_RELEASE:-no}" = "yes" ]; then
+    preserved_dir="$(dirname "${APP_DIR}")/$(basename "${APP_DIR}").previous"
+    rm -rf "${preserved_dir}"
+    mv "${ATOMIC_BACKUP}" "${preserved_dir}"
+    log "Previous runtime preserved at ${preserved_dir}"
+  else
+    rm -rf "${ATOMIC_BACKUP}"
+  fi
+  ATOMIC_BACKUP=""
+  ATOMIC_STAGE=""
+}
+
+run_atomic_update() {
+  prepare_atomic_update
+  activate_atomic_update
+}
 write_service() {
   node_bin="$(command -v node)"
   npm_bin="$(command -v npm)"
@@ -503,6 +641,18 @@ WantedBy=multi-user.target
 SERVICE
 }
 
+wait_for_api_health_soft() {
+  health_url="http://127.0.0.1:${PORT}/api/health"
+  attempts="${1:-30}"
+  attempt=1
+  while [ "${attempt}" -le "${attempts}" ]; do
+    if curl -fsS "${health_url}" >/dev/null 2>&1; then return 0; fi
+    if ! systemctl is-active --quiet "${APP_NAME}"; then return 1; fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
 wait_for_api_health() {
   health_url="http://127.0.0.1:${PORT}/api/health"
   log "Waiting for API health check: ${health_url}"
@@ -531,6 +681,15 @@ wait_for_api_health() {
   die "API health check did not pass after $((attempts * 2)) seconds: ${health_url}"
 }
 
+verify_web_routes_soft() {
+  admin_path="$(cd "${APP_DIR}" && resolve_admin_path)"
+  for path in / "${admin_path}" "${admin_path}/"; do
+    url="http://127.0.0.1:${PORT}${path}"
+    content_type="$(curl -fsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
+    case "${content_type}" in text/html*) ;; *) return 1 ;; esac
+  done
+  return 0
+}
 verify_web_routes() {
   admin_path="$(cd "${APP_DIR}" && resolve_admin_path)"
   for path in / "${admin_path}" "${admin_path}/"; do
@@ -1123,31 +1282,38 @@ main() {
   log "Checking MySQL"
   install_local_mysql_if_needed
 
-  stop_existing_service_for_update
+  if should_use_atomic_update; then
+    log "Existing runtime detected; using prepared atomic update"
+    write_service
+    systemctl daemon-reload
+    systemctl enable "${APP_NAME}"
+    run_atomic_update
+  else
+    stop_existing_service_for_update
 
-  log "Installing project files to ${APP_DIR}"
-  install_app_files
+    log "Installing project files to ${APP_DIR}"
+    install_app_files
 
-  log "Writing .env"
-  write_env_file
+    log "Writing .env"
+    write_env_file
 
-  log "Installing dependencies, migrating database and verifying runtime"
-  install_dependencies_and_build
+    log "Installing dependencies, migrating database and verifying runtime"
+    install_dependencies_and_build
 
-  log "Verifying runtime files"
-  verify_runtime_files
+    log "Verifying runtime files"
+    verify_runtime_files
 
-  cleanup_runtime_files
+    cleanup_runtime_files
+    verify_runtime_files
 
-  verify_runtime_files
-
-  log "Writing systemd service"
-  write_service
-  systemctl daemon-reload
-  systemctl enable "${APP_NAME}"
-  systemctl restart "${APP_NAME}"
-  wait_for_api_health
-  verify_web_routes
+    log "Writing systemd service"
+    write_service
+    systemctl daemon-reload
+    systemctl enable "${APP_NAME}"
+    systemctl restart "${APP_NAME}"
+    wait_for_api_health
+    verify_web_routes
+  fi
 
   configure_optional_nginx
 
@@ -1181,5 +1347,9 @@ main() {
   echo "journalctl -u ${APP_NAME} -f"
   echo "shiye  # 打开管理菜单"
 }
+
+if [ "${SHIYE_INSTALL_LIBRARY_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 main "$@"
