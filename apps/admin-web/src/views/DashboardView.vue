@@ -82,6 +82,46 @@ const networkTotal = computed(() => serviceNodeTotal.value + serverTotal.value);
 const networkRate = computed(() => percent(enabledServiceNodes.value + enabledServers.value, networkTotal.value));
 const incomeRate = computed(() => (todayIncome.value > 0 ? 100 : 0));
 const recentActivity = computed(() => overview.value?.activity ?? []);
+const paymentChannelRate = computed(() => percent(enabledPaymentChannels.value, paymentChannels.value));
+const socksRate = computed(() => percent(enabledSocks.value, socksTotal.value));
+const enabledJobCount = computed(() => Number(jobSettings.value.disableExpiredEnabled) + Number(jobSettings.value.trafficSyncEnabled));
+const operationalRates = computed(() => {
+  const groups = [
+    { active: activeCustomers.value, total: customerTotal.value },
+    { active: activeCustomerNodes.value, total: customerNodeTotal.value },
+    { active: enabledServiceNodes.value, total: serviceNodeTotal.value },
+    { active: enabledServers.value, total: serverTotal.value },
+    { active: enabledSocks.value, total: socksTotal.value },
+    { active: enabledPaymentChannels.value, total: paymentChannels.value }
+  ].filter((group) => group.total > 0);
+  return groups.map((group) => percent(group.active, group.total));
+});
+const operationalScore = computed(() => {
+  if (!operationalRates.value.length) return 0;
+  return Math.round(operationalRates.value.reduce((total, value) => total + value, 0) / operationalRates.value.length);
+});
+const operationalTone = computed(() => {
+  if (error.value) return 'bad';
+  if (!operationalRates.value.length) return 'idle';
+  if (operationalScore.value < 60 || expiredCustomerNodes.value > 0) return 'bad';
+  if (operationalScore.value < 85 || enabledJobCount.value < 2) return 'warn';
+  return 'good';
+});
+const operationalLabel = computed(() => {
+  if (error.value) return '读取异常';
+  if (!operationalRates.value.length) return '待配置';
+  if (operationalTone.value === 'bad') return '需要处理';
+  if (operationalTone.value === 'warn') return '运行关注';
+  return '运行良好';
+});
+const operationalDescription = computed(() => {
+  if (error.value) return '概览数据读取失败，请刷新后再次检查业务状态。';
+  if (!operationalRates.value.length) return '当前尚未配置可参与计算的业务资源，请先添加面板、节点或支付通道。';
+  const issues: string[] = [];
+  if (expiredCustomerNodes.value) issues.push(`${expiredCustomerNodes.value} 个过期节点待停用`);
+  if (enabledJobCount.value < 2) issues.push(`${2 - enabledJobCount.value} 项自动任务未启用`);
+  return issues.length ? `已配置资源综合启用率 ${operationalScore.value}%，${issues.join('，')}。` : `已配置资源综合启用率 ${operationalScore.value}%，节点、面板、出站与支付服务状态稳定。`;
+});
 
 async function loadDashboard() {
   loading.value = true;
@@ -262,6 +302,46 @@ onMounted(loadDashboard);
     </section>
 
     <el-alert v-if="error" class="dashboard-alert" :title="error" type="error" show-icon :closable="false" />
+
+    <section class="dashboard-command-center" :class="`is-${operationalTone}`" aria-label="业务运行态势">
+      <div class="dashboard-command-score">
+        <div class="dashboard-command-ring" :style="{ '--score': `${operationalScore * 3.6}deg` }">
+          <div><strong>{{ operationalScore }}</strong><span>态势分</span></div>
+        </div>
+        <span class="dashboard-command-pulse"><i></i>{{ operationalLabel }}</span>
+      </div>
+      <div class="dashboard-command-copy">
+        <div class="dashboard-command-title">
+          <div><span>实时业务中枢</span><h2>业务运行态势</h2></div>
+          <span class="dashboard-command-badge">{{ operationalLabel }}</span>
+        </div>
+        <p>{{ operationalDescription }}</p>
+        <div class="dashboard-command-meta">
+          <span>已配置资源 <strong>{{ networkTotal + socksTotal + paymentChannels }}</strong></span>
+          <span>启用自动任务 <strong>{{ enabledJobCount }} / 2</strong></span>
+          <span>待支付订单 <strong>{{ pendingOrders }}</strong></span>
+        </div>
+      </div>
+      <div class="dashboard-command-signals">
+        <div>
+          <span><Router :size="14" />网络资源</span><strong>{{ networkRate }}%</strong>
+          <i><b :style="{ width: `${networkRate}%` }"></b></i>
+        </div>
+        <div>
+          <span><Link2 :size="14" />绑定节点</span><strong>{{ customerNodeRate }}%</strong>
+          <i><b :style="{ width: `${customerNodeRate}%` }"></b></i>
+        </div>
+        <div>
+          <span><Activity :size="14" />SOCKS 出站</span><strong>{{ socksRate }}%</strong>
+          <i><b :style="{ width: `${socksRate}%` }"></b></i>
+        </div>
+        <div>
+          <span><CircleDollarSign :size="14" />支付通道</span><strong>{{ paymentChannelRate }}%</strong>
+          <i><b :style="{ width: `${paymentChannelRate}%` }"></b></i>
+        </div>
+      </div>
+      <Activity class="dashboard-command-mark" :size="116" aria-hidden="true" />
+    </section>
 
     <section class="dashboard-stat-grid" aria-label="核心业务统计">
       <article class="dashboard-stat-card purple">
