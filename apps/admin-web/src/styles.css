@@ -4255,6 +4255,172 @@ input:-webkit-autofill:active {
   }
 }
 
+/* Compact pass: match the small operational cards in the reference. */
+:is(.customer-user-grid, .node-card-grid, .xui-panel-grid, .socks-card-grid) {
+  grid-template-columns: repeat(auto-fill, minmax(310px, 360px));
+  gap: 14px;
+}
+
+.entity-runtime-card {
+  min-height: 0;
+  gap: 9px;
+  padding: 14px;
+}
+
+:is(.customer-card-header, .route-node-card-header, .xui-panel-card-header, .socks-card-header) {
+  gap: 9px;
+}
+
+:is(.customer-card-identity, .route-node-identity, .xui-panel-identity, .socks-card-identity) {
+  gap: 9px;
+}
+
+.customer-card-avatar,
+:is(.route-node-icon, .xui-panel-icon, .socks-card-icon) {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+}
+
+.customer-card-identity > .customer-card-avatar { font-size: 19px; }
+:is(.route-node-icon, .xui-panel-icon, .socks-card-icon) svg { width: 18px; height: 18px; }
+
+:is(.customer-card-identity strong, .route-node-identity strong, .xui-panel-identity strong, .socks-card-identity strong) {
+  font-size: 14px;
+}
+
+:is(.customer-status-chip, .node-status-chip, .xui-status-chip, .socks-status-chip) {
+  min-height: 22px;
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+:is(.route-node-address, .xui-panel-address, .socks-endpoint) {
+  min-height: 39px;
+  grid-template-columns: 14px minmax(0, 1fr) 26px;
+  gap: 6px;
+  padding: 6px 7px 6px 9px;
+}
+
+:is(.route-node-address small, .xui-panel-address small, .socks-endpoint small) { display: none; }
+:is(.route-node-address strong, .xui-panel-address strong, .socks-endpoint strong) { font-size: 10.5px; }
+:is(.node-copy-button, .xui-copy-button, .socks-copy-button) { width: 26px; height: 26px; }
+
+.runtime-metric-grid { gap: 6px; }
+
+.runtime-metric-grid > .runtime-metric {
+  min-height: 52px;
+  gap: 4px;
+  padding: 7px 8px;
+}
+
+.runtime-metric-grid > .runtime-metric::after {
+  inset: auto 8px 6px;
+}
+
+.runtime-metric-grid > .runtime-metric span { font-size: 9.5px; }
+.runtime-metric-grid > .runtime-metric strong { padding-bottom: 6px; font-size: 11.5px; }
+
+.runtime-info-line {
+  gap: 10px;
+  font-size: 10px;
+}
+
+:is(.route-node-tags, .xui-panel-tags, .socks-card-tags) {
+  min-height: 20px;
+  max-height: 22px;
+  flex-wrap: nowrap;
+  gap: 5px;
+  overflow: hidden;
+}
+
+:is(.route-node-tag, .xui-panel-tag, .socks-card-tag) {
+  flex: 0 1 auto;
+  padding: 2px 6px;
+  font-size: 9.5px;
+}
+
+.customer-service-line { min-height: 22px; }
+.customer-expiry-chip { min-height: 21px; padding: 2px 7px; font-size: 10px; }
+
+:is(.route-node-remark, .xui-panel-remark, .socks-card-remark) {
+  min-height: 0;
+  margin: 0;
+  font-size: 10px;
+}
+
+.runtime-card-footer {
+  min-height: 39px;
+  gap: 8px;
+  padding-top: 9px;
+}
+
+.runtime-footer-label { font-size: 9.5px; }
+.runtime-action-group { gap: 5px; }
+
+.runtime-action-group .runtime-icon-button,
+.runtime-action-group .el-dropdown .runtime-icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 6px;
+}
+
+.runtime-action-group .runtime-icon-button svg { width: 14px; height: 14px; }
+
+.runtime-toggle-switch {
+  --el-switch-on-color: #6366f1;
+  --el-switch-off-color: #252a35;
+  --el-switch-border-color: rgb(255 255 255 / 8%);
+  width: 34px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 2.5%);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.runtime-toggle-switch:hover {
+  border-color: rgb(99 102 241 / 32%);
+  background: rgb(99 102 241 / 8%);
+}
+
+.runtime-toggle-switch .el-switch__core {
+  min-width: 28px;
+  height: 16px;
+  border: 0;
+}
+
+.runtime-toggle-switch .el-switch__action {
+  width: 12px;
+  height: 12px;
+  background: #eef2ff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+}
+
+.runtime-toggle-switch.is-checked .el-switch__core {
+  box-shadow: 0 0 12px rgb(99 102 241 / 28%);
+}
+
+.runtime-toggle-switch.is-disabled { opacity: .68; }
+
+.customer-user-card,
+.route-node-card,
+.xui-panel-card,
+.socks-outbound-card {
+  min-height: 0;
+}
+
+@media (max-width: 760px) {
+  .entity-runtime-card { padding: 13px; }
+  .runtime-card-footer { align-items: center; }
+  .runtime-footer-label { padding-top: 0; }
+}
+
 /* System settings console. */
 .settings-console-page {
   --settings-surface: #12141c;

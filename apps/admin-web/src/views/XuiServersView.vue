@@ -4,7 +4,6 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   Activity,
   CheckCircle2,
-  CircleSlash2,
   Clipboard,
   CloudCog,
   Edit3,
@@ -658,7 +657,7 @@ onMounted(loadServers);
           <span v-if="connectionTests[server.id]?.state === 'success'" class="xui-panel-tag inbound">入站 {{ connectionTests[server.id]?.inboundCount ?? 0 }}</span>
         </div>
 
-        <p class="xui-panel-remark" :class="{ 'is-empty': !server.remark }">{{ server.remark || '暂无备注' }}</p>
+        <p v-if="server.remark" class="xui-panel-remark">{{ server.remark }}</p>
 
         <footer class="xui-panel-actions runtime-card-footer">
           <span class="runtime-footer-label"><Network :size="13" />路径 {{ server.basePath || '/' }}</span>
@@ -678,6 +677,15 @@ onMounted(loadServers);
           <el-tooltip content="编辑连接" placement="top">
             <el-button class="runtime-icon-button" aria-label="编辑连接" @click="editServer(server)"><Edit3 :size="15" /></el-button>
           </el-tooltip>
+          <el-tooltip :content="server.enabled ? '停用连接' : '启用连接'" placement="top">
+            <el-switch
+              class="runtime-toggle-switch"
+              :model-value="server.enabled"
+              :loading="togglingIds.has(server.id)"
+              :disabled="togglingIds.has(server.id)"
+              @change="(enabled: boolean | string | number) => toggleServerEnabled(server, Boolean(enabled))"
+            />
+          </el-tooltip>
           <el-dropdown trigger="click" @command="(command: string) => handleServerCommand(server, command)">
             <el-button class="xui-more-button runtime-icon-button" aria-label="更多面板操作"><MoreHorizontal :size="16" /></el-button>
             <template #dropdown>
@@ -687,11 +695,6 @@ onMounted(loadServers);
                 <el-dropdown-item command="presence" :disabled="presenceIds.has(server.id)"><Users :size="14" />查看在线客户端</el-dropdown-item>
                 <el-dropdown-item command="certs" :disabled="certIds.has(server.id)"><FileKey2 :size="14" />读取证书状态</el-dropdown-item>
                 <el-dropdown-item command="sync-socks" :disabled="!server.enabled || syncingSocksIds.has(server.id)"><RefreshCw :size="14" />导入 SOCKS 出站</el-dropdown-item>
-                <el-dropdown-item command="toggle" :disabled="togglingIds.has(server.id)">
-                  <CircleSlash2 v-if="server.enabled" :size="14" />
-                  <CheckCircle2 v-else :size="14" />
-                  {{ server.enabled ? '停用连接' : '启用连接' }}
-                </el-dropdown-item>
                 <el-dropdown-item command="delete" divided :disabled="deletingIds.has(server.id)"><Trash2 :size="14" />删除连接</el-dropdown-item>
               </el-dropdown-menu>
             </template>

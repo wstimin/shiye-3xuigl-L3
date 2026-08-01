@@ -3,7 +3,6 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   CheckCircle2,
-  CircleSlash2,
   Clipboard,
   CloudCog,
   Edit3,
@@ -622,12 +621,11 @@ watch(() => form.transport, () => {
           <span v-if="nodeRegion(node)" class="route-node-tag region">{{ nodeRegion(node)?.label }}</span>
           <span class="route-node-tag transport">{{ transportLabel(node.config?.transport) }}</span>
           <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
-          <span class="route-node-tag">{{ remoteModeLabel(node) }}</span>
           <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
           <span v-if="node.config?.socksRelayEnabled" class="route-node-tag relay" :title="socksLabel(node.config.socksNodeId)">SOCKS 中转</span>
         </div>
 
-        <p class="route-node-remark" :class="{ 'is-empty': !node.remark }">{{ node.remark || '暂无备注' }}</p>
+        <p v-if="node.remark" class="route-node-remark">{{ node.remark }}</p>
 
         <footer class="route-node-actions runtime-card-footer">
           <span class="runtime-footer-label"><RadioTower :size="13" />{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }}</span>
@@ -644,17 +642,21 @@ watch(() => form.transport, () => {
             @click="syncRemoteConfig(node)"
           ><UploadCloud :size="15" /></el-button>
           </el-tooltip>
+          <el-tooltip :content="node.enabled ? '停用节点' : '启用节点'" placement="top">
+            <el-switch
+              class="runtime-toggle-switch"
+              :model-value="node.enabled"
+              :loading="togglingIds.has(node.id)"
+              :disabled="togglingIds.has(node.id)"
+              @change="(enabled: boolean | string | number) => toggleNodeEnabled(node, Boolean(enabled))"
+            />
+          </el-tooltip>
           <el-dropdown trigger="click" @command="(command: string) => handleNodeCommand(node, command)">
             <el-button class="node-more-button runtime-icon-button" aria-label="更多节点操作"><MoreHorizontal :size="16" /></el-button>
             <template #dropdown>
               <el-dropdown-menu class="node-action-menu">
                 <el-dropdown-item command="traffic-limit" :disabled="!node.inboundId || syncingTrafficLimitIds.has(node.id)"><Gauge :size="14" />同步流量额度</el-dropdown-item>
                 <el-dropdown-item command="reset-traffic" :disabled="!node.inboundId || resettingTrafficIds.has(node.id)"><RotateCcw :size="14" />重置远端流量</el-dropdown-item>
-                <el-dropdown-item command="toggle" :disabled="togglingIds.has(node.id)">
-                  <CircleSlash2 v-if="node.enabled" :size="14" />
-                  <CheckCircle2 v-else :size="14" />
-                  {{ node.enabled ? '停用节点' : '启用节点' }}
-                </el-dropdown-item>
                 <el-dropdown-item command="delete" divided :disabled="deletingIds.has(node.id)"><Trash2 :size="14" />删除节点</el-dropdown-item>
               </el-dropdown-menu>
             </template>

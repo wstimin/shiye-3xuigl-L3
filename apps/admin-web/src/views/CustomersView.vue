@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Activity, Ban, CalendarClock, CircleCheckBig, Edit3, KeyRound, Link2, MoreHorizontal, Plus, RefreshCw, RotateCcw, Search, ServerOff, Trash2, Unlink, UserRound, Users, Wallet } from 'lucide-vue-next';
+import { Activity, CalendarClock, CircleCheckBig, Edit3, KeyRound, Link2, MoreHorizontal, Plus, RefreshCw, RotateCcw, Search, ServerOff, Trash2, Unlink, UserRound, Users, Wallet } from 'lucide-vue-next';
 import { api } from '../api';
 
 type CustomerNode = {
@@ -691,7 +691,6 @@ onMounted(loadCustomers);
         <div class="customer-service-line runtime-tag-line">
           <span class="customer-expiry-chip" :class="`is-${customerExpiryState(customer).tone}`"><i></i>{{ customerExpiryState(customer).label }}</span>
           <span v-if="customer.remark" class="customer-card-remark" :title="customer.remark">{{ customer.remark }}</span>
-          <span v-else class="customer-card-remark is-empty">暂无备注</span>
         </div>
 
         <footer class="customer-card-actions runtime-card-footer">
@@ -703,6 +702,15 @@ onMounted(loadCustomers);
           <el-tooltip content="编辑用户" placement="top">
             <el-button class="runtime-icon-button" aria-label="编辑用户" @click="editCustomer(customer)"><Edit3 :size="15" /></el-button>
           </el-tooltip>
+          <el-tooltip :content="customer.status === 'active' ? '禁用用户' : '启用用户'" placement="top">
+            <el-switch
+              class="runtime-toggle-switch"
+              :model-value="customer.status === 'active'"
+              :loading="togglingCustomerIds.has(customer.id)"
+              :disabled="togglingCustomerIds.has(customer.id)"
+              @change="(enabled: boolean | string | number) => toggleCustomerStatus(customer, enabled)"
+            />
+          </el-tooltip>
           <el-dropdown trigger="click" placement="bottom-end" @command="(command: string) => handleCustomerCommand(customer, command)">
             <el-button class="customer-more-button runtime-icon-button" aria-label="更多操作" title="更多操作"><MoreHorizontal :size="17" /></el-button>
             <template #dropdown>
@@ -710,7 +718,6 @@ onMounted(loadCustomers);
                 <el-dropdown-item command="edit"><Edit3 :size="14" />编辑用户</el-dropdown-item>
                 <el-dropdown-item command="bind"><Link2 :size="14" />绑定节点</el-dropdown-item>
                 <el-dropdown-item command="balance"><Wallet :size="14" />调整余额</el-dropdown-item>
-                <el-dropdown-item command="toggle" :disabled="togglingCustomerIds.has(customer.id)"><Ban :size="14" />{{ customer.status === 'active' ? '禁用用户' : '启用用户' }}</el-dropdown-item>
                 <el-dropdown-item command="delete" divided :disabled="deletingCustomerIds.has(customer.id)"><Trash2 :size="14" />{{ deletingCustomerIds.has(customer.id) ? '正在删除' : '删除用户' }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>

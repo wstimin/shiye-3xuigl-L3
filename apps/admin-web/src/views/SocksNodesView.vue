@@ -3,7 +3,6 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   CheckCircle2,
-  CircleSlash2,
   Clipboard,
   CloudCog,
   Download,
@@ -419,11 +418,7 @@ onMounted(loadNodes);
           <span v-if="node.remoteOutboundTag" class="socks-card-tag outbound" :title="node.remoteOutboundTag">{{ node.remoteOutboundTag }}</span>
         </div>
 
-        <div v-if="isImportedNode(node)" class="socks-source-line">
-          <Download :size="13" />
-          <span>来源：{{ serverName(node.sourceServerId) || '远端面板' }}</span>
-        </div>
-        <p class="socks-card-remark" :class="{ 'is-empty': !node.remark }">{{ node.remark || '暂无备注' }}</p>
+        <p v-if="node.remark" class="socks-card-remark">{{ node.remark }}</p>
 
         <footer class="socks-card-actions runtime-card-footer">
           <span class="runtime-footer-label"><Network :size="13" />{{ isImportedNode(node) ? (serverName(node.sourceServerId) || '远端面板') : '本地配置' }}</span>
@@ -432,10 +427,13 @@ onMounted(loadNodes);
             <el-button class="runtime-icon-button" aria-label="编辑出站" @click="editNode(node)"><Edit3 :size="15" /></el-button>
           </el-tooltip>
           <el-tooltip :content="node.enabled ? '停用出站' : '启用出站'" placement="top">
-          <el-button class="socks-toggle-button runtime-icon-button" :loading="togglingIds.has(node.id)" :aria-label="node.enabled ? '停用出站' : '启用出站'" @click="toggleNodeEnabled(node)">
-            <CircleSlash2 v-if="node.enabled" :size="14" />
-            <CheckCircle2 v-else :size="14" />
-          </el-button>
+            <el-switch
+              class="runtime-toggle-switch"
+              :model-value="node.enabled"
+              :loading="togglingIds.has(node.id)"
+              :disabled="togglingIds.has(node.id)"
+              @change="(enabled: boolean | string | number) => toggleNodeEnabled(node, Boolean(enabled))"
+            />
           </el-tooltip>
           <el-tooltip content="删除出站节点" placement="top">
             <el-button class="socks-delete-button runtime-icon-button" :loading="deletingIds.has(node.id)" aria-label="删除出站节点" @click="removeNode(node)"><Trash2 :size="15" /></el-button>
