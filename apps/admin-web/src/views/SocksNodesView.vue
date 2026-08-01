@@ -21,6 +21,9 @@ import {
 import { api } from '../api';
 import { entityAvatarStyle, entityInitial } from '../entity-avatar';
 
+type SyncTask = { id: string; action: string; status: string; message?: string | null; attemptCount: number; updatedAt: string };
+type OperationResult = { state?: 'success' | 'partial' | 'failed'; message?: string; pendingActions?: string[] };
+
 type SocksNode = {
   id: string;
   name: string;
@@ -32,6 +35,7 @@ type SocksNode = {
   hasPassword?: boolean;
   sourceServerId?: string | null;
   remoteOutboundTag?: string | null;
+  syncTasks?: SyncTask[];
 };
 type ServiceNode = { id: string; config?: { socksRelayEnabled?: boolean; socksNodeId?: string | null } | null };
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
@@ -45,6 +49,7 @@ const syncingRemote = ref(false);
 const revealingSecret = ref(false);
 const togglingIds = ref<Set<string>>(new Set());
 const deletingIds = ref<Set<string>>(new Set());
+const retryingIds = ref<Set<string>>(new Set());
 const error = ref('');
 const searchQuery = ref('');
 const selectedStatus = ref('');
@@ -102,12 +107,14 @@ async function loadNodes() {
 }
 
 async function saveNode() {
+  if (saving.value) return;
   saving.value = true;
   error.value = '';
   try {
     const path = editingId.value ? `/api/admin/socks-nodes/${editingId.value}` : '/api/admin/socks-nodes';
-    await api(path, { method: editingId.value ? 'PATCH' : 'POST', body: cleanFormBody() });
-    ElMessage.success(editingId.value ? '出站节点已更新' : '出站节点已添加');
+    const result = await api<OperationResult>(path, { method: editingId.value ? 'PATCH' : 'POST', body: cleanFormBody() });
+    if (result.state === 'partial') ElMessage.warning(result.message || '保存成功，同步失败');
+    else ElMessage.success(editingId.value ? '出站节点已更新' : '出站节点已添加');
     dialogVisible.value = false;
     resetForm();
     await loadNodes();
@@ -119,6 +126,7 @@ async function saveNode() {
 }
 
 async function syncRemoteSocks() {
+  if (syncingRemote.value) return;
   if (!syncServerId.value) {
     ElMessage.warning('请先选择要导入的 3x-ui 面板');
     return;
@@ -183,6 +191,7 @@ async function revealNodeSecret() {
 }
 
 async function removeNode(node: SocksNode) {
+  if (deletingIds.value.has(node.id)) return;
   const remoteHint = isImportedNode(node)
     ? '该节点来自远端，删除时会同步删除远端对应 SOCKS 出站和引用规则。'
     : '该节点由本地创建，只会删除本地记录。';
@@ -215,14 +224,35 @@ async function toggleNodeEnabled(node: SocksNode, enabled = !node.enabled) {
   togglingIds.value = addPendingId(togglingIds.value, node.id);
   error.value = '';
   try {
-    await api(`/api/admin/socks-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
-    ElMessage.success(enabled ? '出站节点已启用' : '出站节点已停用');
+    const result = await api<OperationResult>(`/api/admin/socks-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
+    if (result.state === 'partial') ElMessage.warning('保存成功，同步失败');
+    else ElMessage.success(enabled ? '出站节点已启用' : '出站节点已停用');
+    await loadNodes();
   } catch (err) {
     node.enabled = previous;
     showError(err, '更新出站节点状态失败');
   } finally {
+    await loadNodes();
     togglingIds.value = removePendingId(togglingIds.value, node.id);
   }
+}
+
+async function retryNodeTasks(node: SocksNode) {
+  if (retryingIds.value.has(node.id) || !node.syncTasks?.length) return;
+  retryingIds.value = addPendingId(retryingIds.value, node.id);
+  let failed = 0;
+  const priority: Record<string, number> = { 'socks-references': 1, 'socks-delete-check': 2 };
+  for (const task of [...node.syncTasks].sort((left, right) => (priority[left.action] || 9) - (priority[right.action] || 9))) {
+    try {
+      await api(`/api/admin/sync-tasks/${task.id}/retry`, { method: 'POST' });
+    } catch {
+      failed += 1;
+    }
+  }
+  if (failed) ElMessage.warning('部分同步失败');
+  else ElMessage.success('同步成功');
+  retryingIds.value = removePendingId(retryingIds.value, node.id);
+  await loadNodes();
 }
 
 async function copyEndpoint(node: SocksNode) {
@@ -379,7 +409,7 @@ onMounted(loadNodes);
     </div>
 
     <div v-loading="loading" class="socks-card-grid">
-      <article v-for="node in filteredNodes" :key="node.id" class="socks-outbound-card entity-runtime-card" :class="node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
+      <article v-for="node in filteredNodes" :key="node.id" class="socks-outbound-card entity-runtime-card" :class="node.syncTasks?.length ? 'runtime-state-error' : node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="socks-card-header">
           <div class="socks-card-identity">
             <span class="socks-card-icon entity-name-avatar" :style="entityAvatarStyle(node.name, node.id)">{{ entityInitial(node.name, '出') }}</span>
@@ -388,7 +418,7 @@ onMounted(loadNodes);
               <span>SOCKS 出站 · {{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
             </div>
           </div>
-          <span class="socks-status-chip" :class="node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.enabled ? '已启用' : '已停用' }}</span>
+          <span class="socks-status-chip" :class="node.syncTasks?.length ? 'is-pending' : node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.syncTasks?.length ? '待同步' : node.enabled ? '已启用' : '已停用' }}</span>
         </header>
 
         <div class="socks-endpoint">
@@ -418,6 +448,7 @@ onMounted(loadNodes);
           <span class="socks-card-tag" :class="isImportedNode(node) ? 'imported' : 'manual'">{{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
           <span v-if="node.hasPassword" class="socks-card-tag password">已保存密码</span>
           <span v-if="node.remoteOutboundTag" class="socks-card-tag outbound" :title="node.remoteOutboundTag">{{ node.remoteOutboundTag }}</span>
+          <span v-if="node.syncTasks?.length" class="socks-card-tag sync-pending" :title="node.syncTasks.map((task) => task.message || task.action).join('；')">待同步 {{ node.syncTasks.length }}</span>
         </div>
 
         <p v-if="node.remark" class="socks-card-remark">{{ node.remark }}</p>
@@ -425,6 +456,9 @@ onMounted(loadNodes);
         <footer class="socks-card-actions runtime-card-footer">
           <span class="runtime-footer-label"><Network :size="13" />{{ isImportedNode(node) ? (serverName(node.sourceServerId) || '远端面板') : '本地配置' }}</span>
           <div class="runtime-action-group">
+          <el-tooltip v-if="node.syncTasks?.length" content="重试待同步任务" placement="top">
+            <el-button class="runtime-icon-button runtime-retry-button" :loading="retryingIds.has(node.id)" aria-label="重试待同步任务" @click="retryNodeTasks(node)"><RefreshCw :size="15" /></el-button>
+          </el-tooltip>
           <el-tooltip content="编辑出站" placement="top">
             <el-button class="runtime-icon-button" aria-label="编辑出站" @click="editNode(node)"><Edit3 :size="15" /></el-button>
           </el-tooltip>

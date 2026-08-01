@@ -365,3 +365,23 @@ model AuditLog {
   @@index([action, createdAt])
   @@map("audit_logs")
 }
+
+model SyncTask {
+  id            String    @id @default(cuid())
+  entityType    String    @db.VarChar(40)
+  entityId      String    @db.VarChar(80)
+  action        String    @db.VarChar(80)
+  status        String    @default("pending") @db.VarChar(24)
+  message       String?   @db.Text
+  detail        Json?
+  attemptCount  Int       @default(0)
+  lastAttemptAt DateTime?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([entityType, entityId, action])
+  @@index([status, updatedAt])
+  @@index([entityType, entityId])
+  @@map("sync_tasks")
+}

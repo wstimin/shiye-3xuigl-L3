@@ -24,6 +24,8 @@ import { api } from '../api';
 import { entityAvatarStyle, entityInitial } from '../entity-avatar';
 
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
+type SyncTask = { id: string; action: string; status: string; message?: string | null; attemptCount: number; updatedAt: string };
+type OperationResult = { state?: 'success' | 'partial' | 'failed'; message?: string; pendingActions?: string[] };
 type SocksNode = { id: string; name: string; host: string; port: number; enabled: boolean };
 type ServiceNodeConfig = {
   encryption?: string;
@@ -53,6 +55,7 @@ type ServiceNode = {
   remark?: string | null;
   config?: ServiceNodeConfig | null;
   server?: XuiServer;
+  syncTasks?: SyncTask[];
 };
 type TrafficSyncResult = {
   synced: boolean;
@@ -109,6 +112,7 @@ const syncingTrafficLimitIds = ref<Set<string>>(new Set());
 const resettingTrafficIds = ref<Set<string>>(new Set());
 const togglingIds = ref<Set<string>>(new Set());
 const deletingIds = ref<Set<string>>(new Set());
+const retryingIds = ref<Set<string>>(new Set());
 const error = ref('');
 const searchQuery = ref('');
 const selectedServerId = ref('');
@@ -206,6 +210,7 @@ async function loadNodes() {
 }
 
 async function saveNode() {
+  if (saving.value) return;
   saving.value = true;
   error.value = '';
   try {
@@ -222,8 +227,9 @@ async function saveNode() {
         'xhttpMode'
       ].includes(key)))
       : form;
-    await api(path, { method: editingId.value ? 'PATCH' : 'POST', body });
-    ElMessage.success(editingId.value ? '路由节点已更新' : '路由节点已创建');
+    const result = await api<OperationResult>(path, { method: editingId.value ? 'PATCH' : 'POST', body });
+    if (result.state === 'partial') ElMessage.warning(result.message || '保存成功，同步失败');
+    else ElMessage.success(editingId.value ? '路由节点已更新' : '路由节点已创建');
     dialogVisible.value = false;
     resetForm();
     await loadNodes();
@@ -235,6 +241,7 @@ async function saveNode() {
 }
 
 async function syncRemoteConfig(node: ServiceNode) {
+  if (syncingConfigIds.value.has(node.id)) return;
   try {
     await ElMessageBox.confirm(
       `确认把「${node.name}」的出站中转配置写入远端 Xray？系统只会管理本项目标记的出站和路由。`,
@@ -253,22 +260,24 @@ async function syncRemoteConfig(node: ServiceNode) {
     error.value = '同步失败';
     ElMessage.error(error.value);
   } finally {
+    await loadNodes();
     syncingConfigIds.value = removePendingId(syncingConfigIds.value, node.id);
   }
 }
 
 async function syncTrafficLimit(node: ServiceNode) {
+  if (syncingTrafficLimitIds.value.has(node.id)) return;
   syncingTrafficLimitIds.value = addPendingId(syncingTrafficLimitIds.value, node.id);
   error.value = '';
   try {
     const result = await api<TrafficSyncResult>(`/api/admin/service-nodes/${node.id}/sync-traffic-limit`, { method: 'POST' });
     if (result.synced && result.failed === 0) ElMessage.success('同步成功');
     else ElMessage.error('同步失败');
-    await loadNodes();
   } catch {
     error.value = '同步失败';
     ElMessage.error(error.value);
   } finally {
+    await loadNodes();
     syncingTrafficLimitIds.value = removePendingId(syncingTrafficLimitIds.value, node.id);
   }
 }
@@ -331,6 +340,7 @@ function editNode(node: ServiceNode) {
 }
 
 async function removeNode(node: ServiceNode) {
+  if (deletingIds.value.has(node.id)) return;
   try {
     await ElMessageBox.confirm(
       `确认删除路由节点「${node.name}」？系统会清理本项目写入的远端出站路由，并在该入站由本系统创建时删除远端入站。`,
@@ -361,15 +371,36 @@ async function toggleNodeEnabled(node: ServiceNode, enabled = !node.enabled) {
   togglingIds.value = addPendingId(togglingIds.value, node.id);
   error.value = '';
   try {
-    await api(`/api/admin/service-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
-    ElMessage.success(enabled ? '路由节点已启用' : '路由节点已停用');
+    const result = await api<OperationResult>(`/api/admin/service-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
+    if (result.state === 'partial') ElMessage.warning('保存成功，同步失败');
+    else ElMessage.success(enabled ? '路由节点已启用' : '路由节点已停用');
+    await loadNodes();
   } catch {
     node.enabled = previous;
     error.value = '更新失败';
     ElMessage.error(error.value);
   } finally {
+    await loadNodes();
     togglingIds.value = removePendingId(togglingIds.value, node.id);
   }
+}
+
+async function retryNodeTasks(node: ServiceNode) {
+  if (retryingIds.value.has(node.id) || !node.syncTasks?.length) return;
+  retryingIds.value = addPendingId(retryingIds.value, node.id);
+  let failed = 0;
+  const priority: Record<string, number> = { 'service-inbound': 1, 'service-config': 2, 'service-clients': 3, 'service-delete-check': 4 };
+  for (const task of [...node.syncTasks].sort((left, right) => (priority[left.action] || 9) - (priority[right.action] || 9))) {
+    try {
+      await api(`/api/admin/sync-tasks/${task.id}/retry`, { method: 'POST' });
+    } catch {
+      failed += 1;
+    }
+  }
+  if (failed) ElMessage.warning('部分同步失败');
+  else ElMessage.success('同步成功');
+  retryingIds.value = removePendingId(retryingIds.value, node.id);
+  await loadNodes();
 }
 
 function handleNodeCommand(node: ServiceNode, command: string) {
@@ -570,7 +601,7 @@ watch(() => form.transport, () => {
     </div>
 
     <div v-loading="loading" class="node-card-grid">
-      <article v-for="node in filteredNodes" :key="node.id" class="route-node-card entity-runtime-card" :class="node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
+      <article v-for="node in filteredNodes" :key="node.id" class="route-node-card entity-runtime-card" :class="node.syncTasks?.length ? 'runtime-state-error' : node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="route-node-card-header">
           <div class="route-node-identity">
             <span class="route-node-icon entity-name-avatar" :style="entityAvatarStyle(node.name, node.id)">{{ entityInitial(node.name, '节') }}</span>
@@ -579,7 +610,7 @@ watch(() => form.transport, () => {
               <span>{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }} · {{ node.config?.encryption || 'none' }}</span>
             </div>
           </div>
-          <span class="node-status-chip" :class="node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.enabled ? '已启用' : '已停用' }}</span>
+          <span class="node-status-chip" :class="node.syncTasks?.length ? 'is-pending' : node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.syncTasks?.length ? '待同步' : node.enabled ? '已启用' : '已停用' }}</span>
         </header>
 
         <div class="route-node-address" :class="{ 'is-missing': !node.server?.baseUrl }">
@@ -610,6 +641,7 @@ watch(() => form.transport, () => {
           <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
           <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
           <span v-if="node.config?.socksRelayEnabled" class="route-node-tag relay" :title="socksLabel(node.config.socksNodeId)">SOCKS 中转</span>
+          <span v-if="node.syncTasks?.length" class="route-node-tag sync-pending" :title="node.syncTasks.map((task) => task.message || task.action).join('；')">待同步 {{ node.syncTasks.length }}</span>
         </div>
 
         <p v-if="node.remark" class="route-node-remark">{{ node.remark }}</p>
@@ -617,6 +649,9 @@ watch(() => form.transport, () => {
         <footer class="route-node-actions runtime-card-footer">
           <span class="runtime-footer-label"><RadioTower :size="13" />{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }}</span>
           <div class="runtime-action-group">
+          <el-tooltip v-if="node.syncTasks?.length" content="重试待同步任务" placement="top">
+            <el-button class="runtime-icon-button runtime-retry-button" :loading="retryingIds.has(node.id)" aria-label="重试待同步任务" @click="retryNodeTasks(node)"><RefreshCw :size="15" /></el-button>
+          </el-tooltip>
           <el-tooltip content="编辑节点" placement="top">
             <el-button class="runtime-icon-button" aria-label="编辑节点" @click="editNode(node)"><Edit3 :size="15" /></el-button>
           </el-tooltip>

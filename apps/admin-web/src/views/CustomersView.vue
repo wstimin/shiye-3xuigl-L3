@@ -142,6 +142,7 @@ function handleCustomerPageSizeChange(pageSize: number) {
 }
 
 async function saveCustomer() {
+  if (savingCustomer.value) return;
   savingCustomer.value = true;
   error.value = '';
   try {
@@ -161,7 +162,7 @@ async function saveCustomer() {
 }
 
 async function bindNode() {
-  if (!bindForm.customerId || !bindForm.serviceNodeId) return;
+  if (binding.value || !bindForm.customerId || !bindForm.serviceNodeId) return;
   binding.value = true;
   error.value = '';
   try {
@@ -187,7 +188,7 @@ async function bindNode() {
 }
 
 async function updateCustomerNode() {
-  if (!nodeEditForm.customerId || !nodeEditForm.customerNodeId || !nodeEditForm.serviceNodeId) return;
+  if (updatingCustomerNode.value || !nodeEditForm.customerId || !nodeEditForm.customerNodeId || !nodeEditForm.serviceNodeId) return;
   updatingCustomerNode.value = true;
   error.value = '';
   try {
@@ -212,7 +213,7 @@ async function updateCustomerNode() {
 }
 
 async function adjustBalance() {
-  if (!balanceForm.customerId || balanceForm.amount <= 0) return;
+  if (adjustingBalance.value || !balanceForm.customerId || balanceForm.amount <= 0) return;
   adjustingBalance.value = true;
   error.value = '';
   try {
@@ -237,6 +238,7 @@ async function adjustBalance() {
 }
 
 async function syncNode(customer: Customer, node: CustomerNode) {
+  if (syncingIds.value.has(node.id)) return;
   syncingIds.value = new Set(syncingIds.value).add(node.id);
   error.value = '';
   try {
@@ -254,6 +256,7 @@ async function syncNode(customer: Customer, node: CustomerNode) {
 }
 
 async function renewNode(customer: Customer, node: CustomerNode) {
+  if (renewingIds.value.has(node.id)) return;
   const months = renewMonths.value[node.id] || 1;
   renewingIds.value = new Set(renewingIds.value).add(node.id);
   error.value = '';
@@ -297,6 +300,7 @@ async function showNodeTraffic(customer: Customer, node: CustomerNode) {
 }
 
 async function resetNodeTraffic(customer: Customer, node: CustomerNode) {
+  if (resettingTrafficIds.value.has(node.id)) return;
   await ElMessageBox.confirm(`确认重置「${node.serviceNode?.name || node.xuiEmail}」这个远端客户端的流量？`, '重置客户端流量', { type: 'warning', customClass: 'customer-dark-message-box' });
   resettingTrafficIds.value = new Set(resettingTrafficIds.value).add(node.id);
   error.value = '';
@@ -322,6 +326,7 @@ async function unbindNode(customer: Customer, node: CustomerNode) {
 }
 
 async function deleteBoundServiceNode(customer: Customer, node: CustomerNode) {
+  if (deletingServiceNodeIds.value.has(node.id)) return;
   if (!node.serviceNode?.id) {
     ElMessage.error('该绑定缺少服务节点信息，无法删除服务节点');
     return;
@@ -417,6 +422,7 @@ function editCustomer(customer: Customer) {
 }
 
 async function removeCustomer(customer: Customer) {
+  if (deletingCustomerIds.value.has(customer.id)) return;
   try {
     await ElMessageBox.confirm(`确认删除用户「${customer.name}」？系统只会删除面板用户和本地绑定，不会删除路由节点或远端 3x-ui 入站/客户端。`, '删除确认', {
       type: 'warning',

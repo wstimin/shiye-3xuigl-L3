@@ -57,6 +57,11 @@ export class NodesController {
   @Roles('admin')
   deleteServiceNode(@Param('id') id: string) { return this.nodes.deleteServiceNode(id); }
 
+  @Post('admin/service-nodes/:id/sync-config')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  syncServiceNodeConfig(@Param('id') id: string) { return this.nodes.syncServiceNodeConfig(id); }
+
   @Post('admin/service-nodes/:id/sync-traffic-limit')
   @UseGuards(AuthGuard)
   @Roles('admin')
@@ -81,6 +86,11 @@ export class NodesController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   updateSocksNode(@Param('id') id: string, @Body(new ZodValidationPipe(socksNodeUpsertSchema.partial())) body: Partial<z.infer<typeof socksNodeUpsertSchema>>) { return this.nodes.updateSocksNode(id, body); }
+
+  @Post('admin/sync-tasks/:id/retry')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  retrySyncTask(@Param('id') id: string) { return this.nodes.retrySyncTask(id); }
 
   @Delete('admin/socks-nodes/:id')
   @UseGuards(AuthGuard)

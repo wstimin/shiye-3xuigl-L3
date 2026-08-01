@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ArrowRight, CircleAlert, ClipboardList, CreditCard, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
-import { api } from './api';
+import { api, onSessionExpired } from './api';
 
 type SessionUser = { role: string; username: string };
 type Branding = { brandName: string; logoDataUrl: string };
@@ -47,6 +47,7 @@ const user = ref<SessionUser | null>(null);
 const branding = reactive<Branding>({ brandName: fallbackBrandName, logoDataUrl: '' });
 const loginForm = reactive({ username: '', password: '' });
 const route = useRoute();
+let stopSessionExpired: (() => void) | undefined;
 const isDashboardRoute = computed(() => route.path === '/');
 const darkAdminRoutes = new Set(['/', '/customers', '/nodes', '/xui-servers', '/socks-nodes', '/sync-logs', '/diagnostics', '/finance', '/cards', '/payments', '/settings']);
 const isDarkAdminRoute = computed(() => darkAdminRoutes.has(route.path));
@@ -144,6 +145,13 @@ function escapeSvg(value: string) {
   return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] || char);
 }
 
+function handleSessionExpired() {
+  if (!user.value) return;
+  user.value = null;
+  mobileNavOpen.value = false;
+  loginError.value = '登录已失效';
+}
+
 function handleBrandingUpdated(event: Event) {
   const next = (event as CustomEvent<Partial<Branding>>).detail || {};
   branding.brandName = next.brandName || fallbackBrandName;
@@ -152,12 +160,14 @@ function handleBrandingUpdated(event: Event) {
 }
 
 onMounted(async () => {
+  stopSessionExpired = onSessionExpired(handleSessionExpired);
   window.addEventListener(brandingUpdatedEvent, handleBrandingUpdated);
   await loadBranding();
   await loadMe();
 });
 
 onUnmounted(() => {
+  stopSessionExpired?.();
   window.removeEventListener(brandingUpdatedEvent, handleBrandingUpdated);
 });
 </script>

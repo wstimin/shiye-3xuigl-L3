@@ -150,6 +150,13 @@ export class XuiService {
     return { connected: true, inbounds };
   }
 
+  async testStoredServerDraft(id: string, input: z.infer<typeof xuiServerUpsertSchema>) {
+    const client = await this.createAuthenticatedClient(await this.storedServerDraftConfig(id, input));
+    const inbounds = await client.listInbounds();
+    this.assertXuiSuccess(inbounds);
+    return { connected: true, serverId: id, inboundCount: this.xuiArray(inbounds).length, inbounds };
+  }
+
   async testStoredServer(id: string) {
     const server = await this.prisma.xuiServer.findUnique({ where: { id } });
     if (!server) throw new NotFoundException('3x-ui 服务器不存在');
@@ -168,6 +175,11 @@ export class XuiService {
       username: input.username,
       password: input.password
     });
+    return this.readWebCertFiles(client);
+  }
+
+  async testStoredServerDraftCertFiles(id: string, input: z.infer<typeof xuiServerUpsertSchema>) {
+    const client = await this.createAuthenticatedClient(await this.storedServerDraftConfig(id, input));
     return this.readWebCertFiles(client);
   }
 
@@ -305,6 +317,10 @@ export class XuiService {
     this.assertXuiSuccess(response);
     const reloadResponse = await client.restartXrayService();
     this.assertXuiSuccess(reloadResponse);
+    await this.prisma.syncTask.updateMany({
+      where: { entityType: 'service-node', entityId: serviceNodeId, action: 'service-config', status: { not: 'resolved' } },
+      data: { status: 'resolved', message: null, resolvedAt: new Date() }
+    });
     await this.writeSyncLog(serviceNode.serverId, 'service-node-config-sync', 'success', `Service node ${serviceNode.name} remote config ${action}`, {
       serviceNodeId,
       inboundId: serviceNode.inboundId,
@@ -1217,6 +1233,20 @@ export class XuiService {
     }
 
     return client;
+  }
+
+  private async storedServerDraftConfig(id: string, input: z.infer<typeof xuiServerUpsertSchema>): Promise<XuiServerConfig> {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id } });
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
+    return {
+      baseUrl: input.baseUrl,
+      basePath: input.basePath === undefined ? server.basePath : input.basePath || null,
+      username: input.username === undefined ? server.username : input.username || null,
+      password: input.password,
+      passwordEnc: input.password === undefined ? server.passwordEnc : null,
+      token: input.token,
+      tokenEnc: input.token === undefined ? server.tokenEnc : null
+    };
   }
 
   private async deleteRemoteClient(server: XuiServerConfig & { id?: string | null }, inboundId: number, xuiEmail: string, keepTraffic: boolean, detail: Record<string, unknown>) {

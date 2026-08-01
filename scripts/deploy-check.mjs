@@ -9,6 +9,8 @@ readRequiredFile('packages/payment-core/dist/index.js');
 const adminIndex = readRequiredFile('dist/admin-web/index.html');
 const userIndex = readRequiredFile('dist/user-web/index.html');
 const nginxConfig = readRequiredFile('infra/nginx/shiye.conf');
+const prismaSchema = readRequiredFile('prisma/schema.prisma');
+const syncTaskMigration = readRequiredFile('prisma/migrations/20260801010000_sync_tasks/migration.sql');
 
 if (adminIndex) {
   requireMatch(adminIndex, /src="\.\/assets\//, 'Admin build must load JS from relative ./assets/ so ADMIN_PATH can change at runtime.');
@@ -19,6 +21,16 @@ if (adminIndex) {
 if (userIndex) {
   requireMatch(userIndex, /src="\/assets\//, 'User build must load JS from /assets/.');
   requireMatch(userIndex, /href="\/assets\//, 'User build must load CSS from /assets/.');
+}
+
+if (prismaSchema) {
+  requireMatch(prismaSchema, /model\s+SyncTask\s*\{/, 'Prisma schema must include the SyncTask model.');
+  requireMatch(prismaSchema, /@@map\("sync_tasks"\)/, 'SyncTask must map to the sync_tasks table.');
+}
+
+if (syncTaskMigration) {
+  requireMatch(syncTaskMigration, /CREATE TABLE[^\n]*sync_tasks/, 'Sync task migration must create the sync_tasks table.');
+  requireMatch(syncTaskMigration, /sync_tasks_entityType_entityId_action_key/, 'Sync task migration must enforce one task per entity action.');
 }
 
 if (nginxConfig) {

@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { Activity, CalendarClock, Copy, ListFilter, Network, QrCode, RefreshCw, Search, X } from 'lucide-vue-next';
 import { api } from '../api';
 import { notifyError, notifySuccess } from '../notify';
+import { createNodeQrImage } from '../node-qr';
 
 type UserNode = {
   id: string;
@@ -117,7 +118,7 @@ async function showQrCode(node: UserNode, link: string, index: number) {
   try {
     qrPreview.value = {
       title: `${node.serviceNode.name} / 线路 ${index + 1}`,
-      image: await QRCode.toDataURL(link, { width: 260, margin: 1 })
+      image: await createNodeQrImage(link, QRCode.toDataURL)
     };
   } catch {
     error.value = '生成失败';

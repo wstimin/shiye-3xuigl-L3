@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ArrowRight, CalendarClock, CircleAlert, CircleUserRound, Gauge, Home, LockKeyhole, LogOut, Menu, Network, QrCode, ReceiptText, ShieldCheck, TicketCheck, UserRound, WalletCards, X } from 'lucide-vue-next';
-import { api } from './api';
+import { api, onSessionExpired } from './api';
 import { userAvatarStyle, userInitial } from './avatar';
 import { onNotify, type NotifyPayload } from './notify';
 
@@ -37,6 +37,7 @@ const displayLoginUsername = computed(() => userIdentity.value?.loginUsername ||
 const currentUserInitial = computed(() => userInitial(displayName.value));
 let noticeId = 0;
 let stopNotify: (() => void) | undefined;
+let stopSessionExpired: (() => void) | undefined;
 
 async function loadBranding() {
   try {
@@ -127,6 +128,14 @@ function escapeSvg(value: string) {
   return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] || char);
 }
 
+function handleSessionExpired() {
+  if (!user.value) return;
+  user.value = null;
+  userIdentity.value = null;
+  mobileNavOpen.value = false;
+  loginError.value = '登录已失效';
+}
+
 function pushNotice(payload: NotifyPayload) {
   const id = ++noticeId;
   notices.value = [...notices.value, { id, ...payload }].slice(-3);
@@ -139,12 +148,14 @@ function closeNotice(id: number) {
 
 onMounted(async () => {
   stopNotify = onNotify(pushNotice);
+  stopSessionExpired = onSessionExpired(handleSessionExpired);
   await loadBranding();
   await loadMe();
 });
 
 onUnmounted(() => {
   stopNotify?.();
+  stopSessionExpired?.();
 });
 
 watch(() => route.fullPath, () => {

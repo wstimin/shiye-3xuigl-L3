@@ -15,10 +15,24 @@ export class XuiController {
   @Roles('admin')
   test(@Body(new ZodValidationPipe(xuiServerUpsertSchema)) body: z.infer<typeof xuiServerUpsertSchema>) { return this.xui.testConnection(body); }
 
+  @Post('admin/xui-servers/:id/test-draft')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  testStoredServerDraft(@Param('id') id: string, @Body(new ZodValidationPipe(xuiServerUpsertSchema)) body: z.infer<typeof xuiServerUpsertSchema>) {
+    return this.xui.testStoredServerDraft(id, body);
+  }
+
   @Post('admin/xui/certs')
   @UseGuards(AuthGuard)
   @Roles('admin')
   testCertFiles(@Body(new ZodValidationPipe(xuiServerUpsertSchema)) body: z.infer<typeof xuiServerUpsertSchema>) { return this.xui.testConnectionCertFiles(body); }
+
+  @Post('admin/xui-servers/:id/certs-draft')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  testStoredServerDraftCertFiles(@Param('id') id: string, @Body(new ZodValidationPipe(xuiServerUpsertSchema)) body: z.infer<typeof xuiServerUpsertSchema>) {
+    return this.xui.testStoredServerDraftCertFiles(id, body);
+  }
 
   @Post('admin/xui-servers/:id/test')
   @UseGuards(AuthGuard)
@@ -61,11 +75,6 @@ export class XuiController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   syncServiceNode(@Param('id') id: string) { return this.xui.syncServiceNode(id); }
-
-  @Post('admin/service-nodes/:id/sync-config')
-  @UseGuards(AuthGuard)
-  @Roles('admin')
-  syncServiceNodeConfig(@Param('id') id: string) { return this.xui.syncServiceNodeRemoteConfig(id); }
 
   @Post('admin/service-nodes/:id/set-enable')
   @UseGuards(AuthGuard)

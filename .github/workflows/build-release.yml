@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies from lockfile
         run: npm ci
 
+      - name: Run critical logic tests
+        run: npm test
+
       - name: Type-check source
         run: npm run typecheck
 

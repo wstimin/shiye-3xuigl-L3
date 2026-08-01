@@ -48,6 +48,8 @@ type XuiServer = {
 
 type CertResult = { found: boolean; certFile: string; keyFile: string; message?: string; raw?: unknown };
 type ConnectionTest = { state: 'success' | 'error'; inboundCount?: number; message?: string };
+type ServerSyncResult = { created: number; updated: number; skipped: number };
+type SocksSyncResult = { remoteSocksFound: number; remoteSocksImported: number };
 
 const servers = ref<XuiServer[]>([]);
 const loading = ref(false);
@@ -126,6 +128,7 @@ async function loadServers() {
 }
 
 async function saveServer() {
+  if (saving.value) return;
   saving.value = true;
   error.value = '';
   try {
@@ -143,10 +146,12 @@ async function saveServer() {
 }
 
 async function testForm() {
+  if (testingForm.value) return;
   testingForm.value = true;
   error.value = '';
   try {
-    await api<{ connected: boolean; inbounds: unknown }>('/api/admin/xui/test', { method: 'POST', body: cleanFormBody() });
+    const path = editingId.value ? `/api/admin/xui-servers/${editingId.value}/test-draft` : '/api/admin/xui/test';
+    await api<{ connected: boolean; inbounds: unknown }>(path, { method: 'POST', body: cleanFormBody() });
     ElMessage.success('连接成功');
   } catch (err) {
     showError(err, '测试连接失败');
@@ -156,6 +161,7 @@ async function testForm() {
 }
 
 async function testSaved(server: XuiServer) {
+  if (testingIds.value.has(server.id)) return;
   testingIds.value = addPendingId(testingIds.value, server.id);
   error.value = '';
   try {
@@ -172,10 +178,12 @@ async function testSaved(server: XuiServer) {
 }
 
 async function testFormCerts() {
+  if (testingCertForm.value) return;
   testingCertForm.value = true;
   error.value = '';
   try {
-    const result = await api<CertResult>('/api/admin/xui/certs', { method: 'POST', body: cleanFormBody() });
+    const path = editingId.value ? `/api/admin/xui-servers/${editingId.value}/certs-draft` : '/api/admin/xui/certs';
+    const result = await api<CertResult>(path, { method: 'POST', body: cleanFormBody() });
     await showCertResult(result, true);
   } catch (err) {
     showError(err, '证书读取失败');
@@ -185,6 +193,7 @@ async function testFormCerts() {
 }
 
 async function testSavedCerts(server: XuiServer) {
+  if (certIds.value.has(server.id)) return;
   certIds.value = addPendingId(certIds.value, server.id);
   error.value = '';
   try {
@@ -219,6 +228,7 @@ async function showCertResult(result: CertResult, allowFill: boolean) {
 }
 
 async function syncServer(server: XuiServer) {
+  if (syncingIds.value.has(server.id)) return;
   try {
     await ElMessageBox.confirm(
       `确认从“${server.name}”读取远端入站，并同步为本地路由节点？此操作不会同步远端用户。`,
@@ -231,8 +241,9 @@ async function syncServer(server: XuiServer) {
   syncingIds.value = addPendingId(syncingIds.value, server.id);
   error.value = '';
   try {
-    await api(`/api/admin/xui-servers/${server.id}/sync`, { method: 'POST' });
-    ElMessage.success('同步成功');
+    const result = await api<ServerSyncResult>(`/api/admin/xui-servers/${server.id}/sync`, { method: 'POST' });
+    if (result.skipped > 0) ElMessage.warning('部分同步失败');
+    else ElMessage.success('同步成功');
   } catch (err) {
     showError(err, '同步远端节点失败');
   } finally {
@@ -241,6 +252,7 @@ async function syncServer(server: XuiServer) {
 }
 
 async function syncServerSocks(server: XuiServer) {
+  if (syncingSocksIds.value.has(server.id)) return;
   try {
     await ElMessageBox.confirm(
       `确认从“${server.name}”读取远端 Xray 配置并导入 SOCKS 出站？只会写入本地出站节点列表。`,
@@ -253,8 +265,8 @@ async function syncServerSocks(server: XuiServer) {
   syncingSocksIds.value = addPendingId(syncingSocksIds.value, server.id);
   error.value = '';
   try {
-    await api(`/api/admin/xui-servers/${server.id}/sync-socks`, { method: 'POST' });
-    ElMessage.success('导入成功');
+    const result = await api<SocksSyncResult>(`/api/admin/xui-servers/${server.id}/sync-socks`, { method: 'POST' });
+    ElMessage.success(result.remoteSocksFound > 0 ? '导入成功' : '没有可导入节点');
   } catch (err) {
     showError(err, '导入远端 SOCKS 失败');
   } finally {
@@ -359,6 +371,7 @@ async function revealServerSecrets() {
 }
 
 async function removeServer(server: XuiServer) {
+  if (deletingIds.value.has(server.id)) return;
   try {
     await ElMessageBox.confirm(
       `确认删除面板连接“${server.name}”？存在关联路由节点时后端会拒绝删除，请先处理关联节点。`,

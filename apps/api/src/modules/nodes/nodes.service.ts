@@ -42,6 +42,8 @@ type XuiServerConfig = {
 
 const SHARE_LINK_PROTOCOLS = new Set(['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria', 'hysteria2']);
 
+type SyncTaskAction = 'service-inbound' | 'service-clients' | 'service-config' | 'socks-references' | 'service-delete-check' | 'socks-delete-check';
+
 @Injectable()
 export class NodesService {
   constructor(private readonly prisma: PrismaService, private readonly encryption: EncryptionService, private readonly xui: XuiService) {}
@@ -100,15 +102,19 @@ export class NodesService {
 
   async deleteServer(id: string) {
     await this.ensureServer(id);
+    const serviceNodeCount = await this.prisma.serviceNode.count({ where: { serverId: id } });
+    if (serviceNodeCount) throw new BadRequestException('请先删除关联路由节点');
     await this.prisma.xuiServer.delete({ where: { id } });
     return { deleted: true, id };
   }
 
-  listServiceNodes() {
-    return this.prisma.serviceNode.findMany({
+  async listServiceNodes() {
+    const nodes = await this.prisma.serviceNode.findMany({
       orderBy: { createdAt: 'desc' },
       include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
     });
+    const tasks = await this.pendingTasks('service-node', nodes.map((node) => node.id));
+    return nodes.map((node) => ({ ...node, syncTasks: tasks.get(node.id) || [] }));
   }
 
   async createServiceNode(input: z.infer<typeof serviceNodeUpsertSchema>) {
@@ -119,6 +125,7 @@ export class NodesService {
     let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[] } | null = null;
     let remoteClient: { email?: string; uuid?: string; subId?: string } | null = null;
     let remoteValidation: Awaited<ReturnType<XuiService['validateServiceNodeInbound']>> | null = null;
+    let localCreated = false;
 
     if (remoteMode === 'bind') {
       if (!inboundId) throw new BadRequestException('绑定已有入站时必须填写入站 ID');
@@ -194,11 +201,26 @@ export class NodesService {
         },
         include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
       });
-      if (config.socksRelayEnabled) await this.xui.syncServiceNodeRemoteConfig(node.id);
-      return node;
+      localCreated = true;
+      const pendingActions: SyncTaskAction[] = [];
+      if (config.socksRelayEnabled) {
+        try {
+          await this.xui.syncServiceNodeRemoteConfig(node.id);
+          await this.resolveSyncTask('service-node', node.id, 'service-config');
+        } catch (error) {
+          pendingActions.push('service-config');
+          await this.failSyncTask('service-node', node.id, 'service-config', error);
+        }
+      }
+      return {
+        ...node,
+        state: pendingActions.length ? 'partial' : 'success',
+        message: pendingActions.length ? '创建成功，同步失败' : '创建成功',
+        pendingActions
+      };
     } catch (error) {
-      if (remoteCreated) await this.xui.deleteRemoteInbound(input.serverId, remoteCreated.inboundId).catch(() => undefined);
       if (this.isUniqueConstraintError(error)) throw new BadRequestException('该 3x-ui 入站已绑定到其他路由节点');
+      if (remoteCreated && !localCreated) await this.xui.deleteRemoteInbound(input.serverId, remoteCreated.inboundId).catch(() => undefined);
       throw error;
     }
   }
@@ -214,6 +236,7 @@ export class NodesService {
     let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[] } | null = null;
     let remoteClient: { email?: string; uuid?: string; subId?: string } | null = null;
     let remoteValidation: Awaited<ReturnType<XuiService['validateServiceNodeInbound']>> | null = null;
+    let localUpdated = false;
     const nextName = input.name || current.name;
     let nextProtocol = input.protocol || current.protocol;
     let nextEncryption = input.encryption || previousConfig.encryption || 'none';
@@ -232,14 +255,23 @@ export class NodesService {
     if (remoteMode === 'bind') {
       if (!inboundId) throw new BadRequestException('绑定已有入站时必须填写入站 ID');
       await this.assertServiceNodeInboundAvailable(nextServerId, inboundId, id);
-      remoteValidation = await this.xui.validateServiceNodeInbound(nextServerId, inboundId);
-      this.assertShareLinkProtocol(remoteValidation.protocol);
-      this.assertTransportCompatibility(remoteValidation.protocol, remoteValidation.encryption, remoteValidation.transportConfig.transport);
-      remoteClient = remoteValidation.remoteClient;
-      nextProtocol = remoteValidation.protocol;
-      nextEncryption = remoteValidation.encryption;
-      nextTransport = remoteValidation.transportConfig.transport;
-      nextRemotePort = remoteValidation.port || nextRemotePort;
+      const bindingChanged = nextServerId !== current.serverId || inboundId !== current.inboundId || previousConfig.remoteMode !== 'bind';
+      if (bindingChanged) {
+        remoteValidation = await this.xui.validateServiceNodeInbound(nextServerId, inboundId);
+        this.assertShareLinkProtocol(remoteValidation.protocol);
+        this.assertTransportCompatibility(remoteValidation.protocol, remoteValidation.encryption, remoteValidation.transportConfig.transport);
+        remoteClient = remoteValidation.remoteClient;
+        nextProtocol = remoteValidation.protocol;
+        nextEncryption = remoteValidation.encryption;
+        nextTransport = remoteValidation.transportConfig.transport;
+        nextRemotePort = remoteValidation.port || nextRemotePort;
+      } else {
+        remoteClient = {
+          email: previousConfig.remoteClientEmail,
+          uuid: previousConfig.remoteClientUuid,
+          subId: previousConfig.remoteClientSubId
+        };
+      }
     } else if (!inboundId) {
       remoteCreated = await this.xui.createServiceNodeInbound({
         serverId: nextServerId,
@@ -333,30 +365,6 @@ export class NodesService {
         nextRemark === current.remark &&
         (input.inboundPort === undefined || nextRemotePort === previousConfig.remoteInboundPort)
       );
-      if (!remoteCreated && inboundId && remoteInboundChanged) {
-        if (remoteEnableOnlyChanged) {
-          await this.xui.setServiceNodeRemoteEnable(id, nextEnabled);
-        } else {
-          await this.xui.updateServiceNodeInbound({
-            serverId: nextServerId,
-            inboundId,
-            name: nextName,
-            protocol: nextProtocol,
-            encryption: config.encryption || 'none',
-            transport: config.transport || 'tcp',
-            tcpHeaderType: config.tcpHeaderType,
-            transportHost: config.transportHost,
-            transportPath: config.transportPath,
-            grpcServiceName: config.grpcServiceName,
-            grpcAuthority: config.grpcAuthority,
-            grpcMultiMode: config.grpcMultiMode,
-            xhttpMode: config.xhttpMode,
-            enabled: nextEnabled,
-            port: nextRemotePort,
-            remark: nextRemoteRemark
-          });
-        }
-      }
       const updated = await this.prisma.serviceNode.update({
         where: { id },
         data: {
@@ -372,61 +380,117 @@ export class NodesService {
         },
         include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
       });
+      localUpdated = true;
+      const pendingActions: SyncTaskAction[] = [];
+      if (!remoteCreated && inboundId && remoteInboundChanged) {
+        try {
+          if (remoteEnableOnlyChanged) await this.xui.setServiceNodeRemoteEnable(id, nextEnabled);
+          else await this.syncServiceNodeInboundFromLocal(id);
+          await this.resolveSyncTask('service-node', id, 'service-inbound');
+        } catch (error) {
+          pendingActions.push('service-inbound');
+          await this.failSyncTask('service-node', id, 'service-inbound', error, { remoteEnableOnlyChanged });
+        }
+      }
       const remoteClientShouldSync = Boolean(updated.inboundId && (remoteInboundChanged || trafficLimitChanged));
       if (remoteClientShouldSync) {
         await this.prisma.customerNode.updateMany({
           where: { serviceNodeId: id },
           data: { trafficLimitGb: updated.trafficLimitGb }
         });
-        const syncResult = await this.xui.syncServiceNodeTrafficLimit(id);
-        if (!syncResult.synced) {
-          throw new BadGatewayException(`路由节点已保存，但远端 3x-ui 客户端同步未全部成功：成功 ${syncResult.updated}，跳过 ${syncResult.skipped}，失败 ${syncResult.failed}`);
+        try {
+          const syncResult = await this.xui.syncServiceNodeTrafficLimit(id);
+          if (!syncResult.synced) throw new BadGatewayException('部分客户端同步失败');
+          await this.resolveSyncTask('service-node', id, 'service-clients');
+        } catch (error) {
+          pendingActions.push('service-clients');
+          await this.failSyncTask('service-node', id, 'service-clients', error);
         }
       }
       if (updated.inboundId && socksConfigChanged) {
-        await this.xui.syncServiceNodeRemoteConfig(id);
+        try {
+          await this.xui.syncServiceNodeRemoteConfig(id);
+          await this.resolveSyncTask('service-node', id, 'service-config');
+        } catch (error) {
+          pendingActions.push('service-config');
+          await this.failSyncTask('service-node', id, 'service-config', error);
+        }
       }
-      return updated;
+      return {
+        ...updated,
+        state: pendingActions.length ? 'partial' : 'success',
+        message: pendingActions.length ? '保存成功，同步失败' : '保存成功',
+        pendingActions
+      };
     } catch (error) {
-      if (remoteCreated) await this.xui.deleteRemoteInbound(nextServerId, remoteCreated.inboundId).catch(() => undefined);
+      if (remoteCreated && !localUpdated) await this.xui.deleteRemoteInbound(nextServerId, remoteCreated.inboundId).catch(() => undefined);
       if (this.isUniqueConstraintError(error)) throw new BadRequestException('该 3x-ui 入站已绑定到其他路由节点');
       throw error;
     }
   }
 
-  async deleteServiceNode(id: string) {
+  async deleteServiceNode(id: string, recordFailure = true) {
     const current = await this.ensureServiceNode(id);
-    const remoteClientCleanup = { skipped: true, reason: 'clients belong to the service-node inbound and are removed with the inbound' };
-    const remoteConfigCleanup = current.inboundId
-      ? await this.xui.syncServiceNodeRemoteConfig(id, { removeOnly: true })
-      : { skipped: true, reason: 'service node has no inbound ID' };
-    const remoteInboundCleanup = await this.xui.deleteManagedServiceNodeInbound(id);
-    const localImportedSocksCleanup = await this.cleanupLocalImportedSocksNodeForServiceNode(id, current.config);
-    const customerNodes = await this.prisma.customerNode.findMany({ where: { serviceNodeId: id }, select: { id: true } });
-    const customerNodeIds = customerNodes.map((node) => node.id);
-    const cleanupActions: Prisma.PrismaPromise<unknown>[] = [
-      this.prisma.renewalLog.updateMany({ where: { customerNodeId: { in: customerNodeIds } }, data: { customerNodeId: null } }),
-      this.prisma.customerNode.deleteMany({ where: { serviceNodeId: id } }),
-      this.prisma.serviceNode.delete({ where: { id } })
-    ];
-    if (localImportedSocksCleanup.deleteSocksNodeId) cleanupActions.push(this.prisma.socksNode.delete({ where: { id: localImportedSocksCleanup.deleteSocksNodeId } }));
-    await this.prisma.$transaction(cleanupActions);
-    return { deleted: true, id, remoteClientCleanup, remoteConfigCleanup, remoteInboundCleanup, localImportedSocksCleanup };
+    try {
+      const remoteClientCleanup = { skipped: true, reason: 'clients belong to the service-node inbound and are removed with the inbound' };
+      const remoteConfigCleanup = current.inboundId
+        ? await this.xui.syncServiceNodeRemoteConfig(id, { removeOnly: true })
+        : { skipped: true, reason: 'service node has no inbound ID' };
+      const remoteInboundCleanup = await this.xui.deleteManagedServiceNodeInbound(id);
+      const localImportedSocksCleanup = await this.cleanupLocalImportedSocksNodeForServiceNode(id, current.config);
+      const customerNodes = await this.prisma.customerNode.findMany({ where: { serviceNodeId: id }, select: { id: true } });
+      const customerNodeIds = customerNodes.map((node) => node.id);
+      const cleanupActions: Prisma.PrismaPromise<unknown>[] = [
+        this.prisma.renewalLog.updateMany({ where: { customerNodeId: { in: customerNodeIds } }, data: { customerNodeId: null } }),
+        this.prisma.customerNode.deleteMany({ where: { serviceNodeId: id } }),
+        this.prisma.syncTask.deleteMany({ where: { entityType: 'service-node', entityId: id } }),
+        this.prisma.serviceNode.delete({ where: { id } })
+      ];
+      if (localImportedSocksCleanup.deleteSocksNodeId) {
+        cleanupActions.push(this.prisma.syncTask.deleteMany({ where: { entityType: 'socks-node', entityId: localImportedSocksCleanup.deleteSocksNodeId } }));
+        cleanupActions.push(this.prisma.socksNode.delete({ where: { id: localImportedSocksCleanup.deleteSocksNodeId } }));
+      }
+      await this.prisma.$transaction(cleanupActions);
+      return { deleted: true, id, state: 'success', message: '删除成功', remoteClientCleanup, remoteConfigCleanup, remoteInboundCleanup, localImportedSocksCleanup };
+    } catch (error) {
+      if (recordFailure) await this.failSyncTask('service-node', id, 'service-delete-check', error);
+      throw error;
+    }
   }
 
-  async syncServiceNodeTrafficLimit(id: string) {
+  async syncServiceNodeConfig(id: string) {
+    try {
+      const result = await this.xui.syncServiceNodeRemoteConfig(id);
+      await this.resolveSyncTask('service-node', id, 'service-config');
+      return result;
+    } catch (error) {
+      await this.failSyncTask('service-node', id, 'service-config', error);
+      throw error;
+    }
+  }
+
+  async syncServiceNodeTrafficLimit(id: string, recordFailure = true) {
     const node = await this.prisma.serviceNode.findUnique({ where: { id }, select: { id: true, inboundId: true, trafficLimitGb: true } });
     if (!node) throw new NotFoundException('Service node not found');
     await this.prisma.customerNode.updateMany({
       where: { serviceNodeId: id },
       data: { trafficLimitGb: node.trafficLimitGb }
     });
-    return this.xui.syncServiceNodeTrafficLimit(id);
+    try {
+      const result = await this.xui.syncServiceNodeTrafficLimit(id);
+      if (!result.synced) throw new BadGatewayException('部分客户端同步失败');
+      await this.resolveSyncTask('service-node', id, 'service-clients');
+      return result;
+    } catch (error) {
+      if (recordFailure) await this.failSyncTask('service-node', id, 'service-clients', error);
+      throw error;
+    }
   }
 
   async listSocksNodes() {
     const nodes = await this.prisma.socksNode.findMany({ orderBy: { createdAt: 'desc' } });
-    return nodes.map(maskSocksNode);
+    const tasks = await this.pendingTasks('socks-node', nodes.map((node) => node.id));
+    return nodes.map((node) => ({ ...maskSocksNode(node), syncTasks: tasks.get(node.id) || [] }));
   }
 
   async getSocksNodeSecrets(id: string) {
@@ -479,30 +543,45 @@ export class NodesService {
       ? await Promise.all(usedServiceNodes.map(async (serviceNode) => {
         try {
           const result = await this.xui.syncServiceNodeRemoteConfig(serviceNode.id);
+          await this.resolveSyncTask('service-node', serviceNode.id, 'service-config');
           return { serviceNodeId: serviceNode.id, serviceNodeName: serviceNode.name, synced: true, result };
         } catch (error) {
-          return { serviceNodeId: serviceNode.id, serviceNodeName: serviceNode.name, synced: false, message: error instanceof Error ? error.message : String(error) };
+          await this.failSyncTask('service-node', serviceNode.id, 'service-config', error, { socksNodeId: id });
+          return { serviceNodeId: serviceNode.id, serviceNodeName: serviceNode.name, synced: false, message: this.shortSyncMessage(error) };
         }
       }))
       : [];
     const failed = syncResults.filter((item) => !item.synced);
-    if (failed.length) {
-      throw new BadGatewayException(`出站节点已保存，但 ${failed.length} 个路由节点同步远端失败：${failed.map((item) => item.serviceNodeName).join('、')}`);
-    }
-    return { ...maskSocksNode(node), syncResults };
+    if (failed.length) await this.failSyncTask('socks-node', id, 'socks-references', new Error('部分路由节点同步失败'), { failed });
+    else await this.resolveSyncTask('socks-node', id, 'socks-references');
+    return {
+      ...maskSocksNode(node),
+      state: failed.length ? 'partial' : 'success',
+      message: failed.length ? '保存成功，同步失败' : '保存成功',
+      pendingActions: failed.length ? ['socks-references'] : [],
+      syncResults
+    };
   }
 
-  async deleteSocksNode(id: string) {
+  async deleteSocksNode(id: string, recordFailure = true) {
     const node = await this.ensureSocksNode(id);
     const serviceNodes = await this.prisma.serviceNode.findMany({ select: { id: true, name: true, config: true } });
     const used = serviceNodes.find((node) => jsonObject(node.config).socksNodeId === id);
     if (used) throw new BadRequestException(`Socks 节点正在被服务节点“${used.name}”使用，请先关闭或更换该服务节点的 Socks 中转`);
-    let remoteDelete: unknown = null;
-    if (node.sourceServerId && node.remoteOutboundTag) {
-      remoteDelete = await this.xui.deleteRemoteSocksOutbound(node.sourceServerId, node.remoteOutboundTag);
+    try {
+      let remoteDelete: unknown = null;
+      if (node.sourceServerId && node.remoteOutboundTag) {
+        remoteDelete = await this.xui.deleteRemoteSocksOutbound(node.sourceServerId, node.remoteOutboundTag);
+      }
+      await this.prisma.$transaction([
+        this.prisma.syncTask.deleteMany({ where: { entityType: 'socks-node', entityId: id } }),
+        this.prisma.socksNode.delete({ where: { id } })
+      ]);
+      return { deleted: true, id, state: 'success', message: '删除成功', remoteDelete };
+    } catch (error) {
+      if (recordFailure) await this.failSyncTask('socks-node', id, 'socks-delete-check', error);
+      throw error;
     }
-    await this.prisma.socksNode.delete({ where: { id } });
-    return { deleted: true, id, remoteDelete };
   }
 
   async listUserNodes(customerId: string) {
@@ -676,6 +755,137 @@ export class NodesService {
     if (!node) throw new NotFoundException('Customer node not found');
     const result = await this.deleteServiceNode(node.serviceNodeId);
     return { ...result, customerId, customerNodeId };
+  }
+
+  async retrySyncTask(id: string) {
+    const task = await this.prisma.syncTask.findUnique({ where: { id } });
+    if (!task || task.status === 'resolved') throw new NotFoundException('待同步任务不存在');
+    try {
+      const result = await this.runSyncTask(task.entityType, task.entityId, task.action as SyncTaskAction);
+      await this.resolveSyncTask(task.entityType, task.entityId, task.action as SyncTaskAction);
+      return { state: 'success', message: '同步成功', taskId: id, result };
+    } catch (error) {
+      await this.failSyncTask(task.entityType, task.entityId, task.action as SyncTaskAction, error, task.detail);
+      throw error;
+    }
+  }
+
+  private async runSyncTask(entityType: string, entityId: string, action: SyncTaskAction) {
+    if (entityType === 'service-node') {
+      if (action === 'service-inbound') return this.syncServiceNodeInboundFromLocal(entityId);
+      if (action === 'service-clients') return this.syncServiceNodeTrafficLimit(entityId, false);
+      if (action === 'service-config') return this.xui.syncServiceNodeRemoteConfig(entityId);
+      if (action === 'service-delete-check') return this.retryServiceNodeDeleteCheck(entityId);
+    }
+    if (entityType === 'socks-node') {
+      if (action === 'socks-references') return this.syncSocksNodeReferences(entityId);
+      if (action === 'socks-delete-check') return this.deleteSocksNode(entityId, false);
+    }
+    throw new BadRequestException('该任务不支持自动重试');
+  }
+
+  private async syncServiceNodeInboundFromLocal(id: string) {
+    const node = await this.ensureServiceNode(id);
+    if (!node.inboundId) throw new BadRequestException('路由节点缺少远端入站 ID');
+    const config = jsonObject(node.config) as ServiceNodeConfig;
+    return this.xui.updateServiceNodeInbound({
+      serverId: node.serverId,
+      inboundId: node.inboundId,
+      name: node.name,
+      protocol: node.protocol,
+      encryption: config.encryption || 'none',
+      transport: config.transport || 'tcp',
+      tcpHeaderType: config.tcpHeaderType,
+      transportHost: config.transportHost,
+      transportPath: config.transportPath,
+      grpcServiceName: config.grpcServiceName,
+      grpcAuthority: config.grpcAuthority,
+      grpcMultiMode: config.grpcMultiMode,
+      xhttpMode: config.xhttpMode,
+      enabled: node.enabled,
+      port: config.remoteInboundPort,
+      remark: node.name
+    });
+  }
+
+  private async syncSocksNodeReferences(id: string) {
+    await this.ensureSocksNode(id);
+    const serviceNodes = await this.serviceNodesUsingSocksNode(id);
+    const results = await Promise.all(serviceNodes.map(async (node) => {
+      try {
+        const result = await this.xui.syncServiceNodeRemoteConfig(node.id);
+        await this.resolveSyncTask('service-node', node.id, 'service-config');
+        return { serviceNodeId: node.id, serviceNodeName: node.name, synced: true, result };
+      } catch (error) {
+        await this.failSyncTask('service-node', node.id, 'service-config', error, { socksNodeId: id });
+        return { serviceNodeId: node.id, serviceNodeName: node.name, synced: false, message: this.errorMessage(error) };
+      }
+    }));
+    const failed = results.filter((item) => !item.synced);
+    if (failed.length) throw new BadGatewayException('部分路由节点同步失败');
+    return { synced: true, results };
+  }
+
+  private async retryServiceNodeDeleteCheck(id: string) {
+    const exists = await this.prisma.serviceNode.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return { resolved: true, reason: '路由节点已经删除' };
+    return this.deleteServiceNode(id, false);
+  }
+
+  private async pendingTasks(entityType: string, entityIds: string[]) {
+    const result = new Map<string, Array<{ id: string; action: string; status: string; message: string | null; attemptCount: number; updatedAt: Date }>>();
+    if (!entityIds.length) return result;
+    const tasks = await this.prisma.syncTask.findMany({
+      where: { entityType, entityId: { in: entityIds }, status: { in: ['pending', 'failed'] } },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true, entityId: true, action: true, status: true, message: true, attemptCount: true, updatedAt: true }
+    });
+    for (const task of tasks) result.set(task.entityId, [...(result.get(task.entityId) || []), task]);
+    return result;
+  }
+
+  private async failSyncTask(entityType: string, entityId: string, action: SyncTaskAction, error: unknown, detail?: unknown) {
+    const message = this.shortSyncMessage(error);
+    return this.prisma.syncTask.upsert({
+      where: { entityType_entityId_action: { entityType, entityId, action } },
+      create: {
+        entityType,
+        entityId,
+        action,
+        status: 'failed',
+        message,
+        detail: this.toJsonValue(detail || null),
+        attemptCount: 1,
+        lastAttemptAt: new Date()
+      },
+      update: {
+        status: 'failed',
+        message,
+        detail: this.toJsonValue(detail || null),
+        attemptCount: { increment: 1 },
+        lastAttemptAt: new Date(),
+        resolvedAt: null
+      }
+    });
+  }
+
+  private async resolveSyncTask(entityType: string, entityId: string, action: SyncTaskAction) {
+    return this.prisma.syncTask.updateMany({
+      where: { entityType, entityId, action, status: { not: 'resolved' } },
+      data: { status: 'resolved', message: null, resolvedAt: new Date() }
+    });
+  }
+
+  private shortSyncMessage(error: unknown) {
+    const message = this.errorMessage(error);
+    if (/timeout|超时/i.test(message)) return '远端请求超时';
+    if (/disabled|停用/i.test(message)) return '远端面板已停用';
+    if (/not found|不存在|missing/i.test(message)) return '远端数据不存在';
+    return '远端同步失败';
+  }
+
+  private errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private async ensureServer(id: string) {
