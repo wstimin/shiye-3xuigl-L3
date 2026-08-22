@@ -60,7 +60,7 @@ export class XuiClient {
     const text = await response.text();
     this.rememberCookies(response.headers);
     const payload = text ? this.parse(text) : null;
-    if (!response.ok) throw new XuiClientError(`3x-ui request failed: ${response.status}`, response.status, payload);
+    if (!response.ok) throw this.requestError(response.status, payload);
     return payload as T;
   }
 
@@ -82,7 +82,7 @@ export class XuiClient {
     const text = await response.text();
     this.rememberCookies(response.headers);
     const payload = text ? this.parse(text) : null;
-    if (!response.ok) throw new XuiClientError(`3x-ui request failed: ${response.status}`, response.status, payload);
+    if (!response.ok) throw this.requestError(response.status, payload);
     return payload as T;
   }
 
@@ -191,6 +191,10 @@ export class XuiClient {
     return this.request(`/panel/api/clients/get/${encodeURIComponent(email)}`);
   }
 
+  async getClientRecord(email: string) {
+    return this.responseClientObject(await this.getClientDetails(email));
+  }
+
   addClient(inboundId: number, client: unknown) {
     const body = this.clientMutationBody(inboundId, client);
     if (this.isV36()) return this.request('/panel/api/clients/add', {
@@ -207,10 +211,10 @@ export class XuiClient {
     const body = this.clientMutationBody(inboundId, client);
     const email = this.clientEmail(client) || clientId;
     if (this.isV36()) {
-      const current = await this.getClientDetails(clientId || email);
+      const current = await this.getClientRecord(clientId || email);
       return this.request(`/panel/api/clients/update/${encodeURIComponent(clientId || email)}`, {
         method: 'POST',
-        body: this.v36ClientPayload(client, this.responseClientObject(current))
+        body: this.v36ClientPayload(client, current)
       });
     }
     return this.withLegacyFallback(
@@ -451,14 +455,33 @@ export class XuiClient {
 
   private v36ClientPayload(client: unknown, current: Record<string, unknown> = {}) {
     const requested = this.objectValue(client);
-    const payload: Record<string, unknown> = { ...current, ...requested };
+    const merged: Record<string, unknown> = { ...current, ...requested };
     const requestedId = typeof requested.id === 'string' ? requested.id.trim() : '';
     const currentId = typeof current.id === 'string' ? current.id.trim() : '';
-    if (requestedId) payload.uuid = requestedId;
-    else if (!payload.uuid && currentId) payload.uuid = currentId;
+    if (requestedId) merged.uuid = requestedId;
+    else if (!merged.uuid && currentId) merged.uuid = currentId;
 
-    for (const key of ['id', 'inboundIds', 'traffic', 'externalConfigIds', 'createdAt', 'updatedAt', 'created_at', 'updated_at']) {
-      delete payload[key];
+    const payload: Record<string, unknown> = {};
+    for (const key of [
+      'email',
+      'uuid',
+      'password',
+      'auth',
+      'security',
+      'method',
+      'flow',
+      'limitIp',
+      'totalGB',
+      'expiryTime',
+      'enable',
+      'tgId',
+      'subId',
+      'reset',
+      'reverse',
+      'comment',
+      'group_name'
+    ]) {
+      if (merged[key] !== undefined && merged[key] !== null) payload[key] = merged[key];
     }
     return payload;
   }
@@ -471,7 +494,16 @@ export class XuiClient {
     const candidate = root.obj ?? root.data ?? root.result ?? payload;
     const parsed = typeof candidate === 'string' ? this.objectValue(this.parse(candidate)) : this.objectValue(candidate);
     const nestedClient = this.objectValue(parsed.client);
-    return Object.keys(nestedClient).length ? nestedClient : parsed;
+    if (!Object.keys(nestedClient).length) return parsed;
+    if (nestedClient.inboundIds !== undefined || parsed.inboundIds === undefined) return nestedClient;
+    return { ...nestedClient, inboundIds: parsed.inboundIds };
+  }
+
+  private requestError(status: number, payload: unknown) {
+    const object = this.objectValue(payload);
+    const detail = String(object.msg || object.message || '').trim();
+    const suffix = detail ? ` - ${detail}` : '';
+    return new XuiClientError(`3x-ui request failed: ${status}${suffix}`, status, payload);
   }
 
   private isV36() {

@@ -1236,9 +1236,15 @@ export class XuiService {
         throw new BadRequestException('绑定已有 3x-ui 入站时未找到对应远端客户端，为避免重复创建，请填写已有客户端的远端标识/email 或 UUID 后再同步');
       }
 
-      const uuid = existing.uuid || remoteClientUuid || customerNode.uuid || savedUuid || randomUUID();
-      const subId = existing.subId || remoteClientSubId || savedSubId || this.subscriptionId(uuid);
-      const xuiEmail = this.stringValue(options.preferredClientEmail) || existing.email || remoteClientEmail || customerNode.xuiEmail;
+      let uuid = existing.uuid || remoteClientUuid || customerNode.uuid || savedUuid || randomUUID();
+      let subId = existing.subId || remoteClientSubId || savedSubId || this.subscriptionId(uuid);
+      let xuiEmail = this.stringValue(options.preferredClientEmail) || existing.email || remoteClientEmail || customerNode.xuiEmail;
+      if (client.usesApiProfile('v3.6')) {
+        xuiEmail = await this.availableV36ClientEmail(client, xuiEmail, existing, {
+          customerId,
+          loginUsername: customerNode.customer.loginUsername
+        });
+      }
       const xuiClient = this.buildXuiClient({
         protocol: customerNode.serviceNode.protocol,
         uuid,
@@ -1253,6 +1259,18 @@ export class XuiService {
       const updateIdentifier = client.usesApiProfile('v3.6') ? existing.email || xuiEmail : existing.clientId || existing.uuid || uuid;
       const payload = await client.updateClient(existing.inboundId || inboundId, updateIdentifier, xuiClient);
       this.assertXuiSuccess(payload);
+      if (client.usesApiProfile('v3.6')) {
+        const confirmed = await this.confirmV36ClientUpdate(client, {
+          requestedEmail: xuiEmail,
+          previousEmail: existing.email,
+          inboundId,
+          uuid,
+          subId
+        });
+        xuiEmail = confirmed.email;
+        uuid = confirmed.uuid || uuid;
+        subId = confirmed.subId || subId;
+      }
       const links = targetStatus === 'active'
         ? await this.requireLinksForServiceNode(client, xuiEmail, subId, {
           serverId,
@@ -2777,6 +2795,72 @@ export class XuiService {
       }
     }
     return { exists: false, raw: null };
+  }
+
+  private async availableV36ClientEmail(
+    client: XuiClient,
+    requestedEmail: string,
+    existing: ClientMatch,
+    customer: { customerId: string; loginUsername: string }
+  ) {
+    const requested = requestedEmail.trim();
+    if (!requested || this.normalizeIdentity(requested) === this.normalizeIdentity(existing.email)) return requested || existing.email || '';
+
+    const candidates = [
+      requested,
+      this.readableIdentifier(`${requested}-${customer.loginUsername}`, requested, 128),
+      this.readableIdentifier(`${requested}-${customer.customerId.slice(-6)}`, requested, 128)
+    ].filter((value, index, values) => value && values.indexOf(value) === index);
+
+    for (const candidate of candidates) {
+      const occupied = await this.optionalV36ClientRecord(client, candidate);
+      if (!occupied || this.sameV36Client(occupied, existing)) return candidate;
+    }
+    throw new BadRequestException(`3x-ui 客户端名称 ${requested} 已被其他用户占用，请修改用户名称后重试`);
+  }
+
+  private async confirmV36ClientUpdate(
+    client: XuiClient,
+    expected: { requestedEmail: string; previousEmail?: string; inboundId: number; uuid?: string; subId?: string }
+  ) {
+    const emails = [expected.requestedEmail, expected.previousEmail]
+      .map((value) => String(value || '').trim())
+      .filter((value, index, values) => value && values.indexOf(value) === index);
+
+    for (const email of emails) {
+      const record = await this.optionalV36ClientRecord(client, email);
+      if (!record) continue;
+      const identity = this.v36ClientIdentity(record);
+      if (!this.sameV36Client(record, expected)) continue;
+      const inboundIds = this.numberList(record.inboundIds);
+      if (inboundIds.length && !inboundIds.includes(expected.inboundId)) continue;
+      return {
+        email: identity.email || email,
+        uuid: identity.uuid,
+        subId: identity.subId
+      };
+    }
+
+    throw new BadGatewayException(`3x-ui 3.6 客户端更新后回读失败：${expected.requestedEmail}`);
+  }
+
+  private async optionalV36ClientRecord(client: XuiClient, email: string) {
+    try {
+      const record = await client.getClientRecord(email);
+      return Object.keys(record).length ? record : undefined;
+    } catch (error) {
+      if (this.isRemoteNotFound(error)) return undefined;
+      throw error;
+    }
+  }
+
+  private sameV36Client(record: unknown, expected: { email?: string; uuid?: string; subId?: string }) {
+    const identity = this.v36ClientIdentity(record);
+    const expectedUuid = this.normalizeIdentity(expected.uuid);
+    const expectedSubId = this.normalizeIdentity(expected.subId);
+    if (expectedUuid && this.normalizeIdentity(identity.uuid) === expectedUuid) return true;
+    if (expectedSubId && this.normalizeIdentity(identity.subId) === expectedSubId) return true;
+    return Boolean(expected.email && this.normalizeIdentity(identity.email) === this.normalizeIdentity(expected.email));
   }
 
   private async loadRemoteSocksRouteState(client: XuiClient): Promise<RemoteSocksRouteState> {

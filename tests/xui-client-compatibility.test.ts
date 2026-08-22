@@ -132,6 +132,63 @@ test('3.6 client updates preserve the full record and translate legacy UUID fiel
   ]);
 });
 
+test('3.6 request errors include the panel response message', async () => {
+  const client = new XuiClient({
+    baseUrl: 'https://v36.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async () => jsonResponse({ success: false, msg: 'Client email already exists' }, 400)
+  });
+
+  await assert.rejects(
+    () => client.updateClient(9, 'old@example.com', { email: 'new@example.com' }),
+    /3x-ui request failed: 400 - Client email already exists/
+  );
+});
+
+test('3.6 Trojan updates preserve the password credential and omit read-only fields', async () => {
+  let updateBody: any;
+  const client = new XuiClient({
+    baseUrl: 'https://v36.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/panel/api/clients/get/trojan-user') {
+        return jsonResponse({
+          success: true,
+          obj: {
+            id: 91,
+            email: 'trojan-user',
+            password: 'trojan-secret',
+            subId: 'trojan-sub',
+            inboundIds: [15],
+            traffic: { up: 1, down: 2 },
+            createdAt: 100
+          }
+        });
+      }
+      if (path === '/panel/api/clients/update/trojan-user') {
+        updateBody = JSON.parse(String(init?.body));
+        return jsonResponse({ success: true });
+      }
+      return jsonResponse({ message: `unexpected request ${path}` }, 500);
+    }
+  });
+
+  await client.updateClient(15, 'trojan-user', {
+    email: 'trojan-user',
+    password: 'trojan-secret',
+    enable: false,
+    totalGB: 2048
+  });
+
+  assert.equal(updateBody.password, 'trojan-secret');
+  assert.equal(updateBody.subId, 'trojan-sub');
+  assert.equal(updateBody.enable, false);
+  assert.equal(updateBody.inboundIds, undefined);
+  assert.equal(updateBody.traffic, undefined);
+  assert.equal(updateBody.createdAt, undefined);
+});
+
 test('legacy client updates keep the existing form endpoint and do not fetch 3.6 details', async () => {
   const requests: Array<{ path: string; contentType: string; body: string }> = [];
   const client = new XuiClient({
@@ -311,6 +368,7 @@ test('3.6 customer binding updates the existing global client without creating a
     '/panel/api/clients/list',
     '/panel/api/clients/get/user%40example.com',
     '/panel/api/clients/update/user%40example.com',
+    '/panel/api/clients/get/user%40example.com',
     '/panel/api/clients/links/user%40example.com'
   ]);
   const update = requests.find((request) => request.path === '/panel/api/clients/update/user%40example.com');
@@ -343,10 +401,22 @@ test('3.6 customer binding renames the remote client and persists both local ide
       if (path === '/panel/api/clients/list') {
         return jsonResponse({ success: true, obj: [{ email: 'old@example.com', uuid: 'real-v36-uuid', subId: 'real-sub', inboundIds: [9] }] });
       }
+      if (path === '/panel/api/clients/get/%E5%BC%A0-%E4%B8%89-9' && !requests.some((request) => request.path === '/panel/api/clients/update/old%40example.com')) {
+        return jsonResponse({ success: false, msg: 'Client not found' }, 404);
+      }
       if (path === '/panel/api/clients/get/old%40example.com') {
         return jsonResponse({ success: true, obj: { email: 'old@example.com', uuid: 'real-v36-uuid', subId: 'real-sub', comment: 'keep-me' } });
       }
       if (path === '/panel/api/clients/update/old%40example.com') return jsonResponse({ success: true });
+      if (path === '/panel/api/clients/get/%E5%BC%A0-%E4%B8%89-9') {
+        return jsonResponse({
+          success: true,
+          obj: JSON.stringify({
+            client: { email: '张-三-9', uuid: 'real-v36-uuid', subId: 'real-sub', comment: 'keep-me' },
+            inboundIds: [9]
+          })
+        });
+      }
       if (path === '/panel/api/clients/links/%E5%BC%A0-%E4%B8%89-9') {
         return jsonResponse({ success: true, obj: ['vless://real-v36-uuid@node.example.com:443#node'] });
       }
@@ -412,14 +482,181 @@ test('3.6 customer binding renames the remote client and persists both local ide
   assert.deepEqual(requests.map((request) => request.path), [
     '/panel/api/inbounds/list',
     '/panel/api/clients/list',
+    '/panel/api/clients/get/%E5%BC%A0-%E4%B8%89-9',
     '/panel/api/clients/get/old%40example.com',
     '/panel/api/clients/update/old%40example.com',
+    '/panel/api/clients/get/%E5%BC%A0-%E4%B8%89-9',
     '/panel/api/clients/links/%E5%BC%A0-%E4%B8%89-9'
   ]);
   const update = requests.find((request) => request.path === '/panel/api/clients/update/old%40example.com');
   assert.equal((update?.body as any).email, '张-三-9');
   assert.equal((update?.body as any).comment, 'keep-me');
 });
+
+test('3.6 customer binding keeps the confirmed old identity when a rename is not applied', async () => {
+  const requests: string[] = [];
+  let updated = false;
+  const client = new XuiClient({
+    baseUrl: 'https://v36.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async (input) => {
+      const path = new URL(String(input)).pathname;
+      requests.push(path);
+      if (path === '/panel/api/inbounds/list') {
+        return jsonResponse({ success: true, obj: [{ id: 9, protocol: 'vless', settings: JSON.stringify({ clients: [{ email: 'old@example.com' }] }) }] });
+      }
+      if (path === '/panel/api/clients/list') {
+        return jsonResponse({ success: true, obj: [{ email: 'old@example.com', uuid: 'real-v36-uuid', subId: 'real-sub', inboundIds: [9] }] });
+      }
+      if (path === '/panel/api/clients/get/new-name-9') return jsonResponse({ success: false, msg: 'Client not found' }, 404);
+      if (path === '/panel/api/clients/get/old%40example.com') {
+        return jsonResponse({ success: true, obj: { email: 'old@example.com', uuid: 'real-v36-uuid', subId: 'real-sub', inboundIds: [9] } });
+      }
+      if (path === '/panel/api/clients/update/old%40example.com') {
+        updated = true;
+        return jsonResponse({ success: true });
+      }
+      if (path === '/panel/api/clients/links/old%40example.com' && updated) {
+        return jsonResponse({ success: true, obj: ['vless://real-v36-uuid@node.example.com:443#node'] });
+      }
+      return jsonResponse({ message: `unexpected request ${path}` }, 500);
+    }
+  });
+  const customerNode = v36CustomerNodeFixture();
+  let localUpdate: any;
+  let serviceUpdate: any;
+  const service = v36SyncServiceFixture(client, customerNode, (customer, serviceNode) => {
+    localUpdate = customer;
+    serviceUpdate = serviceNode;
+  });
+
+  const result = await service.syncCustomerNode('customer-1', 'customer-node-1', {
+    createIfMissing: false,
+    requireExisting: true,
+    preferredClientEmail: 'new-name-9'
+  });
+
+  assert.equal(result.synced, true);
+  assert.equal(localUpdate.xuiEmail, 'old@example.com');
+  assert.equal(serviceUpdate, undefined);
+  assert.equal(requests.at(-1), '/panel/api/clients/links/old%40example.com');
+});
+
+test('3.6 customer binding avoids a global email collision with a readable deterministic suffix', async () => {
+  const requests: Array<{ path: string; body: any }> = [];
+  let updated = false;
+  const fallbackEmail = 'same-name-9-user';
+  const client = new XuiClient({
+    baseUrl: 'https://v36.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      requests.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (path === '/panel/api/inbounds/list') {
+        return jsonResponse({ success: true, obj: [{ id: 9, protocol: 'vless', settings: JSON.stringify({ clients: [{ email: 'old@example.com' }] }) }] });
+      }
+      if (path === '/panel/api/clients/list') {
+        return jsonResponse({ success: true, obj: [{ email: 'old@example.com', uuid: 'real-v36-uuid', subId: 'real-sub', inboundIds: [9] }] });
+      }
+      if (path === '/panel/api/clients/get/same-name-9') {
+        return jsonResponse({ success: true, obj: { email: 'same-name-9', uuid: 'another-uuid', subId: 'another-sub', inboundIds: [12] } });
+      }
+      if (path === `/panel/api/clients/get/${fallbackEmail}` && !updated) return jsonResponse({ success: false, msg: 'Client not found' }, 404);
+      if (path === '/panel/api/clients/get/old%40example.com') {
+        return jsonResponse({ success: true, obj: { email: 'old@example.com', uuid: 'real-v36-uuid', subId: 'real-sub', inboundIds: [9] } });
+      }
+      if (path === '/panel/api/clients/update/old%40example.com') {
+        updated = true;
+        return jsonResponse({ success: true });
+      }
+      if (path === `/panel/api/clients/get/${fallbackEmail}` && updated) {
+        return jsonResponse({ success: true, obj: { email: fallbackEmail, uuid: 'real-v36-uuid', subId: 'real-sub', inboundIds: [9] } });
+      }
+      if (path === `/panel/api/clients/links/${fallbackEmail}`) {
+        return jsonResponse({ success: true, obj: ['vless://real-v36-uuid@node.example.com:443#node'] });
+      }
+      return jsonResponse({ message: `unexpected request ${path}` }, 500);
+    }
+  });
+  const customerNode = v36CustomerNodeFixture();
+  let localUpdate: any;
+  let serviceUpdate: any;
+  const service = v36SyncServiceFixture(client, customerNode, (customer, serviceNode) => {
+    localUpdate = customer;
+    serviceUpdate = serviceNode;
+  });
+
+  await service.syncCustomerNode('customer-1', 'customer-node-1', {
+    createIfMissing: false,
+    requireExisting: true,
+    preferredClientEmail: 'same-name-9'
+  });
+
+  assert.equal(localUpdate.xuiEmail, fallbackEmail);
+  assert.equal(serviceUpdate.config.remoteClientEmail, fallbackEmail);
+  assert.equal(requests.find((request) => request.path === '/panel/api/clients/update/old%40example.com')?.body.email, fallbackEmail);
+});
+
+function v36CustomerNodeFixture() {
+  return {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    serviceNodeId: 'service-node-1',
+    xuiEmail: 'old@example.com',
+    uuid: null,
+    expireAt: null,
+    trafficLimitGb: 100,
+    status: 'active',
+    config: {},
+    customer: { id: 'customer-1', name: 'User', loginUsername: 'user' },
+    serviceNode: {
+      id: 'service-node-1',
+      name: 'Node',
+      protocol: 'vless',
+      enabled: true,
+      inboundId: 9,
+      trafficLimitGb: 100,
+      config: { encryption: 'none', remoteClientEmail: 'old@example.com', remoteClientUuid: 'real-v36-uuid', remoteClientSubId: 'real-sub' },
+      server: { id: 'server-1', enabled: true, baseUrl: 'https://v36.example.com', config: {} }
+    }
+  };
+}
+
+function v36SyncServiceFixture(client: XuiClient, customerNode: ReturnType<typeof v36CustomerNodeFixture>, updates: (customer: any, serviceNode: any) => void) {
+  let customerUpdate: any;
+  let serviceUpdate: any;
+  const tx = {
+    customerNode: {
+      update: async ({ data }: any) => {
+        customerUpdate = data;
+        return { ...customerNode, ...data };
+      }
+    },
+    serviceNode: {
+      update: async ({ data }: any) => {
+        serviceUpdate = data;
+        return {};
+      }
+    }
+  };
+  const service = new XuiService({
+    customerNode: {
+      findFirst: async () => customerNode,
+      update: async ({ data }: any) => {
+        updates(data, undefined);
+        return { ...customerNode, ...data };
+      }
+    },
+    $transaction: async (operation: any) => {
+      const result = await operation(tx);
+      updates(customerUpdate, serviceUpdate);
+      return result;
+    },
+    syncLog: { create: async () => ({}) }
+  } as never, {} as never) as any;
+  service.createAuthenticatedClient = async () => client;
+  return service;
+}
 
 test('missing OpenAPI endpoint keeps an older panel on the legacy profile', async () => {
   const client = new XuiClient({

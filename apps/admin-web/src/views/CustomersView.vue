@@ -197,8 +197,8 @@ async function bindNode() {
     bindDialogVisible.value = false;
     Object.assign(bindForm, { xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
-  } catch {
-    error.value = '绑定失败';
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '绑定失败';
     ElMessage.error(error.value);
   } finally {
     binding.value = false;
@@ -222,8 +222,8 @@ async function updateCustomerNode() {
     ElMessage.success('更新成功');
     editNodeDialogVisible.value = false;
     await loadCustomers();
-  } catch {
-    error.value = '更新失败';
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '更新失败';
     ElMessage.error(error.value);
   } finally {
     updatingCustomerNode.value = false;
@@ -263,8 +263,8 @@ async function syncNode(customer: Customer, node: CustomerNode) {
     await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/sync`, { method: 'POST' });
     ElMessage.success('同步成功');
     await loadCustomers();
-  } catch {
-    error.value = '同步失败';
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '同步失败';
     ElMessage.error(error.value);
   } finally {
     const done = new Set(syncingIds.value);

@@ -107,7 +107,7 @@ function shouldNotifySessionExpired(path: string) {
 
 function responseErrorMessage(status: number, message: unknown) {
   const text = typeof message === 'string' ? message.trim() : '';
-  if (text && text.length <= 24 && /[\u3400-\u9fff]/.test(text)) return text;
+  if (text && text.length <= 240 && /[\u3400-\u9fff]/.test(text)) return text;
   if (status === 401) return '登录已失效';
   if (status === 403) return '没有操作权限';
   if (status === 404) return '数据不存在';
