@@ -18,6 +18,7 @@ type ServiceNodeConfig = {
   xhttpMode?: string;
   realityTarget?: string;
   realityServerName?: string;
+  realityMinClientVersion?: string;
   socksRelayEnabled?: boolean;
   socksNodeId?: string | null;
   remoteMode?: 'create' | 'bind';
@@ -40,6 +41,13 @@ type XuiServerConfig = {
   realityServerName?: string;
   realityFingerprint?: string;
   realitySpiderX?: string;
+  panelCompatibility?: {
+    detectedVersion?: string;
+    apiProfile?: 'legacy' | 'v3.6';
+    detectedAt?: string;
+    source?: string;
+    openApiVersion?: string;
+  };
 };
 
 const SHARE_LINK_PROTOCOLS = new Set(['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria', 'hysteria2']);
@@ -83,8 +91,13 @@ export class NodesService {
   }
 
   async updateServer(id: string, input: Partial<z.infer<typeof xuiServerUpsertSchema>>) {
-    const current = await this.prisma.xuiServer.findUnique({ where: { id }, select: { config: true } });
+    const current = await this.prisma.xuiServer.findUnique({ where: { id }, select: { config: true, baseUrl: true, basePath: true } });
     if (!current) throw new NotFoundException('3x-ui server not found');
+    const config = this.serverConfig(input, serverConfigFrom(current.config));
+    const nextBasePath = input.basePath === undefined ? current.basePath : input.basePath || null;
+    if ((input.baseUrl !== undefined && input.baseUrl !== current.baseUrl) || nextBasePath !== current.basePath) {
+      delete config.panelCompatibility;
+    }
     const server = await this.prisma.xuiServer.update({
       where: { id },
       data: {
@@ -94,7 +107,7 @@ export class NodesService {
         username: input.username === undefined ? undefined : input.username || null,
         passwordEnc: input.password === undefined ? undefined : this.encryption.encryptNullable(input.password),
         tokenEnc: input.token === undefined ? undefined : this.encryption.encryptNullable(input.token),
-        config: this.toJsonValue(this.serverConfig(input, serverConfigFrom(current.config))),
+        config: this.toJsonValue(config),
         enabled: input.enabled,
         remark: input.remark === undefined ? undefined : input.remark || null
       }
@@ -120,6 +133,7 @@ export class NodesService {
   }
 
   async createServiceNode(input: z.infer<typeof serviceNodeUpsertSchema>) {
+    if (input.protocol === 'hysteria') input = { ...input, encryption: 'tls', transport: 'tcp' };
     this.assertShareLinkProtocol(input.protocol);
     await this.ensureServer(input.serverId);
     const remoteMode = input.remoteMode || 'create';
@@ -153,6 +167,7 @@ export class NodesService {
         xhttpMode: input.xhttpMode,
         realityTarget: input.realityTarget,
         realityServerName: input.realityServerName,
+        realityMinClientVersion: input.realityMinClientVersion,
         enabled: input.enabled,
         port: input.inboundPort,
         remark: input.name,
@@ -247,6 +262,14 @@ export class NodesService {
     let nextProtocol = input.protocol || current.protocol;
     let nextEncryption = input.encryption || previousConfig.encryption || 'none';
     let nextTransport = input.transport || previousConfig.transport || 'tcp';
+    if ((nextProtocol === 'hysteria' || nextProtocol === 'hysteria2')) {
+      nextEncryption = 'tls';
+      nextTransport = 'tcp';
+    } else {
+      if (!['vless', 'trojan'].includes(nextProtocol) && nextEncryption === 'reality' && input.encryption === undefined) nextEncryption = 'none';
+      if (nextProtocol === 'shadowsocks') nextTransport = 'tcp';
+    }
+    input = { ...input, encryption: nextEncryption as 'none' | 'tls' | 'reality', transport: nextTransport as 'tcp' | 'ws' | 'grpc' | 'httpupgrade' | 'xhttp' };
     this.assertTransportCompatibility(nextProtocol, nextEncryption, nextTransport);
     const nextEnabled = input.enabled ?? current.enabled;
     let nextRemotePort = input.inboundPort === undefined ? previousConfig.remoteInboundPort : input.inboundPort;
@@ -294,6 +317,7 @@ export class NodesService {
         xhttpMode: input.xhttpMode || previousConfig.xhttpMode || 'auto',
         realityTarget: input.realityTarget === undefined ? previousConfig.realityTarget : input.realityTarget,
         realityServerName: input.realityServerName === undefined ? previousConfig.realityServerName : input.realityServerName,
+        realityMinClientVersion: input.realityMinClientVersion === undefined ? previousConfig.realityMinClientVersion : input.realityMinClientVersion,
         enabled: nextEnabled,
         port: input.inboundPort,
         remark: nextRemoteRemark,
@@ -351,6 +375,7 @@ export class NodesService {
         (input.xhttpMode !== undefined && input.xhttpMode !== (previousConfig.xhttpMode || 'auto')) ||
         (input.realityTarget !== undefined && input.realityTarget !== (previousConfig.realityTarget || '')) ||
         (input.realityServerName !== undefined && input.realityServerName !== (previousConfig.realityServerName || '')) ||
+        (input.realityMinClientVersion !== undefined && input.realityMinClientVersion !== (previousConfig.realityMinClientVersion || '')) ||
         nextEnabled !== current.enabled ||
         (remoteMode === 'create' && previousConfig.remoteInboundRemark !== nextRemoteRemark) ||
         (input.inboundPort !== undefined && nextRemotePort !== previousConfig.remoteInboundPort)
@@ -377,6 +402,22 @@ export class NodesService {
         nextRemark === current.remark &&
         (input.inboundPort === undefined || nextRemotePort === previousConfig.remoteInboundPort)
       );
+      const remoteStructureChanged = Boolean(
+        nextProtocol !== current.protocol ||
+        nextEncryption !== (previousConfig.encryption || 'none') ||
+        nextTransport !== (previousConfig.transport || 'tcp') ||
+        (config.tcpHeaderType || 'none') !== (previousConfig.tcpHeaderType || 'none') ||
+        (config.transportHost || '') !== (previousConfig.transportHost || '') ||
+        (config.transportPath || '/') !== (previousConfig.transportPath || '/') ||
+        (config.grpcServiceName || '') !== (previousConfig.grpcServiceName || '') ||
+        (config.grpcAuthority || '') !== (previousConfig.grpcAuthority || '') ||
+        Boolean(config.grpcMultiMode) !== Boolean(previousConfig.grpcMultiMode) ||
+        (config.xhttpMode || 'auto') !== (previousConfig.xhttpMode || 'auto') ||
+        (config.realityTarget || '') !== (previousConfig.realityTarget || '') ||
+        (config.realityServerName || '') !== (previousConfig.realityServerName || '') ||
+        (config.realityMinClientVersion || '') !== (previousConfig.realityMinClientVersion || '') ||
+        (input.inboundPort !== undefined && nextRemotePort !== previousConfig.remoteInboundPort)
+      );
       const updated = await this.prisma.serviceNode.update({
         where: { id },
         data: {
@@ -396,12 +437,13 @@ export class NodesService {
       const pendingActions: SyncTaskAction[] = [];
       if (!remoteCreated && inboundId && remoteInboundChanged) {
         try {
-          if (remoteEnableOnlyChanged) await this.xui.setServiceNodeRemoteEnable(id, nextEnabled);
-          else await this.syncServiceNodeInboundFromLocal(id);
+          const syncResult = remoteEnableOnlyChanged
+            ? await this.xui.setServiceNodeRemoteEnable(id, nextEnabled)
+            : await this.syncServiceNodeInboundFromLocal(id, remoteStructureChanged);
           await this.resolveSyncTask('service-node', id, 'service-inbound');
         } catch (error) {
           pendingActions.push('service-inbound');
-          await this.failSyncTask('service-node', id, 'service-inbound', error, { remoteEnableOnlyChanged });
+          await this.failSyncTask('service-node', id, 'service-inbound', error, { remoteEnableOnlyChanged, runtimeReloadRequired: remoteStructureChanged });
         }
       }
       const clientIdentityChanged = nextProtocol !== current.protocol || nextEncryption !== (previousConfig.encryption || 'none');
@@ -431,8 +473,12 @@ export class NodesService {
           await this.failSyncTask('service-node', id, 'service-config', error);
         }
       }
+      const finalNode = await this.prisma.serviceNode.findUnique({
+        where: { id },
+        include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
+      });
       return {
-        ...updated,
+        ...(finalNode || updated),
         state: pendingActions.length ? 'partial' : 'success',
         message: pendingActions.length ? '保存成功，同步失败' : '保存成功',
         pendingActions
@@ -776,7 +822,7 @@ export class NodesService {
     const task = await this.prisma.syncTask.findUnique({ where: { id } });
     if (!task || task.status === 'resolved') throw new NotFoundException('待同步任务不存在');
     try {
-      const result = await this.runSyncTask(task.entityType, task.entityId, task.action as SyncTaskAction);
+      const result = await this.runSyncTask(task.entityType, task.entityId, task.action as SyncTaskAction, task.detail);
       await this.resolveSyncTask(task.entityType, task.entityId, task.action as SyncTaskAction);
       return { state: 'success', message: '同步成功', taskId: id, result };
     } catch (error) {
@@ -785,9 +831,9 @@ export class NodesService {
     }
   }
 
-  private async runSyncTask(entityType: string, entityId: string, action: SyncTaskAction) {
+  private async runSyncTask(entityType: string, entityId: string, action: SyncTaskAction, detail?: unknown) {
     if (entityType === 'service-node') {
-      if (action === 'service-inbound') return this.syncServiceNodeInboundFromLocal(entityId);
+      if (action === 'service-inbound') return this.syncServiceNodeInboundFromLocal(entityId, Boolean(jsonObject(detail).runtimeReloadRequired));
       if (action === 'service-clients') return this.syncServiceNodeTrafficLimit(entityId, false);
       if (action === 'service-config') return this.xui.syncServiceNodeRemoteConfig(entityId);
       if (action === 'service-delete-check') return this.retryServiceNodeDeleteCheck(entityId);
@@ -799,11 +845,11 @@ export class NodesService {
     throw new BadRequestException('该任务不支持自动重试');
   }
 
-  private async syncServiceNodeInboundFromLocal(id: string) {
+  private async syncServiceNodeInboundFromLocal(id: string, forceRuntimeReload = false) {
     const node = await this.ensureServiceNode(id);
     if (!node.inboundId) throw new BadRequestException('路由节点缺少远端入站 ID');
     const config = jsonObject(node.config) as ServiceNodeConfig;
-    return this.xui.updateServiceNodeInbound({
+    const result = await this.xui.updateServiceNodeInbound({
       serverId: node.serverId,
       inboundId: node.inboundId,
       name: node.name,
@@ -819,10 +865,50 @@ export class NodesService {
       xhttpMode: config.xhttpMode,
       realityTarget: config.realityTarget,
       realityServerName: config.realityServerName,
+      realityMinClientVersion: config.realityMinClientVersion,
       enabled: node.enabled,
       port: config.remoteInboundPort,
-      remark: node.name
+      remark: node.name,
+      forceRuntimeReload
     });
+    await this.persistProtocolClientIdentities(id, config, result.clientIdentities || []);
+    return result;
+  }
+
+  private async persistProtocolClientIdentities(id: string, config: ServiceNodeConfig, identities: Array<{ email?: string; uuid?: string; subId?: string }>) {
+    if (!identities.length) return;
+    const serviceEmail = stringValue(config.remoteClientEmail);
+    const serviceSubId = stringValue(config.remoteClientSubId);
+    const serviceIdentity = identities.find((item) => serviceEmail && item.email === serviceEmail)
+      || identities.find((item) => serviceSubId && item.subId === serviceSubId);
+    if (serviceIdentity) {
+      Object.assign(config, {
+        remoteClientEmail: serviceIdentity.email || serviceEmail,
+        remoteClientUuid: serviceIdentity.uuid || config.remoteClientUuid,
+        remoteClientSubId: serviceIdentity.subId || serviceSubId
+      });
+      await this.prisma.serviceNode.update({ where: { id }, data: { config: this.toJsonValue(config) } });
+    }
+
+    const customerNodes = await this.prisma.customerNode.findMany({
+      where: { serviceNodeId: id },
+      select: { id: true, xuiEmail: true, config: true }
+    });
+    for (const node of customerNodes) {
+      const saved = jsonObject(node.config);
+      const subId = stringValue(saved.subId);
+      const identity = identities.find((item) => item.email === node.xuiEmail)
+        || identities.find((item) => subId && item.subId === subId);
+      if (!identity) continue;
+      await this.prisma.customerNode.update({
+        where: { id: node.id },
+        data: {
+          xuiEmail: identity.email || node.xuiEmail,
+          uuid: identity.uuid || null,
+          config: this.toJsonValue({ ...saved, uuid: identity.uuid || null, subId: identity.subId || subId })
+        }
+      });
+    }
   }
 
   private async syncSocksNodeReferences(id: string) {
@@ -1041,6 +1127,7 @@ export class NodesService {
       xhttpMode: input.xhttpMode === undefined ? previous.xhttpMode || 'auto' : input.xhttpMode,
       realityTarget: input.realityTarget === undefined ? previous.realityTarget || '' : input.realityTarget || '',
       realityServerName: input.realityServerName === undefined ? previous.realityServerName || '' : input.realityServerName || '',
+      realityMinClientVersion: input.realityMinClientVersion === undefined ? previous.realityMinClientVersion || '' : input.realityMinClientVersion || '',
       socksRelayEnabled: input.socksRelayEnabled === undefined ? Boolean(previous.socksRelayEnabled) : input.socksRelayEnabled,
       socksNodeId: input.socksNodeId === undefined ? previous.socksNodeId || null : input.socksNodeId || null
     };
@@ -1101,7 +1188,8 @@ function serverConfigFrom(value: unknown): XuiServerConfig {
     realityTarget: String(config.realityTarget || '').trim(),
     realityServerName: String(config.realityServerName || '').trim(),
     realityFingerprint: String(config.realityFingerprint || 'chrome').trim(),
-    realitySpiderX: String(config.realitySpiderX || '/').trim()
+    realitySpiderX: String(config.realitySpiderX || '/').trim(),
+    panelCompatibility: jsonObject(config.panelCompatibility) as XuiServerConfig['panelCompatibility']
   };
 }
 

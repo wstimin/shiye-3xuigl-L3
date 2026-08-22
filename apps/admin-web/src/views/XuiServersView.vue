@@ -56,6 +56,11 @@ type XuiServer = {
     realityServerName?: string;
     realityFingerprint?: string;
     realitySpiderX?: string;
+    panelCompatibility?: {
+      detectedVersion?: string;
+      apiProfile?: 'legacy' | 'v3.6';
+      detectedAt?: string;
+    };
   } | null;
   hasPassword?: boolean;
   hasToken?: boolean;
@@ -76,6 +81,7 @@ const certIds = ref<Set<string>>(new Set());
 const syncingIds = ref<Set<string>>(new Set());
 const syncingSocksIds = ref<Set<string>>(new Set());
 const statusIds = ref<Set<string>>(new Set());
+const versionIds = ref<Set<string>>(new Set());
 const presenceIds = ref<Set<string>>(new Set());
 const togglingIds = ref<Set<string>>(new Set());
 const deletingIds = ref<Set<string>>(new Set());
@@ -189,6 +195,21 @@ async function testSaved(server: XuiServer) {
     showError(err, message);
   } finally {
     testingIds.value = removePendingId(testingIds.value, server.id);
+  }
+}
+
+async function detectServerVersion(server: XuiServer) {
+  if (versionIds.value.has(server.id)) return;
+  versionIds.value = addPendingId(versionIds.value, server.id);
+  error.value = '';
+  try {
+    const result = await api<{ label: string }>(`/api/admin/xui-servers/${server.id}/detect-version`, { method: 'POST' });
+    ElMessage.success(`检测结果：${result.label}`);
+    await loadServers();
+  } catch (err) {
+    showError(err, '检测面板版本失败');
+  } finally {
+    versionIds.value = removePendingId(versionIds.value, server.id);
   }
 }
 
@@ -429,6 +450,7 @@ async function toggleServerEnabled(server: XuiServer, enabled = !server.enabled)
 function handleServerCommand(server: XuiServer, command: string) {
   if (command === 'test') void testSaved(server);
   if (command === 'status') void showServerStatus(server);
+  if (command === 'version') void detectServerVersion(server);
   if (command === 'presence') void showClientPresence(server);
   if (command === 'certs') void testSavedCerts(server);
   if (command === 'sync-socks') void syncServerSocks(server);
@@ -562,6 +584,13 @@ function hasTlsConfig(server: XuiServer) {
 
 function hasRealityCandidate(server: XuiServer) {
   return Boolean(server.config?.realityTarget || server.config?.realityServerName);
+}
+
+function compatibilityLabel(server: XuiServer) {
+  const compatibility = server.config?.panelCompatibility;
+  if (!compatibility) return '版本未检测';
+  if (compatibility.detectedVersion) return compatibility.detectedVersion;
+  return compatibility.apiProfile === 'v3.6' ? '3.6 API 兼容' : 'Legacy/旧版 API';
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
@@ -713,6 +742,7 @@ onMounted(loadServers);
             <span v-if="server.hasPassword" class="xui-panel-tag password">密码</span>
             <span v-if="server.config?.tlsServerName" class="xui-panel-tag tls" :title="server.config.tlsServerName">TLS {{ server.config.tlsServerName }}</span>
             <span class="xui-panel-tag reality">Reality {{ hasRealityCandidate(server) ? '候选已配置' : '自动探测' }}</span>
+            <span class="xui-panel-tag tls">{{ compatibilityLabel(server) }}</span>
             <span v-if="connectionTests[server.id]?.state === 'success'" class="xui-panel-tag inbound">入站 {{ connectionTests[server.id]?.inboundCount ?? 0 }}</span>
           </div>
           <span class="runtime-summary-note" :title="[server.username || '未保存登录账号', server.config?.shareHost || '使用面板域名分享', server.remark].filter(Boolean).join(' · ')"><KeyRound :size="12" />{{ server.username || '未保存登录账号' }} · {{ server.config?.shareHost || '使用面板域名分享' }}<template v-if="server.remark"> · {{ server.remark }}</template></span>
@@ -750,6 +780,7 @@ onMounted(loadServers);
             <template #dropdown>
               <el-dropdown-menu class="xui-action-menu">
                 <el-dropdown-item command="test" :disabled="testingIds.has(server.id)"><Wifi :size="14" />测试连接</el-dropdown-item>
+                <el-dropdown-item command="version" :disabled="versionIds.has(server.id)"><Search :size="14" />检测版本</el-dropdown-item>
                 <el-dropdown-item command="status" :disabled="statusIds.has(server.id)"><Activity :size="14" />查看面板状态</el-dropdown-item>
                 <el-dropdown-item command="presence" :disabled="presenceIds.has(server.id)"><Users :size="14" />查看在线客户端</el-dropdown-item>
                 <el-dropdown-item command="certs" :disabled="certIds.has(server.id)"><FileKey2 :size="14" />读取证书状态</el-dropdown-item>

@@ -39,6 +39,11 @@ export class XuiController {
   @Roles('admin')
   testStoredServer(@Param('id') id: string) { return this.xui.testStoredServer(id); }
 
+  @Post('admin/xui-servers/:id/detect-version')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  detectVersion(@Param('id') id: string) { return this.xui.detectStoredServerVersion(id); }
+
   @Post('admin/xui-servers/:id/reality-detect')
   @UseGuards(AuthGuard)
   @Roles('admin')

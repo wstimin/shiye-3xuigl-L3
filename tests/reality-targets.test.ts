@@ -59,7 +59,25 @@ test('node form detects and displays Reality parameters without using TLS fields
   assert.match(source, /\/api\/admin\/xui-servers\/\$\{serverId\}\/reality-detect/);
   assert.match(source, /Reality 目标/);
   assert.match(source, /Reality SNI/);
+  assert.match(source, /最小客户端版本/);
+  assert.match(source, /realityMinClientVersion/);
   assert.doesNotMatch(source, /realityServerName\s*=\s*[^\n]*tlsServerName/);
+});
+
+test('Reality stream settings keep minClient empty unless a minimum version is supplied', async () => {
+  const realityService = new XuiService({} as never, {} as never) as any;
+  realityService.resolveRealityKeys = async () => ({ privateKey: 'private-key', publicKey: 'public-key' });
+  realityService.resolveRealityTarget = async () => ({ target: 'cdn.example.com:443', serverName: 'cdn.example.com', source: 'scan' });
+
+  const empty = await realityService.defaultStreamSettings({}, 'reality', {}, { protocol: 'vless', transport: 'tcp' });
+  const versioned = await realityService.defaultStreamSettings({}, 'reality', {}, {
+    protocol: 'vless',
+    transport: 'tcp',
+    realityMinClientVersion: '1.0.0'
+  });
+
+  assert.equal(empty.realitySettings.minClient, '');
+  assert.equal(versioned.realitySettings.minClient, '1.0.0');
 });
 
 
@@ -129,7 +147,9 @@ test('full Reality inbound update preserves credentials and verifies the remote 
       submitted = structuredClone(body);
       remoteInbound = structuredClone(body);
       return { success: true, obj: remoteInbound };
-    }
+    },
+    restartXrayService: async () => ({ success: true }),
+    serverStatus: async () => ({ success: true, obj: { xray: { state: 'running', errorMsg: '' } } })
   };
   const prisma = {
     xuiServer: {
@@ -152,6 +172,7 @@ test('full Reality inbound update preserves credentials and verifies the remote 
     transportPath: '/',
     realityTarget: 'new.example.com:443',
     realityServerName: 'new.example.com',
+    realityMinClientVersion: '1.0.0',
     enabled: true,
     port: 24443
   });
@@ -162,6 +183,7 @@ test('full Reality inbound update preserves credentials and verifies the remote 
   assert.equal(submitted.streamSettings.realitySettings.privateKey, 'private-key');
   assert.equal(submitted.streamSettings.realitySettings.publicKey, 'public-key');
   assert.deepEqual(submitted.streamSettings.realitySettings.shortIds, ['a1b2c3d4']);
+  assert.equal(submitted.streamSettings.realitySettings.minClient, '1.0.0');
   assert.equal(submitted.streamSettings.realitySettings.settings.shortId, 'a1b2c3d4');
 });
 
@@ -218,7 +240,9 @@ test('remote inbound protocol update sends converted client credentials and veri
   };
   const client = {
     getInbound: async () => ({ success: true, obj: submitted ? { ...submitted, settings: JSON.stringify(submitted.settings), streamSettings: JSON.stringify(submitted.streamSettings) } : originalInbound }),
-    updateInbound: async (_id: number, body: any) => { submitted = body; return { success: true }; }
+    updateInbound: async (_id: number, body: any) => { submitted = body; return { success: true }; },
+    restartXrayService: async () => ({ success: true }),
+    serverStatus: async () => ({ success: true, obj: { xray: { state: 'running', errorMsg: '' } } })
   };
   const protocolService = new XuiService({
     xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://panel.example.com', config: {} }) },

@@ -2,10 +2,20 @@ export type XuiAuth =
   | { kind: 'token'; token: string }
   | { kind: 'password'; username: string; password: string };
 
+export type XuiApiProfile = 'legacy' | 'v3.6';
+
+export type XuiPanelCapabilities = {
+  apiProfile: XuiApiProfile;
+  detectedVersion?: string;
+  source: 'openapi' | 'fallback';
+  openApiVersion?: string;
+};
+
 export type XuiClientOptions = {
   baseUrl: string;
   basePath?: string;
   auth?: XuiAuth;
+  apiProfile?: XuiApiProfile;
   fetchImpl?: typeof fetch;
 };
 
@@ -103,6 +113,39 @@ export class XuiClient {
     return this.request('/panel/api/server/getWebCertFiles');
   }
 
+  usesApiProfile(profile: XuiApiProfile) {
+    return this.options.apiProfile === profile;
+  }
+
+  getOpenApi() {
+    return this.request('/panel/api/openapi.json');
+  }
+
+  async detectCapabilities(): Promise<XuiPanelCapabilities> {
+    try {
+      const payload = await this.getOpenApi();
+      const document = this.openApiDocument(payload);
+      const paths = this.objectValue(document.paths);
+      const supportsV36 = [
+        '/panel/api/clients/add',
+        '/panel/api/clients/update/{email}',
+        '/panel/api/clients/{email}/detach',
+        '/panel/api/inbounds/{id}/resetTraffic'
+      ].every((path) => path in paths);
+      const info = this.objectValue(document.info);
+      const rawVersion = typeof info.version === 'string' ? info.version.trim() : '';
+      return {
+        apiProfile: supportsV36 ? 'v3.6' : 'legacy',
+        detectedVersion: this.semanticVersion(rawVersion) || (supportsV36 ? undefined : rawVersion || undefined),
+        source: 'openapi',
+        openApiVersion: typeof document.openapi === 'string' ? document.openapi : undefined
+      };
+    } catch (error) {
+      if (!(error instanceof XuiClientError) || (error.status !== 404 && error.status !== 405)) throw error;
+      return { apiProfile: 'legacy', source: 'fallback' };
+    }
+  }
+
   getPanelSettings() {
     return this.sessionRequest('/panel/setting/all', { method: 'POST' });
   }
@@ -120,11 +163,11 @@ export class XuiClient {
   }
 
   addInbound(body: unknown) {
-    return this.formRequest('/panel/api/inbounds/add', { method: 'POST', body: this.formBody(body) });
+    return this.formRequest('/panel/api/inbounds/add', { method: 'POST', body: this.inboundFormBody(body) });
   }
 
   updateInbound(id: number, body: unknown) {
-    return this.formRequest(`/panel/api/inbounds/update/${encodeURIComponent(String(id))}`, { method: 'POST', body: this.formBody(body) });
+    return this.formRequest(`/panel/api/inbounds/update/${encodeURIComponent(String(id))}`, { method: 'POST', body: this.inboundFormBody(body) });
   }
 
   deleteInbound(id: number) {
@@ -136,11 +179,13 @@ export class XuiClient {
   }
 
   resetInboundTraffic(id: number) {
+    if (this.isV36()) return this.request(`/panel/api/inbounds/${encodeURIComponent(String(id))}/resetTraffic`, { method: 'POST' });
     return this.request(`/panel/api/inbounds/resetTraffic/${encodeURIComponent(String(id))}`, { method: 'POST' });
   }
 
   addClient(inboundId: number, client: unknown) {
     const body = this.clientMutationBody(inboundId, client);
+    if (this.isV36()) return this.request('/panel/api/clients/add', { method: 'POST', body: { client, inboundIds: [inboundId] } });
     return this.withLegacyFallback(
       () => this.formRequest('/panel/api/inbounds/addClient', { method: 'POST', body }),
       () => this.request('/panel/api/clients/add', { method: 'POST', body: { client, inboundIds: [inboundId] } })
@@ -150,6 +195,7 @@ export class XuiClient {
   updateClient(inboundId: number, clientId: string, client: unknown) {
     const body = this.clientMutationBody(inboundId, client);
     const email = this.clientEmail(client) || clientId;
+    if (this.isV36()) return this.request(`/panel/api/clients/update/${encodeURIComponent(email)}`, { method: 'POST', body: client });
     return this.withLegacyFallback(
       () => this.formRequest(`/panel/api/inbounds/updateClient/${encodeURIComponent(clientId)}`, { method: 'POST', body }),
       () => this.request(`/panel/api/clients/update/${encodeURIComponent(email)}`, { method: 'POST', body: client })
@@ -157,6 +203,9 @@ export class XuiClient {
   }
 
   deleteClient(inboundId: number, email: string, clientId?: string, keepTraffic = false) {
+    if (this.isV36()) {
+      return this.request(`/panel/api/clients/${encodeURIComponent(email)}/detach`, { method: 'POST', body: { inboundIds: [inboundId] } });
+    }
     const endpoint = clientId
       ? `/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/delClient/${encodeURIComponent(clientId)}`
       : `/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/delClientByEmail/${encodeURIComponent(email)}`;
@@ -172,6 +221,7 @@ export class XuiClient {
   }
 
   resetClientTraffic(inboundId: number, email: string) {
+    if (this.isV36()) return this.request(`/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`, { method: 'POST' });
     return this.withLegacyFallback(
       () => this.request(`/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/resetClientTraffic/${encodeURIComponent(email)}`, { method: 'POST' }),
       () => this.request(`/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`, { method: 'POST' })
@@ -183,6 +233,7 @@ export class XuiClient {
   }
 
   getClientTraffic(email: string) {
+    if (this.isV36()) return this.request(`/panel/api/clients/traffic/${encodeURIComponent(email)}`);
     return this.withLegacyFallback(
       () => this.request(`/panel/api/inbounds/getClientTraffics/${encodeURIComponent(email)}`),
       () => this.request(`/panel/api/clients/traffic/${encodeURIComponent(email)}`)
@@ -194,6 +245,7 @@ export class XuiClient {
   }
 
   clientsLastOnline() {
+    if (this.isV36()) return this.request('/panel/api/clients/lastOnline', { method: 'POST' });
     return this.withLegacyFallback(
       () => this.request('/panel/api/inbounds/lastOnline', { method: 'POST' }),
       () => this.request('/panel/api/clients/lastOnline', { method: 'POST' })
@@ -201,6 +253,7 @@ export class XuiClient {
   }
 
   onlineClients() {
+    if (this.isV36()) return this.request('/panel/api/clients/onlines', { method: 'POST' });
     return this.withLegacyFallback(
       () => this.request('/panel/api/inbounds/onlines', { method: 'POST' }),
       () => this.request('/panel/api/clients/onlines', { method: 'POST' })
@@ -339,6 +392,36 @@ export class XuiClient {
     return body as Record<string, unknown>;
   }
 
+  private inboundFormBody(body: unknown): Record<string, unknown> {
+    const source = this.formBody(body);
+    const result: Record<string, unknown> = {};
+    for (const key of [
+      'id',
+      'up',
+      'down',
+      'total',
+      'allTime',
+      'remark',
+      'enable',
+      'expiryTime',
+      'trafficReset',
+      'lastTrafficResetTime',
+      'listen',
+      'port',
+      'protocol',
+      'tag',
+      'nodeId'
+    ]) {
+      if (source[key] !== undefined && source[key] !== null) result[key] = source[key];
+    }
+    for (const key of ['settings', 'streamSettings', 'sniffing']) {
+      const value = source[key];
+      if (value === undefined || value === null) continue;
+      result[key] = typeof value === 'string' ? value : JSON.stringify(value);
+    }
+    return result;
+  }
+
   private clientMutationBody(inboundId: number, client: unknown): Record<string, unknown> {
     return { id: inboundId, settings: JSON.stringify({ clients: [client] }) };
   }
@@ -347,6 +430,26 @@ export class XuiClient {
     if (!client || typeof client !== 'object' || Array.isArray(client)) return '';
     const email = (client as Record<string, unknown>).email;
     return typeof email === 'string' ? email : '';
+  }
+
+  private isV36() {
+    return this.options.apiProfile === 'v3.6';
+  }
+
+  private openApiDocument(payload: unknown): Record<string, unknown> {
+    const root = this.objectValue(payload);
+    const candidate = root.obj ?? root.data ?? payload;
+    if (typeof candidate === 'string') return this.objectValue(this.parse(candidate));
+    return this.objectValue(candidate);
+  }
+
+  private objectValue(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return value as Record<string, unknown>;
+  }
+
+  private semanticVersion(value: string) {
+    return value.match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/)?.[0];
   }
 
   private async withLegacyFallback<T>(primary: () => Promise<T>, legacy: () => Promise<T>): Promise<T> {
