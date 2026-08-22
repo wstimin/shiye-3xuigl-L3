@@ -183,19 +183,36 @@ export class XuiClient {
     return this.request(`/panel/api/inbounds/resetTraffic/${encodeURIComponent(String(id))}`, { method: 'POST' });
   }
 
+  listClients() {
+    return this.request('/panel/api/clients/list');
+  }
+
+  getClientDetails(email: string) {
+    return this.request(`/panel/api/clients/get/${encodeURIComponent(email)}`);
+  }
+
   addClient(inboundId: number, client: unknown) {
     const body = this.clientMutationBody(inboundId, client);
-    if (this.isV36()) return this.request('/panel/api/clients/add', { method: 'POST', body: { client, inboundIds: [inboundId] } });
+    if (this.isV36()) return this.request('/panel/api/clients/add', {
+      method: 'POST',
+      body: { client: this.v36ClientPayload(client), inboundIds: [inboundId] }
+    });
     return this.withLegacyFallback(
       () => this.formRequest('/panel/api/inbounds/addClient', { method: 'POST', body }),
       () => this.request('/panel/api/clients/add', { method: 'POST', body: { client, inboundIds: [inboundId] } })
     );
   }
 
-  updateClient(inboundId: number, clientId: string, client: unknown) {
+  async updateClient(inboundId: number, clientId: string, client: unknown) {
     const body = this.clientMutationBody(inboundId, client);
     const email = this.clientEmail(client) || clientId;
-    if (this.isV36()) return this.request(`/panel/api/clients/update/${encodeURIComponent(email)}`, { method: 'POST', body: client });
+    if (this.isV36()) {
+      const current = await this.getClientDetails(clientId || email);
+      return this.request(`/panel/api/clients/update/${encodeURIComponent(clientId || email)}`, {
+        method: 'POST',
+        body: this.v36ClientPayload(client, this.responseClientObject(current))
+      });
+    }
     return this.withLegacyFallback(
       () => this.formRequest(`/panel/api/inbounds/updateClient/${encodeURIComponent(clientId)}`, { method: 'POST', body }),
       () => this.request(`/panel/api/clients/update/${encodeURIComponent(email)}`, { method: 'POST', body: client })
@@ -430,6 +447,31 @@ export class XuiClient {
     if (!client || typeof client !== 'object' || Array.isArray(client)) return '';
     const email = (client as Record<string, unknown>).email;
     return typeof email === 'string' ? email : '';
+  }
+
+  private v36ClientPayload(client: unknown, current: Record<string, unknown> = {}) {
+    const requested = this.objectValue(client);
+    const payload: Record<string, unknown> = { ...current, ...requested };
+    const requestedId = typeof requested.id === 'string' ? requested.id.trim() : '';
+    const currentId = typeof current.id === 'string' ? current.id.trim() : '';
+    if (requestedId) payload.uuid = requestedId;
+    else if (!payload.uuid && currentId) payload.uuid = currentId;
+
+    for (const key of ['id', 'inboundIds', 'traffic', 'externalConfigIds', 'createdAt', 'updatedAt', 'created_at', 'updated_at']) {
+      delete payload[key];
+    }
+    return payload;
+  }
+
+  private responseClientObject(payload: unknown) {
+    const root = this.objectValue(payload);
+    if (root.success === false) {
+      throw new XuiClientError(String(root.msg || root.message || '3x-ui client lookup failed'), undefined, payload);
+    }
+    const candidate = root.obj ?? root.data ?? root.result ?? payload;
+    const parsed = typeof candidate === 'string' ? this.objectValue(this.parse(candidate)) : this.objectValue(candidate);
+    const nestedClient = this.objectValue(parsed.client);
+    return Object.keys(nestedClient).length ? nestedClient : parsed;
   }
 
   private isV36() {

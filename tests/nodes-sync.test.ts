@@ -95,6 +95,89 @@ test('SOCKS sync failure after local create returns partial and keeps the remote
   assert.equal(deletedRemote, 0);
 });
 
+test('new Reality service nodes persist a manually supplied minimum client version', async () => {
+  let createdConfig: any;
+  const prisma = {
+    xuiServer: { findUnique: async () => ({ id: 'server-1' }) },
+    serviceNode: {
+      findFirst: async () => null,
+      create: async ({ data }: any) => {
+        createdConfig = data.config;
+        return { id: 'node-1', ...data, server: { id: 'server-1', name: '面板', baseUrl: 'https://panel.example.com', enabled: true } };
+      }
+    },
+    socksNode: { findUnique: async () => null }
+  } as any;
+  const xui = {
+    createServiceNodeInbound: async () => ({
+      inboundId: 20,
+      port: 24443,
+      tag: 'shiye-20',
+      remark: 'Reality 节点',
+      remoteClientEmail: 'service@example.com',
+      remoteClientUuid: '11111111-2222-4333-8444-555555555555',
+      remoteClientSubId: 'service-sub',
+      links: ['vless://example'],
+      realityTarget: 'cdn.example.com:443',
+      realityServerName: 'cdn.example.com'
+    })
+  } as any;
+  const service = new NodesService(prisma, encryption(), xui);
+
+  await service.createServiceNode({
+    ...baseInput,
+    name: 'Reality 节点',
+    encryption: 'reality',
+    realityTarget: 'cdn.example.com:443',
+    realityServerName: 'cdn.example.com',
+    realityMinClientVersion: '1.0.0'
+  });
+
+  assert.equal(createdConfig.realityMinClientVersion, '1.0.0');
+});
+
+test('binding passes a readable customer name to the existing remote client update', async () => {
+  let syncOptions: any;
+  let storedNode: any;
+  const serviceNode = {
+    id: 'service-node-1',
+    inboundId: 12,
+    trafficLimitGb: 100,
+    config: {
+      remoteClientEmail: 'shiye-long-generated-client@example.com',
+      remoteClientUuid: '11111111-2222-4333-8444-555555555555',
+      remoteClientSubId: 'service-sub'
+    }
+  };
+  const prisma = {
+    customer: { findUnique: async () => ({ id: 'customer-1', name: '张 三', loginUsername: 'zhangsan' }) },
+    serviceNode: { findUnique: async () => serviceNode },
+    customerNode: {
+      findFirst: async () => null,
+      create: async ({ data }: any) => {
+        storedNode = { id: 'customer-node-1', ...data, trafficLimitGb: 100 };
+        return storedNode;
+      },
+      findUnique: async () => storedNode,
+      delete: async () => ({})
+    }
+  } as any;
+  const xui = {
+    customerClientEmail: (name: string, _login: string, inboundId: number) => `${name.replace(/\s+/g, '-')}-${inboundId}`,
+    syncCustomerNode: async (_customerId: string, _nodeId: string, options: any) => {
+      syncOptions = options;
+      return { synced: true };
+    }
+  } as any;
+  const service = new NodesService(prisma, encryption(), xui);
+
+  await service.bindCustomerNode('customer-1', { serviceNodeId: 'service-node-1', xuiEmail: '', trafficLimitGb: 100 });
+
+  assert.equal(syncOptions.preferredClientEmail, '张-三-12');
+  assert.equal(syncOptions.createIfMissing, false);
+  assert.equal(syncOptions.requireExisting, true);
+});
+
 test('retrying a service config task only synchronizes current config and never creates an inbound', async () => {
   let createCalls = 0;
   let syncCalls = 0;

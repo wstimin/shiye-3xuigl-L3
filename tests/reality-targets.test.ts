@@ -64,7 +64,7 @@ test('node form detects and displays Reality parameters without using TLS fields
   assert.doesNotMatch(source, /realityServerName\s*=\s*[^\n]*tlsServerName/);
 });
 
-test('Reality stream settings keep minClient empty unless a minimum version is supplied', async () => {
+test('Reality stream settings write minClient only when a minimum version is supplied', async () => {
   const realityService = new XuiService({} as never, {} as never) as any;
   realityService.resolveRealityKeys = async () => ({ privateKey: 'private-key', publicKey: 'public-key' });
   realityService.resolveRealityTarget = async () => ({ target: 'cdn.example.com:443', serverName: 'cdn.example.com', source: 'scan' });
@@ -73,11 +73,44 @@ test('Reality stream settings keep minClient empty unless a minimum version is s
   const versioned = await realityService.defaultStreamSettings({}, 'reality', {}, {
     protocol: 'vless',
     transport: 'tcp',
-    realityMinClientVersion: '1.0.0'
+    realityMinClientVersion: '1.2.3'
   });
 
   assert.equal(empty.realitySettings.minClient, '');
-  assert.equal(versioned.realitySettings.minClient, '1.0.0');
+  assert.equal(versioned.realitySettings.minClient, '1.2.3');
+});
+
+test('Reality inbound creation sends a manually supplied minClient to 3x-ui', async () => {
+  let submittedInbound: any;
+  const client = {
+    listInbounds: async () => ({ success: true, obj: [] }),
+    addInbound: async (payload: any) => {
+      submittedInbound = structuredClone(payload);
+      return { success: true, obj: { id: 12 } };
+    },
+    addClient: async () => ({ success: true }),
+    clientLinks: async () => ({ success: true, obj: ['vless://example'] })
+  };
+  const createService = new XuiService({
+    xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://panel.example.com', config: {} }) },
+    syncLog: { create: async () => ({}) }
+  } as never, {} as never) as any;
+  createService.createAuthenticatedClient = async () => client;
+  createService.resolveRealityKeys = async () => ({ privateKey: 'private-key', publicKey: 'public-key' });
+  createService.resolveRealityTarget = async () => ({ target: 'cdn.example.com:443', serverName: 'cdn.example.com', source: 'scan' });
+
+  await createService.createServiceNodeInbound({
+    serverId: 'server-1',
+    name: 'Reality Node',
+    protocol: 'vless',
+    encryption: 'reality',
+    transport: 'tcp',
+    realityMinClientVersion: '1.0.0',
+    enabled: true,
+    port: 24443
+  });
+
+  assert.equal(submittedInbound.streamSettings.realitySettings.minClient, '1.0.0');
 });
 
 

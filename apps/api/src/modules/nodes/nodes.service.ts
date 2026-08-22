@@ -21,6 +21,7 @@ type ServiceNodeConfig = {
   realityMinClientVersion?: string;
   socksRelayEnabled?: boolean;
   socksNodeId?: string | null;
+  remoteSocksOutboundTag?: string;
   remoteMode?: 'create' | 'bind';
   remoteManaged?: boolean;
   remoteInboundTag?: string;
@@ -582,6 +583,7 @@ export class NodesService {
       throw new BadRequestException(`出站节点正在被 ${usedServiceNodes.length} 个路由节点使用，请先在路由节点中关闭或更换出站中转`);
     }
     const shouldResyncRemote = Boolean(
+      input.name !== undefined ||
       input.host !== undefined ||
       input.port !== undefined ||
       input.username !== undefined ||
@@ -684,6 +686,8 @@ export class NodesService {
     const subId = stringValue(serviceConfig.remoteClientSubId);
     const links = Array.isArray(serviceConfig.remoteClientLinks) ? serviceConfig.remoteClientLinks : [];
     if (!xuiEmail) throw new BadRequestException('Service node is missing a remote 3x-ui client. Sync/import the service node first.');
+    if (!serviceNode.inboundId) throw new BadRequestException('Service node is missing a remote 3x-ui inbound ID.');
+    const preferredClientEmail = this.xui.customerClientEmail(customer.name, customer.loginUsername, serviceNode.inboundId);
     const node = await this.prisma.customerNode.create({
       data: {
         customerId,
@@ -705,7 +709,8 @@ export class NodesService {
         trafficLimitGb: node.trafficLimitGb,
         status: 'active',
         createIfMissing: false,
-        requireExisting: true
+        requireExisting: true,
+        preferredClientEmail
       });
     } catch (error) {
       await this.prisma.customerNode.delete({ where: { id: node.id } }).catch(() => undefined);
@@ -1127,7 +1132,9 @@ export class NodesService {
       xhttpMode: input.xhttpMode === undefined ? previous.xhttpMode || 'auto' : input.xhttpMode,
       realityTarget: input.realityTarget === undefined ? previous.realityTarget || '' : input.realityTarget || '',
       realityServerName: input.realityServerName === undefined ? previous.realityServerName || '' : input.realityServerName || '',
-      realityMinClientVersion: input.realityMinClientVersion === undefined ? previous.realityMinClientVersion || '' : input.realityMinClientVersion || '',
+      realityMinClientVersion: input.realityMinClientVersion === undefined
+        ? previous.realityMinClientVersion || ''
+        : input.realityMinClientVersion || '',
       socksRelayEnabled: input.socksRelayEnabled === undefined ? Boolean(previous.socksRelayEnabled) : input.socksRelayEnabled,
       socksNodeId: input.socksNodeId === undefined ? previous.socksNodeId || null : input.socksNodeId || null
     };

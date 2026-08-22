@@ -34,6 +34,7 @@ type SyncOptions = {
   requireExisting?: boolean;
   syncServiceConfig?: boolean;
   persistLocal?: boolean;
+  preferredClientEmail?: string;
 };
 
 type SyncLogQuery = {
@@ -317,7 +318,7 @@ export class XuiService {
       const inbound = this.xuiObject(this.xuiObject(inboundPayload).obj || this.xuiObject(inboundPayload).data || inboundPayload);
       inboundTag = String(inbound.tag || inboundTag);
     }
-    const outboundTag = this.socksOutboundTag(serviceNode.id);
+    let outboundTag = config.remoteSocksOutboundTag || this.legacySocksOutboundTag(serviceNode.id);
 
     const xrayPayload = await client.getXrayConfig();
     this.assertXuiSuccess(xrayPayload);
@@ -336,6 +337,7 @@ export class XuiService {
       if (!socksNode) throw new NotFoundException('Socks node not found');
       if (!socksNode.enabled) throw new BadRequestException('Selected Socks node is disabled');
 
+      outboundTag = this.socksOutboundTag(serviceNode.id, socksNode.name);
       const outbound = this.buildSocksOutbound(outboundTag, socksNode, serviceNode.id);
       const outbounds = Array.isArray(nextConfig.outbounds) ? nextConfig.outbounds : [];
       outbounds.push(outbound);
@@ -354,7 +356,7 @@ export class XuiService {
       routing.rules = rules;
       nextConfig.routing = routing;
       action = 'updated';
-      socksDetail = { socksNodeId: socksNode.id, host: socksNode.host, port: socksNode.port, username: socksNode.username || '' };
+      socksDetail = { socksNodeId: socksNode.id, name: socksNode.name, outboundTag, host: socksNode.host, port: socksNode.port, username: socksNode.username || '' };
     }
 
     const outboundTestUrl = typeof xrayObj.outboundTestUrl === 'string' ? xrayObj.outboundTestUrl : undefined;
@@ -362,6 +364,13 @@ export class XuiService {
     this.assertXuiSuccess(response);
     const reloadResponse = await client.restartXrayService();
     this.assertXuiSuccess(reloadResponse);
+    const nextServiceConfig: ServiceNodeConfig = { ...config };
+    if (action === 'updated') nextServiceConfig.remoteSocksOutboundTag = outboundTag;
+    else delete nextServiceConfig.remoteSocksOutboundTag;
+    await this.prisma.serviceNode.update({
+      where: { id: serviceNodeId },
+      data: { config: this.toJsonValue(nextServiceConfig) }
+    });
     await this.prisma.syncTask.updateMany({
       where: { entityType: 'service-node', entityId: serviceNodeId, action: 'service-config', status: { not: 'resolved' } },
       data: { status: 'resolved', message: null, resolvedAt: new Date() }
@@ -515,7 +524,7 @@ export class XuiService {
     const payload = await client.getInbound(inboundId);
     this.assertXuiSuccess(payload);
     const inbound = this.remoteInboundFromPayload(payload);
-    const remoteClient = this.firstInboundClientIdentity(inbound);
+    const remoteClient = await this.firstClientIdentityForInbound(client, inbound, inboundId);
     if (!remoteClient.email && !remoteClient.uuid && !remoteClient.subId) throw new BadRequestException('This 3x-ui inbound has no client. Create a client in 3x-ui first, or use automatic service-node creation.');
     const streamSettings = this.xuiObject(this.parseMaybeJson(inbound.streamSettings));
     return {
@@ -702,7 +711,8 @@ export class XuiService {
           const uuid = existing.uuid || remoteClientUuid || randomUUID();
           const subId = existing.subId || remoteClientSubId || this.subscriptionId(uuid);
           const email = existing.email || remoteClientEmail || this.serviceClientEmail(serviceNode.name, serviceNode.inboundId);
-          const payload = await client.updateClient(existing.inboundId || serviceNode.inboundId, existing.clientId || existing.uuid || uuid, this.buildXuiClient({
+          const updateIdentifier = client.usesApiProfile('v3.6') ? existing.email || email : existing.clientId || existing.uuid || uuid;
+          const payload = await client.updateClient(existing.inboundId || serviceNode.inboundId, updateIdentifier, this.buildXuiClient({
               protocol: serviceNode.protocol,
               uuid,
               subId,
@@ -1228,7 +1238,7 @@ export class XuiService {
 
       const uuid = existing.uuid || remoteClientUuid || customerNode.uuid || savedUuid || randomUUID();
       const subId = existing.subId || remoteClientSubId || savedSubId || this.subscriptionId(uuid);
-      const xuiEmail = existing.email || remoteClientEmail || customerNode.xuiEmail;
+      const xuiEmail = this.stringValue(options.preferredClientEmail) || existing.email || remoteClientEmail || customerNode.xuiEmail;
       const xuiClient = this.buildXuiClient({
         protocol: customerNode.serviceNode.protocol,
         uuid,
@@ -1240,7 +1250,8 @@ export class XuiService {
         flow: this.clientFlowForServiceNode(customerNode.serviceNode)
       });
       const route = 'clients/update';
-      const payload = await client.updateClient(existing.inboundId || inboundId, existing.clientId || existing.uuid || uuid, xuiClient);
+      const updateIdentifier = client.usesApiProfile('v3.6') ? existing.email || xuiEmail : existing.clientId || existing.uuid || uuid;
+      const payload = await client.updateClient(existing.inboundId || inboundId, updateIdentifier, xuiClient);
       this.assertXuiSuccess(payload);
       const links = targetStatus === 'active'
         ? await this.requireLinksForServiceNode(client, xuiEmail, subId, {
@@ -1268,13 +1279,37 @@ export class XuiService {
         lastSyncedAt: syncedAt,
         config: this.toJsonValue({ ...savedConfig, uuid, subId, links })
       };
+      const remoteIdentityChanged = xuiEmail !== remoteClientEmail
+        || uuid !== remoteClientUuid
+        || subId !== remoteClientSubId;
       const updatedNode = options.persistLocal === false
         ? customerNode
-        : await this.prisma.customerNode.update({
-          where: { id: customerNode.id },
-          data: localPatch,
-          include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
-        });
+        : remoteIdentityChanged
+          ? await this.prisma.$transaction(async (tx) => {
+            const node = await tx.customerNode.update({
+              where: { id: customerNode.id },
+              data: localPatch,
+              include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+            });
+            await tx.serviceNode.update({
+              where: { id: customerNode.serviceNodeId },
+              data: {
+                config: this.toJsonValue({
+                  ...serviceConfig,
+                  remoteClientEmail: xuiEmail,
+                  remoteClientUuid: uuid,
+                  remoteClientSubId: subId,
+                  remoteClientLinks: links
+                })
+              }
+            });
+            return node;
+          })
+          : await this.prisma.customerNode.update({
+            where: { id: customerNode.id },
+            data: localPatch,
+            include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+          });
 
       const detail = {
         customerId,
@@ -2695,7 +2730,28 @@ export class XuiService {
     return normalized.padEnd(normalized.length + (4 - normalized.length % 4) % 4, '=');
   }
 
-  private async findClient(_client: XuiClient, lookup: ClientLookup, inbounds: unknown[]): Promise<ClientMatch> {
+  private async findClient(client: XuiClient, lookup: ClientLookup, inbounds: unknown[]): Promise<ClientMatch> {
+    if (client.usesApiProfile('v3.6')) {
+      const payload = await client.listClients();
+      this.assertXuiSuccess(payload);
+      for (const item of this.xuiArray(payload)) {
+        const wrapper = this.xuiObject(item);
+        const record = this.xuiObject(wrapper.client || item);
+        const inboundIds = this.numberList(wrapper.inboundIds ?? record.inboundIds);
+        if (lookup.inboundId && !inboundIds.includes(lookup.inboundId)) continue;
+        const found = this.v36ClientIdentity(record);
+        if (this.clientMatches(found, lookup)) {
+          return {
+            exists: true,
+            raw: record,
+            inboundId: lookup.inboundId || inboundIds[0],
+            clientId: found.email,
+            ...found
+          };
+        }
+      }
+    }
+
     const sorted = [...inbounds].sort((a, b) => {
       if (!lookup.inboundId) return 0;
       const aTarget = this.inboundIdOf(a) === lookup.inboundId ? 1 : 0;
@@ -2886,8 +2942,8 @@ export class XuiService {
 
   private removeManagedSocksRoute(config: Record<string, unknown>, serviceNodeId: string, inboundTag?: string, remoteOutboundTag?: string) {
     const next: Record<string, unknown> = { ...config };
-    const outboundTag = this.socksOutboundTag(serviceNodeId);
-    const explicitOutboundTags = new Set([outboundTag, remoteOutboundTag].filter((item): item is string => Boolean(item)));
+    const legacyOutboundTag = this.legacySocksOutboundTag(serviceNodeId);
+    const explicitOutboundTags = new Set([legacyOutboundTag, remoteOutboundTag].filter((item): item is string => Boolean(item)));
     const outbounds = Array.isArray(next.outbounds) ? next.outbounds : [];
     const socksOutboundTags = new Set(
       outbounds
@@ -2925,7 +2981,7 @@ export class XuiService {
       const tag = this.stringValue(outbound.tag);
       if (!tag) return true;
       const isServiceManaged = outbound._shiyeServiceNodeId === serviceNodeId || (outbound._shiyeManaged === true && outbound._shiyeMark === SHIYE_ROUTE_MARK && explicitOutboundTags.has(tag));
-      if (tag === outboundTag || isServiceManaged) return false;
+      if (tag === legacyOutboundTag || isServiceManaged) return false;
       return !(removedOutboundTags.has(tag) && !stillReferencedOutboundTags.has(tag));
     });
 
@@ -2941,7 +2997,7 @@ export class XuiService {
   ) {
     const outboundTags = this.stringList(rule.outboundTag);
     if (rule._shiyeServiceNodeId === serviceNodeId) return true;
-    if (outboundTags.some((tag) => tag === this.socksOutboundTag(serviceNodeId))) return true;
+    if (outboundTags.some((tag) => tag === this.legacySocksOutboundTag(serviceNodeId))) return true;
     if (rule._shiyeManaged === true && rule._shiyeMark === SHIYE_ROUTE_MARK && outboundTags.some((tag) => explicitOutboundTags.has(tag))) return true;
     if (!inboundTag || !this.stringList(rule.inboundTag).includes(inboundTag)) return false;
     return outboundTags.some((tag) => explicitOutboundTags.has(tag) || socksOutboundTags.has(tag));
@@ -2970,8 +3026,27 @@ export class XuiService {
     return routing;
   }
 
-  private socksOutboundTag(serviceNodeId: string) {
+  private socksOutboundTag(serviceNodeId: string, name: string) {
+    const readableName = this.readableIdentifier(name, 'outbound', 48);
+    const suffix = this.readableIdentifier(serviceNodeId, 'node', 64).slice(-6);
+    return `socks-${readableName}-${suffix}`;
+  }
+
+  private legacySocksOutboundTag(serviceNodeId: string) {
     return `shiye-socks-${serviceNodeId.slice(0, 18)}`;
+  }
+
+  customerClientEmail(name: string, loginUsername: string, inboundId: number) {
+    const readableName = this.readableIdentifier(name || loginUsername, 'user', 120);
+    return `${readableName}-${inboundId}`;
+  }
+
+  private readableIdentifier(value: string, fallback: string, maxLength: number) {
+    const normalized = String(value || '').normalize('NFKC').trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+      .replace(/^-+|-+$/g, '');
+    return this.truncateText(normalized || fallback, maxLength);
   }
 
   private async verifyRemoteInboundDeleted(client: XuiClient, inboundId: number) {
@@ -3108,6 +3183,16 @@ export class XuiService {
     };
   }
 
+  private v36ClientIdentity(item: unknown) {
+    const object = this.xuiObject(item);
+    const stringId = typeof object.id === 'string' ? object.id.trim() : '';
+    return {
+      email: this.clientEmailOf(object) || undefined,
+      uuid: String(object.uuid || stringId || object.password || object.auth || '').trim() || undefined,
+      subId: this.clientSubIdOf(object) || undefined
+    };
+  }
+
   private clientIdForProtocol(item: unknown, protocol: string) {
     const object = this.xuiObject(item);
     if (protocol === 'trojan') return this.stringValue(object.password);
@@ -3125,6 +3210,27 @@ export class XuiService {
       if (identity.email || identity.uuid || identity.subId) return identity;
     }
     return {};
+  }
+
+  private async firstClientIdentityForInbound(client: XuiClient, inbound: unknown, inboundId: number): Promise<ServiceInboundClientIdentity> {
+    if (!client.usesApiProfile('v3.6')) return this.firstInboundClientIdentity(inbound);
+
+    const settings = this.xuiObject(this.parseMaybeJson(this.xuiObject(inbound).settings));
+    const clients = Array.isArray(settings.clients) ? settings.clients : [];
+    const inline = clients.length ? this.v36ClientIdentity(clients[0]) : {};
+
+    const payload = await client.listClients();
+    this.assertXuiSuccess(payload);
+    let firstAttached: ServiceInboundClientIdentity | undefined;
+    for (const item of this.xuiArray(payload)) {
+      const wrapper = this.xuiObject(item);
+      const record = this.xuiObject(wrapper.client || item);
+      if (!this.numberList(wrapper.inboundIds ?? record.inboundIds).includes(inboundId)) continue;
+      const identity = this.v36ClientIdentity(record);
+      if (!firstAttached && (identity.email || identity.uuid || identity.subId)) firstAttached = identity;
+      if (this.clientMatches(identity, inline)) return identity;
+    }
+    return firstAttached || inline;
   }
 
   private inboundClientIdentities(inbound: unknown): ServiceInboundClientIdentity[] {
@@ -3156,6 +3262,11 @@ export class XuiService {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
     const text = this.stringValue(value);
     return text ? [text] : [];
+  }
+
+  private numberList(value: unknown) {
+    if (!Array.isArray(value)) return [];
+    return value.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0);
   }
 
   private truncateText(value: string, maxLength: number) {
