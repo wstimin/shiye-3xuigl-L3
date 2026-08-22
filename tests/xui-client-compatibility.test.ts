@@ -114,6 +114,45 @@ test('automatic detection failures do not block existing legacy operations', asy
   }
 });
 
+test('unsaved 3.6 panel drafts detect their API profile before certificate reads', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    requests.push(path);
+    if (path === '/panel/api/openapi.json') {
+      return jsonResponse({
+        openapi: '3.0.0',
+        info: { version: '3.6.0' },
+        paths: {
+          '/panel/api/clients/add': {},
+          '/panel/api/clients/update/{email}': {},
+          '/panel/api/clients/{email}/detach': {},
+          '/panel/api/inbounds/{id}/resetTraffic': {}
+        }
+      });
+    }
+    if (path === '/panel/api/server/getWebCertFiles') {
+      return jsonResponse({ success: true, obj: { webCertFile: '/cert/fullchain.pem', webKeyFile: '/cert/privkey.pem' } });
+    }
+    return jsonResponse({ message: 'unexpected request' }, 500);
+  };
+
+  try {
+    const service = new XuiService({} as never, {} as never) as any;
+    const client = await service.createAuthenticatedClient({
+      baseUrl: 'https://draft.example.com',
+      token: 'token'
+    }, true, true);
+    const result = await service.readWebCertFiles(client);
+
+    assert.deepEqual(requests, ['/panel/api/openapi.json', '/panel/api/server/getWebCertFiles']);
+    assert.equal(result.found, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('3.6 last-client deletion uses detach instead of the legacy empty-inbound fallback', async () => {
   const service = new XuiService({} as never, {} as never) as any;
   let deleteCalls = 0;
@@ -137,4 +176,54 @@ test('3.6 last-client deletion uses detach instead of the legacy empty-inbound f
   assert.equal(deleteCalls, 1);
   assert.equal(updateCalls, 0);
   assert.equal(result.lastClientFallback, undefined);
+});
+
+test('3.6 certificate reads use the token-compatible server API', async () => {
+  const service = new XuiService({} as never, {} as never) as any;
+  let apiCalls = 0;
+  let legacyCalls = 0;
+  const client = {
+    usesApiProfile: (profile: string) => profile === 'v3.6',
+    getWebCertFiles: async () => {
+      apiCalls += 1;
+      return { success: true, obj: { webCertFile: '/cert/fullchain.pem', webKeyFile: '/cert/privkey.pem' } };
+    },
+    getPanelSettings: async () => {
+      legacyCalls += 1;
+      return { success: true, obj: {} };
+    }
+  };
+
+  const result = await service.readWebCertFiles(client);
+
+  assert.equal(apiCalls, 1);
+  assert.equal(legacyCalls, 0);
+  assert.equal(result.found, true);
+  assert.equal(result.certFile, '/cert/fullchain.pem');
+  assert.equal(result.keyFile, '/cert/privkey.pem');
+});
+
+test('legacy certificate reads keep using the existing panel settings API', async () => {
+  const service = new XuiService({} as never, {} as never) as any;
+  let apiCalls = 0;
+  let legacyCalls = 0;
+  const client = {
+    usesApiProfile: () => false,
+    getWebCertFiles: async () => {
+      apiCalls += 1;
+      return { success: true, obj: {} };
+    },
+    getPanelSettings: async () => {
+      legacyCalls += 1;
+      return { success: true, obj: { webCertFile: '/legacy/fullchain.pem', webKeyFile: '/legacy/privkey.pem' } };
+    }
+  };
+
+  const result = await service.readWebCertFiles(client);
+
+  assert.equal(apiCalls, 0);
+  assert.equal(legacyCalls, 1);
+  assert.equal(result.found, true);
+  assert.equal(result.certFile, '/legacy/fullchain.pem');
+  assert.equal(result.keyFile, '/legacy/privkey.pem');
 });

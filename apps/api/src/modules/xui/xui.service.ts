@@ -219,7 +219,7 @@ export class XuiService {
       token: input.token,
       username: input.username,
       password: input.password
-    });
+    }, true, true);
     return this.readWebCertFiles(client);
   }
 
@@ -1352,7 +1352,7 @@ export class XuiService {
     }
   }
 
-  private async createAuthenticatedClient(config: XuiServerConfig, autoDetect = true) {
+  private async createAuthenticatedClient(config: XuiServerConfig, autoDetect = true, detectDraft = false) {
     const password = config.password || (config.passwordEnc ? this.encryption.decrypt(config.passwordEnc) : '');
     const token = config.token || (config.tokenEnc ? this.encryption.decrypt(config.tokenEnc) : '');
     const client = new XuiClient({
@@ -1371,7 +1371,7 @@ export class XuiService {
     }
 
     const serverId = this.stringValue(this.xuiObject(config).id);
-    if (autoDetect && serverId && !this.panelCompatibility(config.config)) {
+    if (autoDetect && (serverId || detectDraft) && !this.panelCompatibility(config.config)) {
       let compatibility: PanelCompatibility;
       try {
         compatibility = await this.detectAndPersistPanelCompatibility(config, client);
@@ -1939,7 +1939,9 @@ export class XuiService {
   }
 
   private async readWebCertFiles(client: XuiClient) {
-    const payload = await client.getPanelSettings();
+    const payload = typeof client.usesApiProfile === 'function' && client.usesApiProfile('v3.6')
+      ? await client.getWebCertFiles()
+      : await client.getPanelSettings();
     this.assertXuiSuccess(payload);
     const object = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
     const certFile = String(object.webCertFile || object.certFile || object.certificateFile || object.cert || object.certPath || object.publicKeyPath || '').trim();
