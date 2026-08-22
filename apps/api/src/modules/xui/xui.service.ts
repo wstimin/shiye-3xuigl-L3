@@ -224,7 +224,7 @@ export class XuiService {
   }
 
   async testStoredServerDraftCertFiles(id: string, input: z.infer<typeof xuiServerUpsertSchema>) {
-    const client = await this.createAuthenticatedClient(await this.storedServerDraftConfig(id, input));
+    const client = await this.createAuthenticatedClient(await this.storedServerDraftConfig(id, input), true, true);
     return this.readWebCertFiles(client);
   }
 

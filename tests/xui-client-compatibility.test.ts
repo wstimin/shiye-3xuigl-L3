@@ -153,6 +153,58 @@ test('unsaved 3.6 panel drafts detect their API profile before certificate reads
   }
 });
 
+test('saved 3.6 panel drafts detect their API profile before certificate reads', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    requests.push(path);
+    if (path === '/panel/api/openapi.json') {
+      return jsonResponse({
+        openapi: '3.0.0',
+        info: { version: '3.6.0' },
+        paths: {
+          '/panel/api/clients/add': {},
+          '/panel/api/clients/update/{email}': {},
+          '/panel/api/clients/{email}/detach': {},
+          '/panel/api/inbounds/{id}/resetTraffic': {}
+        }
+      });
+    }
+    if (path === '/panel/api/server/getWebCertFiles') {
+      return jsonResponse({ success: true, obj: { webCertFile: '/cert/fullchain.pem', webKeyFile: '/cert/privkey.pem' } });
+    }
+    return jsonResponse({ message: 'unexpected request' }, 500);
+  };
+
+  try {
+    const service = new XuiService({
+      xuiServer: {
+        findUnique: async () => ({
+          id: 'server-1',
+          basePath: null,
+          username: null,
+          passwordEnc: null,
+          tokenEnc: 'encrypted-token'
+        })
+      }
+    } as never, {
+      decrypt: () => 'token'
+    } as never) as any;
+
+    const result = await service.testStoredServerDraftCertFiles('server-1', {
+      name: '3.6 panel',
+      baseUrl: 'https://saved-draft.example.com',
+      enabled: true
+    });
+
+    assert.deepEqual(requests, ['/panel/api/openapi.json', '/panel/api/server/getWebCertFiles']);
+    assert.equal(result.found, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('3.6 last-client deletion uses detach instead of the legacy empty-inbound fallback', async () => {
   const service = new XuiService({} as never, {} as never) as any;
   let deleteCalls = 0;
