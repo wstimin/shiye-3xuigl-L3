@@ -27,6 +27,8 @@ type PanelCompatibility = {
   openApiVersion?: string;
 };
 
+const PANEL_COMPATIBILITY_TTL_MS = 15 * 60 * 1000;
+
 type SyncLogQuery = {
   serverId?: string;
   action?: string;
@@ -2114,21 +2116,40 @@ export class XuiService {
     await this.assertRemoteClientBindingAvailable(node.serviceNodeId, input.email, node.id);
     const inboundId = node.serviceNode.inboundId;
     if (!inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
-    const client = await this.createAuthenticatedClient(node.serviceNode.server);
+    this.assertOfficialClientIdentifier(input.email);
+    const client = await this.createAuthenticatedClient(node.serviceNode.server, true, false, true);
+    const inboundPayload = await client.getInbound(inboundId).catch((error) => {
+      if (this.isRemoteNotFound(error)) throw new BadRequestException(`官方面板中的入站 ${inboundId} 已不存在，请重新同步或重新创建服务节点`);
+      throw error;
+    });
+    this.assertXuiSuccess(inboundPayload);
+    const remoteInbound = this.remoteInboundFromPayload(inboundPayload);
+    const remoteInboundId = this.inboundIdOf(remoteInbound);
+    if (remoteInboundId && remoteInboundId !== inboundId) {
+      throw new BadRequestException(`官方面板返回的入站 ID 与服务节点不一致：期望 ${inboundId}，实际 ${remoteInboundId}`);
+    }
+    const localProtocol = String(node.serviceNode.protocol || '').trim().toLowerCase();
+    const remoteProtocol = String(remoteInbound.protocol || '').trim().toLowerCase();
+    if (!remoteProtocol) throw new BadRequestException(`官方入站 ${inboundId} 缺少协议配置，无法创建客户端`);
+    if (localProtocol !== remoteProtocol) {
+      throw new BadRequestException(`服务节点协议与官方入站不一致：本地为 ${localProtocol || '未知'}，官方为 ${remoteProtocol}`);
+    }
     const occupied = await this.optionalV36ClientRecord(client, input.email);
     if (occupied) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
 
-    const uuid = input.uuid || randomUUID();
-    const subId = input.subId || this.randomSecret(12);
-    const payload = this.buildXuiClient({
-      protocol: node.serviceNode.protocol,
-      uuid,
-      subId,
+    const listed = await this.findClient(client, { email: input.email }, []);
+    if (listed.exists) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
+
+    const requestedUuid = input.uuid?.trim();
+    const requestedSubId = input.subId?.trim();
+    const payload = this.buildOfficialClientCreatePayload({
+      protocol: remoteProtocol,
+      uuid: requestedUuid,
+      subId: requestedSubId,
       email: input.email,
       enabled: input.enabled,
       expireAt: input.expireAt,
-      trafficLimitGb: input.trafficLimitGb,
-      flow: this.clientFlowForServiceNode(node.serviceNode)
+      trafficLimitGb: input.trafficLimitGb
     });
     let response: unknown;
     try {
@@ -2143,23 +2164,23 @@ export class XuiService {
         xuiEmail: input.email,
         phase: 'remote-create'
       });
-      throw error;
+      throw new BadGatewayException(`创建官方客户端失败：${this.officialPanelError(error)}`);
     }
     try {
-      const verified = await this.findClient(client, { email: input.email, uuid, subId, inboundId }, []);
+      const verified = await this.findClient(client, { email: input.email, inboundId }, []);
       if (!verified.exists) throw new BadGatewayException('远端客户端创建后回读失败');
       const savedConfig = this.xuiObject(node.config);
       const binding = await this.prisma.customerNode.update({
         where: { id: node.id },
         data: {
           xuiEmail: input.email,
-          uuid: verified.uuid || uuid,
+          uuid: verified.uuid || requestedUuid || null,
           expireAt: input.expireAt || null,
           trafficLimitGb: new Prisma.Decimal(input.trafficLimitGb),
           status: input.enabled ? 'active' : 'disabled',
           disabledReason: input.enabled ? null : 'admin',
           lastSyncedAt: new Date(),
-          config: this.toJsonValue({ ...savedConfig, uuid: verified.uuid || uuid, subId: verified.subId || subId })
+          config: this.toJsonValue({ ...savedConfig, uuid: verified.uuid || requestedUuid, subId: verified.subId || requestedSubId })
         },
         include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
       });
@@ -2169,8 +2190,8 @@ export class XuiService {
         serviceNodeId: node.serviceNodeId,
         inboundId,
         xuiEmail: input.email,
-        uuid: verified.uuid || uuid,
-        subId: verified.subId || subId,
+        uuid: verified.uuid || requestedUuid,
+        subId: verified.subId || requestedSubId,
         response: this.toJsonValue(response)
       });
       return { created: true, remoteWrite: true, route: 'clients/add', response, binding };
@@ -2743,7 +2764,7 @@ export class XuiService {
     );
   }
 
-  private async createAuthenticatedClient(config: XuiServerConfig, autoDetect = true, detectDraft = false) {
+  private async createAuthenticatedClient(config: XuiServerConfig, autoDetect = true, detectDraft = false, forceDetect = false) {
     const password = config.password || (config.passwordEnc ? this.encryption.decrypt(config.passwordEnc) : '');
     const token = config.token || (config.tokenEnc ? this.encryption.decrypt(config.tokenEnc) : '');
     const client = new XuiClient({
@@ -2762,7 +2783,11 @@ export class XuiService {
     }
 
     const serverId = this.stringValue(this.xuiObject(config).id);
-    if (autoDetect && (serverId || detectDraft) && !this.panelCompatibility(config.config)) {
+    const compatibility = this.panelCompatibility(config.config);
+    const shouldDetectCompatibility = forceDetect
+      ? !this.panelCompatibilityIsFresh(compatibility)
+      : !compatibility;
+    if (autoDetect && (serverId || detectDraft) && shouldDetectCompatibility) {
       await this.detectAndPersistPanelCompatibility(config, client);
       const detectedClient = new XuiClient({
         baseUrl: config.baseUrl,
@@ -2805,6 +2830,12 @@ export class XuiService {
       source: 'openapi',
       openApiVersion: this.stringValue(compatibility.openApiVersion)
     };
+  }
+
+  private panelCompatibilityIsFresh(compatibility?: PanelCompatibility) {
+    if (!compatibility?.detectedAt) return false;
+    const detectedAt = Date.parse(compatibility.detectedAt);
+    return Number.isFinite(detectedAt) && Date.now() - detectedAt < PANEL_COMPATIBILITY_TTL_MS;
   }
 
   private withPanelCompatibility(value: unknown, compatibility?: PanelCompatibility) {
@@ -2937,6 +2968,25 @@ export class XuiService {
     else {
       client.id = input.uuid;
       if (input.protocol === 'vmess') client.security = 'auto';
+    }
+    return client;
+  }
+
+  private buildOfficialClientCreatePayload(input: { protocol: string; uuid?: string; subId?: string; email: string; enabled: boolean; expireAt?: Date | null; trafficLimitGb: Prisma.Decimal | number | string | null }) {
+    const client: Record<string, unknown> = {
+      email: input.email,
+      enable: input.enabled,
+      expiryTime: input.expireAt ? input.expireAt.getTime() : 0,
+      totalGB: this.gbToBytes(input.trafficLimitGb),
+      limitIp: 0,
+      tgId: 0
+    };
+    if (input.subId) client.subId = input.subId;
+    if (input.uuid) {
+      if (input.protocol === 'trojan') client.password = input.uuid;
+      else if (input.protocol === 'shadowsocks') client.password = input.uuid;
+      else if (input.protocol === 'hysteria' || input.protocol === 'hysteria2') client.auth = input.uuid;
+      else client.id = input.uuid;
     }
     return client;
   }
@@ -4364,8 +4414,19 @@ export class XuiService {
   }
 
   customerClientEmail(name: string, loginUsername: string, inboundId: number) {
-    const readableName = this.readableIdentifier(loginUsername || name, 'user', 120);
-    return `${readableName}-${inboundId}`;
+    const source = String(loginUsername || name || 'user').normalize('NFKC').trim();
+    const readableName = source.toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 72) || 'user';
+    const identityHash = createHash('sha256').update(source || 'user').digest('hex').slice(0, 10);
+    return `${readableName}-${identityHash}-${inboundId}`;
+  }
+
+  private assertOfficialClientIdentifier(value: string) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(value)) {
+      throw new BadRequestException('官方客户端标识只能包含英文字母、数字、点、下划线和短横线，且必须以字母或数字开头');
+    }
   }
 
   private readableIdentifier(value: string, fallback: string, maxLength: number) {
@@ -4684,6 +4745,15 @@ export class XuiService {
 
   private errorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  private officialPanelError(error: unknown) {
+    const message = this.errorMessage(error).replace(/^3x-ui request failed:\s*\d+\s*-?\s*/i, '').trim();
+    if (!message) return '官方面板未返回具体原因，请查看同步日志';
+    if (/already exists|duplicate|unique/i.test(message)) return `客户端标识已存在（官方面板返回：${message}）`;
+    if (/not found|does not exist/i.test(message)) return `目标入站或资源不存在（官方面板返回：${message}）`;
+    if (/invalid|required|validation|must be|bad request/i.test(message)) return `提交字段不符合官方接口要求（官方面板返回：${message}）`;
+    return `官方面板返回：${message}`;
   }
 
   private isUniqueConstraintError(error: unknown) {

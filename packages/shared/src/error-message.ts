@@ -22,7 +22,7 @@ export function userFacingErrorMessage(status: number, message: unknown, fallbac
 
   if (text) {
     const translated = translatedPatterns.find(([pattern]) => pattern.test(text));
-    if (translated) return translated[1];
+    if (translated) return preserveRemoteDetail(text, translated[1]);
   }
 
   if (status === 400 || status === 422) return fallback === '操作失败' ? '提交的信息不符合要求' : fallback;
@@ -34,6 +34,13 @@ export function userFacingErrorMessage(status: number, message: unknown, fallbac
   if (status === 502 || status === 503 || status === 504) return '服务暂时不可用，请稍后重试';
   if (status >= 500) return '服务异常，请稍后重试';
   return fallback;
+}
+
+function preserveRemoteDetail(text: string, translated: string) {
+  if (!/3x-ui|xui|official panel|panel\/api|request failed/i.test(text)) return translated;
+  const detail = text.replace(/^3x-ui request failed:\s*\d+\s*-?\s*/i, '').trim();
+  if (!detail || detail === text && /^3x-ui|^xui/i.test(text)) return translated;
+  return `${translated}（官方面板返回：${detail}）`;
 }
 
 export function readableError(error: unknown, fallback = '操作失败') {
