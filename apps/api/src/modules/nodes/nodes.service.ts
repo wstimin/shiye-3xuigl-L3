@@ -902,10 +902,12 @@ export class NodesService {
     if (!customer) throw new NotFoundException('用户不存在');
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
 
-    const xuiEmail = input.xuiEmail?.trim();
-    const uuid = input.uuid || null;
-    if (!xuiEmail) throw new BadRequestException('绑定用户时必须填写准确的官方 3x-ui 客户端邮箱');
     if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
+    const xuiEmail = input.xuiEmail?.trim() || (input.remoteAction === 'create'
+      ? this.xui.customerClientEmail(customer.name, customer.loginUsername, serviceNode.inboundId)
+      : '');
+    const uuid = input.uuid || null;
+    if (!xuiEmail) throw new BadRequestException('绑定官方已有客户端时必须填写准确的 3x-ui 客户端邮箱');
     if (input.remoteAction === 'create' && input.remoteControl !== 'fully_managed') {
       throw new BadRequestException('创建远端客户端必须使用完全托管模式');
     }

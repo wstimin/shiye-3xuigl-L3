@@ -4364,7 +4364,7 @@ export class XuiService {
   }
 
   customerClientEmail(name: string, loginUsername: string, inboundId: number) {
-    const readableName = this.readableIdentifier(name || loginUsername, 'user', 120);
+    const readableName = this.readableIdentifier(loginUsername || name, 'user', 120);
     return `${readableName}-${inboundId}`;
   }
 

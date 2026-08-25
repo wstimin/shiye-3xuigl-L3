@@ -92,7 +92,7 @@ const balanceDialogVisible = ref(false);
 const customerNodeDialogVisible = ref(false);
 const remoteClientDialogVisible = ref(false);
 const customerForm = reactive({ name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active' as 'active' | 'disabled', remark: '' });
-const bindForm = reactive({ customerId: '', serviceNodeId: '', xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined, remoteControl: 'reference' as CustomerNode['remoteControl'], remoteAction: 'bind' as 'bind' | 'create', takeover: false });
+const bindForm = reactive({ customerId: '', serviceNodeId: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
 const nodeEditForm = reactive({ customerId: '', customerNodeId: '', serviceNodeId: '', xuiEmail: '', expireAt: '', trafficLimitGb: undefined as number | undefined, remoteControl: 'reference' as CustomerNode['remoteControl'], originalServiceNodeId: '', originalXuiEmail: '', originalRemoteControl: 'reference' as CustomerNode['remoteControl'], takeover: false });
 const remoteClientForm = reactive({ customerId: '', customerNodeId: '', xuiEmail: '', mode: 'edit' as 'create' | 'edit', expireAt: '', trafficLimitGb: 0, enabled: true });
 const balanceForm = reactive({ customerId: '', mode: 'add' as 'add' | 'subtract' | 'set', amount: 0, remark: '' });
@@ -196,17 +196,16 @@ async function bindNode() {
       method: 'POST',
       body: {
         serviceNodeId: bindForm.serviceNodeId,
-        xuiEmail: bindForm.xuiEmail,
         expireAt: bindForm.expireAt || undefined,
         trafficLimitGb: bindForm.trafficLimitGb,
-        remoteControl: bindForm.remoteControl,
-        remoteAction: bindForm.remoteAction,
-        takeover: bindForm.takeover
+        remoteControl: 'fully_managed',
+        remoteAction: 'create',
+        takeover: true
       }
     });
-    ElMessage.success(bindForm.remoteAction === 'create' ? '远端客户端已创建并绑定' : '绑定成功');
+    ElMessage.success('官方客户端已创建并绑定');
     bindDialogVisible.value = false;
-    Object.assign(bindForm, { xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined, remoteControl: 'reference', remoteAction: 'bind', takeover: false });
+    Object.assign(bindForm, { expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
   } catch (caught) {
     notifyError(caught, '绑定失败');
@@ -495,8 +494,6 @@ function openBindDialog(customer?: Customer) {
   if (!bindForm.customerId && customers.value[0]) bindForm.customerId = customers.value[0].id;
   if (!bindForm.serviceNodeId && serviceNodes.value[0]) bindForm.serviceNodeId = serviceNodes.value[0].id;
   bindForm.expireAt = bindForm.expireAt || defaultExpireAt();
-  bindForm.remoteAction = 'bind';
-  bindForm.takeover = false;
   bindDialogVisible.value = true;
 }
 
@@ -615,15 +612,6 @@ function controlRank(mode: CustomerNode['remoteControl']) {
   if (mode === 'fully_managed') return 2;
   if (mode === 'subscription_managed') return 1;
   return 0;
-}
-
-function bindRequiresTakeover() {
-  return bindForm.remoteAction === 'create' || bindForm.remoteControl !== 'reference';
-}
-
-function handleBindRemoteActionChange(action: 'bind' | 'create') {
-  if (action === 'create') bindForm.remoteControl = 'fully_managed';
-  bindForm.takeover = false;
 }
 
 function editRequiresTakeover() {
@@ -998,8 +986,8 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="bindDialogVisible" class="customer-dark-dialog" title="绑定路由节点" width="760px" destroy-on-close>
-    <div class="customer-dialog-intro"><Link2 :size="18" /><div><strong>建立用户与官方客户端的精确绑定</strong><span>可绑定官方面板中的已有客户端，或在完全托管模式下创建新客户端；不会修改、替换或删除其他官方账号。</span></div></div>
+  <el-dialog v-model="bindDialogVisible" class="customer-dark-dialog" title="绑定路由节点" width="680px" destroy-on-close>
+    <div class="customer-dialog-intro"><Link2 :size="18" /><div><strong>选择用户和路由节点即可完成绑定</strong><span>系统会在该节点对应的官方入站中创建独立客户端，并自动完成后续续费、停用和流量同步。</span></div></div>
     <el-form :model="bindForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="用户">
         <el-select v-model="bindForm.customerId" placeholder="选择用户" style="width: 100%">
@@ -1010,23 +998,6 @@ onMounted(loadCustomers);
         <el-select v-model="bindForm.serviceNodeId" placeholder="选择节点" style="width: 100%">
           <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
         </el-select>
-      </el-form-item>
-      <el-form-item label="添加方式">
-        <el-select v-model="bindForm.remoteAction" style="width: 100%" @change="handleBindRemoteActionChange">
-          <el-option label="绑定官方已有客户端" value="bind" />
-          <el-option label="创建并绑定新客户端" value="create" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="远端标识"><el-input v-model="bindForm.xuiEmail" placeholder="必填：准确的 3x-ui 客户端邮箱" /></el-form-item>
-      <el-form-item label="控制模式">
-        <el-select v-model="bindForm.remoteControl" style="width: 100%">
-          <el-option label="只读引用（不修改远端账号）" value="reference" :disabled="bindForm.remoteAction === 'create'" />
-          <el-option label="订阅生命周期托管（续费、停用、额度）" value="subscription_managed" :disabled="bindForm.remoteAction === 'create'" />
-          <el-option label="完全托管（含创建、重置、删除）" value="fully_managed" />
-        </el-select>
-      </el-form-item>
-      <el-form-item v-if="bindRequiresTakeover()" label="接管确认" class="form-item-full">
-        <el-checkbox v-model="bindForm.takeover">确认授权本系统管理该官方客户端；不会改名、替换或删除其他官方账号</el-checkbox>
       </el-form-item>
       <el-form-item label="到期时间">
         <div class="date-picker-stack">
@@ -1043,7 +1014,7 @@ onMounted(loadCustomers);
     </el-form>
     <template #footer>
       <el-button @click="bindDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId || !bindForm.xuiEmail.trim() || (bindRequiresTakeover() && !bindForm.takeover)" @click="bindNode">绑定</el-button>
+      <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId" @click="bindNode">创建并绑定</el-button>
     </template>
   </el-dialog>
 

@@ -187,6 +187,44 @@ test('binding refreshes remote identity without creating or modifying the remote
   assert.equal(remoteWriteCalls, 0);
 });
 
+test('managed binding creates a remote client with an automatically generated identifier', async () => {
+  let storedNode: any;
+  let createInput: any;
+  const serviceNode = { id: 'service-node-1', inboundId: 12, trafficLimitGb: 100 };
+  const prisma = {
+    customer: { findUnique: async () => ({ id: 'customer-1', name: '马来用户', loginUsername: 'malai' }) },
+    serviceNode: { findUnique: async () => serviceNode },
+    customerNode: {
+      findFirst: async () => null,
+      create: async ({ data }: any) => {
+        storedNode = { id: 'customer-node-1', ...data, trafficLimitGb: 100 };
+        return storedNode;
+      },
+      findUnique: async () => storedNode,
+      delete: async () => ({})
+    }
+  } as any;
+  const xui = {
+    customerClientEmail: (_name: string, loginUsername: string, inboundId: number) => `${loginUsername}-${inboundId}`,
+    createCustomerNodeRemoteClient: async (_customerId: string, _customerNodeId: string, input: any) => {
+      createInput = input;
+      return { created: true, remoteWrite: true, binding: storedNode };
+    }
+  } as any;
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
+
+  await service.bindCustomerNode('customer-1', {
+    serviceNodeId: 'service-node-1',
+    remoteAction: 'create',
+    remoteControl: 'fully_managed',
+    takeover: true,
+    trafficLimitGb: 100
+  });
+
+  assert.equal(storedNode.xuiEmail, 'malai-12');
+  assert.equal(createInput.email, 'malai-12');
+});
+
 test('retrying a service config task only synchronizes current config and never creates an inbound', async () => {
   let createCalls = 0;
   let syncCalls = 0;
