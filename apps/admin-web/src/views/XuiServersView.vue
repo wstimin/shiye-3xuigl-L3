@@ -649,9 +649,10 @@ function removePendingId(source: Set<string>, id: string) {
   return next;
 }
 
-function showError(_err: unknown, fallback: string) {
-  error.value = fallback;
-  ElMessage.error(fallback);
+function showError(err: unknown, fallback: string) {
+  const message = err instanceof Error && err.message ? err.message : fallback;
+  error.value = message;
+  ElMessage.error(message);
 }
 
 onMounted(loadServers);
