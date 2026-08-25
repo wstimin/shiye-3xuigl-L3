@@ -371,8 +371,8 @@ export class NodesService {
           input = {
             ...input,
             encryption: remoteValidation.encryption as 'none' | 'tls' | 'reality',
-            transport: remoteValidation.transportConfig.transport as 'tcp' | 'ws' | 'grpc' | 'httpupgrade' | 'xhttp',
             ...remoteValidation.transportConfig,
+            transport: remoteValidation.transportConfig.transport as 'tcp' | 'ws' | 'grpc' | 'httpupgrade' | 'xhttp',
             realityTarget: remoteValidation.realityTarget,
             realityServerName: remoteValidation.realityServerName,
             realityMinClientVersion: remoteValidation.realityMinClientVersion

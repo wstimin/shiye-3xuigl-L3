@@ -287,8 +287,8 @@ function handleImportStrategyChange(strategy: 'local_only' | 'target_panel') {
   if (strategy === 'local_only' && importForm.conflict === 'takeover') importForm.conflict = 'reject';
 }
 
-function handleRoutePushRemoteChange(pushRemote: boolean) {
-  if (pushRemote) routeForm.ownership = 'managed';
+function handleRoutePushRemoteChange(pushRemote: string | number | boolean) {
+  if (pushRemote === true) routeForm.ownership = 'managed';
 }
 
 function handleRouteOutboundChange(outboundId: string) {
