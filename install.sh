@@ -641,12 +641,26 @@ WantedBy=multi-user.target
 SERVICE
 }
 
+installed_release_version() {
+  node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(String(pkg.version || ""));' "${APP_DIR}/package.json" 2>/dev/null
+}
+
+api_health_matches_installed_release() {
+  health_url="$1"
+  expected_version="$(installed_release_version)" || return 1
+  [ -n "${expected_version}" ] || return 1
+
+  health_payload="$(curl -fsS "${health_url}" 2>/dev/null)" || return 1
+  actual_version="$(printf '%s' "${health_payload}" | node -e 'let data = ""; process.stdin.on("data", (chunk) => { data += chunk; }); process.stdin.on("end", () => { try { process.stdout.write(String(JSON.parse(data).version || "")); } catch {} });' 2>/dev/null)" || return 1
+  [ "${actual_version}" = "${expected_version}" ]
+}
+
 wait_for_api_health_soft() {
   health_url="http://127.0.0.1:${PORT}/api/health"
   attempts="${1:-30}"
   attempt=1
   while [ "${attempt}" -le "${attempts}" ]; do
-    if curl -fsS "${health_url}" >/dev/null 2>&1; then return 0; fi
+    if api_health_matches_installed_release "${health_url}"; then return 0; fi
     if ! systemctl is-active --quiet "${APP_NAME}"; then return 1; fi
     sleep 2
     attempt=$((attempt + 1))
@@ -660,8 +674,8 @@ wait_for_api_health() {
   attempts=30
   attempt=1
   while [ "${attempt}" -le "${attempts}" ]; do
-    if curl -fsS "${health_url}" >/dev/null 2>&1; then
-      log "API health check passed"
+    if api_health_matches_installed_release "${health_url}"; then
+      log "API health check passed for release $(installed_release_version)"
       return 0
     fi
 
@@ -678,7 +692,7 @@ wait_for_api_health() {
 
   systemctl --no-pager --full status "${APP_NAME}" || true
   journalctl -u "${APP_NAME}" -n 120 --no-pager --full || true
-  die "API health check did not pass after $((attempts * 2)) seconds: ${health_url}"
+  die "API health check did not report the installed release after $((attempts * 2)) seconds: ${health_url}"
 }
 
 verify_web_routes_soft() {

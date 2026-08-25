@@ -196,7 +196,7 @@ async function bindNode() {
       method: 'POST',
       body: {
         serviceNodeId: bindForm.serviceNodeId,
-        expireAt: bindForm.expireAt || undefined,
+        expireAt: dateForApi(bindForm.expireAt),
         trafficLimitGb: bindForm.trafficLimitGb,
         remoteControl: 'fully_managed',
         remoteAction: 'create',
@@ -666,6 +666,13 @@ function formatDatePickerValue(date: Date) {
   const offsetHours = pad(Math.floor(Math.abs(timezoneOffset) / 60));
   const offsetMinutes = pad(Math.abs(timezoneOffset) % 60);
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}${sign}${offsetHours}:${offsetMinutes}`;
+}
+
+function dateForApi(value?: string | null) {
+  if (!value) return undefined;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) throw new Error('到期时间格式无效，请重新选择');
+  return new Date(timestamp).toISOString();
 }
 
 function formatDate(value?: string | null) {

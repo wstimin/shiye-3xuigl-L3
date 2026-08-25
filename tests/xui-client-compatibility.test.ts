@@ -78,6 +78,39 @@ test('official 3.6 client and inbound operations use only the documented paths',
   ]);
 });
 
+test('official 3.6 client creation accepts universal fields and lets the panel generate protocol secrets', async () => {
+  let requestBody: unknown;
+  const client = new XuiClient({
+    baseUrl: 'https://panel.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async (_input, init) => {
+      requestBody = init?.body ? JSON.parse(String(init.body)) : undefined;
+      return jsonResponse({ success: true, msg: 'Client added' });
+    }
+  });
+
+  await client.addClient(3, {
+    email: 'managed-user-3',
+    totalGB: 0,
+    expiryTime: 0,
+    tgId: 0,
+    limitIp: 0,
+    enable: true
+  });
+
+  assert.deepEqual(requestBody, {
+    client: {
+      email: 'managed-user-3',
+      totalGB: 0,
+      expiryTime: 0,
+      tgId: 0,
+      limitIp: 0,
+      enable: true
+    },
+    inboundIds: [3]
+  });
+});
+
 test('3.6 client patches preserve unrelated writable fields and omit read-only fields', async () => {
   const requests: Array<{ path: string; method: string; body: unknown }> = [];
   const client = new XuiClient({
