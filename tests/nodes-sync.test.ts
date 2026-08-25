@@ -268,6 +268,7 @@ test('editing only the node name syncs the inbound without resyncing remote clie
       }
     },
     customerNode: { updateMany: async () => ({ count: 0 }) },
+    renewalLog: { count: async () => 0 },
     syncTask: { updateMany: async () => ({ count: 0 }), upsert: async () => ({}) }
   } as any;
   const xui = {

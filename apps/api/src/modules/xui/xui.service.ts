@@ -1922,12 +1922,12 @@ export class XuiService {
       include: { serviceNode: { include: { server: true } } }
     });
     if (!customerNode) throw new NotFoundException('用户节点不存在');
+    if (customerNode.remoteControl !== 'fully_managed') throw new BadRequestException('只有完全托管账号允许从远端删除');
     const pendingRenewal = await this.prisma.renewalLog.findFirst({
       where: { customerNodeId, status: 'pending' },
       select: { id: true }
     });
     if (pendingRenewal) throw new BadRequestException('该用户节点存在待处理续费，完成自动恢复或人工对账后才能删除远端账号');
-    if (customerNode.remoteControl !== 'fully_managed') throw new BadRequestException('只有完全托管账号允许从远端删除');
     if (!customerNode.serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
     const result = await this.deleteRemoteClient(customerNode.serviceNode.server, customerNode.serviceNode.inboundId, customerNode.xuiEmail, keepTraffic, {
       customerId,

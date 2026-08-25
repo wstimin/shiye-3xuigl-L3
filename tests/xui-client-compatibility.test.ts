@@ -180,6 +180,7 @@ test('binding refresh reads identity and links without any remote write', async 
         return { ...customerNode, ...data };
       }
     },
+    renewalLog: { findFirst: async () => null },
     syncLog: { create: async () => ({}) }
   } as never, {} as never, testLocks()) as any;
   service.createAuthenticatedClient = async () => client;
