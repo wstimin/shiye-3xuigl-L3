@@ -1,3 +1,5 @@
+import { readableError } from '@shiye/shared';
+
 export type NotifyType = 'success' | 'error' | 'info' | 'warning';
 
 export type NotifyPayload = {
@@ -7,6 +9,8 @@ export type NotifyPayload = {
 };
 
 const notifyEventName = 'shiye:user-notify';
+let lastError = '';
+let lastErrorAt = 0;
 
 export function notify(payload: NotifyPayload) {
   window.dispatchEvent(new CustomEvent<NotifyPayload>(notifyEventName, { detail: payload }));
@@ -16,7 +20,12 @@ export function notifySuccess(message: string, title = '操作成功') {
   notify({ type: 'success', title, message });
 }
 
-export function notifyError(message: string, title = '操作失败') {
+export function notifyError(error: unknown, fallback = '操作失败', title = '操作失败') {
+  const message = readableError(error, fallback);
+  const now = Date.now();
+  if (message === lastError && now - lastErrorAt < 1200) return;
+  lastError = message;
+  lastErrorAt = now;
   notify({ type: 'error', title, message });
 }
 

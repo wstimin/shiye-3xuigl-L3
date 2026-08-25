@@ -15,7 +15,9 @@ import {
   TicketCheck,
   Users
 } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { notifyError } from '../notify';
 
 type BusinessActivity = {
   key: string;
@@ -138,8 +140,8 @@ async function loadDashboard() {
     jobSettings.value = settingsResult;
     lastDisableExpired.value = statusResult.lastDisableExpired;
     lastTrafficSync.value = statusResult.lastTrafficSync;
-  } catch {
-    error.value = '加载失败';
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -154,10 +156,9 @@ async function saveJobSettings(patch: Partial<JobSettings>) {
     jobSettings.value = await api<JobSettings>('/api/admin/jobs/settings', { method: 'PATCH', body: patch });
     ElMessage.success('任务设置已保存');
     return true;
-  } catch {
+  } catch (caught) {
     jobSettings.value = previous;
-    error.value = '保存失败';
-    ElMessage.error(error.value);
+    notifyError(caught, '保存失败');
     return false;
   } finally {
     jobSettingsSaving.value = false;
@@ -195,8 +196,7 @@ async function runDisableExpiredNodes() {
     await loadDashboard();
     return result;
   } catch (err) {
-    error.value = '执行失败';
-    ElMessage.error(error.value);
+    notifyError(err, '执行失败');
     throw err;
   } finally {
     jobRunning.value = false;
@@ -212,8 +212,7 @@ async function runTrafficSync() {
     await loadDashboard();
     return result;
   } catch (err) {
-    error.value = '同步失败';
-    ElMessage.error(error.value);
+    notifyError(err, '同步失败');
     throw err;
   } finally {
     trafficJobRunning.value = false;

@@ -2,12 +2,12 @@ export type XuiAuth =
   | { kind: 'token'; token: string }
   | { kind: 'password'; username: string; password: string };
 
-export type XuiApiProfile = 'legacy' | 'v3.6';
+export type XuiApiProfile = 'v3.6';
 
 export type XuiPanelCapabilities = {
   apiProfile: XuiApiProfile;
   detectedVersion?: string;
-  source: 'openapi' | 'fallback';
+  source: 'openapi';
   openApiVersion?: string;
 };
 
@@ -17,6 +17,7 @@ export type XuiClientOptions = {
   auth?: XuiAuth;
   apiProfile?: XuiApiProfile;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 };
 
 export type XuiRequestOptions = {
@@ -51,7 +52,7 @@ export class XuiClient {
       ...options.headers
     };
 
-    const response = await this.fetchImpl(this.url(endpoint), {
+    const response = await this.fetchWithTimeout(endpoint, {
       method: options.method || (options.body ? 'POST' : 'GET'),
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined
@@ -73,7 +74,7 @@ export class XuiClient {
       ...options.headers
     };
 
-    const response = await this.fetchImpl(this.url(endpoint), {
+    const response = await this.fetchWithTimeout(endpoint, {
       method: options.method || (options.body ? 'POST' : 'GET'),
       headers,
       body: options.body ? this.encodeForm(options.body) : undefined
@@ -88,11 +89,7 @@ export class XuiClient {
 
   async login(body: { username: string; password: string }) {
     await this.refreshCsrfToken(false);
-    const response = await this.formRequest('/login', {
-      method: 'POST',
-      headers: this.csrfHeaders(),
-      body
-    });
+    const response = await this.request('/login', { method: 'POST', headers: this.csrfHeaders(), body });
     await this.refreshCsrfToken(true);
     return response;
   }
@@ -114,7 +111,7 @@ export class XuiClient {
   }
 
   usesApiProfile(profile: XuiApiProfile) {
-    return this.options.apiProfile === profile;
+    return profile === 'v3.6';
   }
 
   getOpenApi() {
@@ -134,20 +131,21 @@ export class XuiClient {
       ].every((path) => path in paths);
       const info = this.objectValue(document.info);
       const rawVersion = typeof info.version === 'string' ? info.version.trim() : '';
+      if (!supportsV36) {
+        throw new XuiClientError('当前面板不支持 3x-ui 3.6 官方 API，请升级面板或删除后重新添加');
+      }
       return {
-        apiProfile: supportsV36 ? 'v3.6' : 'legacy',
-        detectedVersion: this.semanticVersion(rawVersion) || (supportsV36 ? undefined : rawVersion || undefined),
+        apiProfile: 'v3.6',
+        detectedVersion: this.semanticVersion(rawVersion) || rawVersion || undefined,
         source: 'openapi',
         openApiVersion: typeof document.openapi === 'string' ? document.openapi : undefined
       };
     } catch (error) {
-      if (!(error instanceof XuiClientError) || (error.status !== 404 && error.status !== 405)) throw error;
-      return { apiProfile: 'legacy', source: 'fallback' };
+      if (error instanceof XuiClientError && (error.status === 404 || error.status === 405)) {
+        throw new XuiClientError('当前面板不支持 3x-ui 3.6 官方 API，请升级面板或删除后重新添加', error.status, error.payload);
+      }
+      throw error;
     }
-  }
-
-  getPanelSettings() {
-    return this.sessionRequest('/panel/setting/all', { method: 'POST' });
   }
 
   getNewX25519Cert() {
@@ -155,19 +153,19 @@ export class XuiClient {
   }
 
   scanRealityTarget(target: string) {
-    return this.formRequest('/panel/api/server/scanRealityTarget', { method: 'POST', body: { target } });
+    return this.request('/panel/api/server/scanRealityTarget', { method: 'POST', body: { target } });
   }
 
   scanRealityTargets(targets?: string) {
-    return this.formRequest('/panel/api/server/scanRealityTargets', { method: 'POST', body: { targets: targets || '' } });
+    return this.request('/panel/api/server/scanRealityTargets', { method: 'POST', body: { targets: targets || '' } });
   }
 
   addInbound(body: unknown) {
-    return this.formRequest('/panel/api/inbounds/add', { method: 'POST', body: this.inboundFormBody(body) });
+    return this.request('/panel/api/inbounds/add', { method: 'POST', body: this.inboundJsonBody(body) });
   }
 
   updateInbound(id: number, body: unknown) {
-    return this.formRequest(`/panel/api/inbounds/update/${encodeURIComponent(String(id))}`, { method: 'POST', body: this.inboundFormBody(body) });
+    return this.request(`/panel/api/inbounds/update/${encodeURIComponent(String(id))}`, { method: 'POST', body: this.inboundJsonBody(body) });
   }
 
   deleteInbound(id: number) {
@@ -175,12 +173,11 @@ export class XuiClient {
   }
 
   setInboundEnable(id: number, enable: boolean) {
-    return this.formRequest(`/panel/api/inbounds/setEnable/${encodeURIComponent(String(id))}`, { method: 'POST', body: { enable } });
+    return this.request(`/panel/api/inbounds/setEnable/${encodeURIComponent(String(id))}`, { method: 'POST', body: { enable } });
   }
 
   resetInboundTraffic(id: number) {
-    if (this.isV36()) return this.request(`/panel/api/inbounds/${encodeURIComponent(String(id))}/resetTraffic`, { method: 'POST' });
-    return this.request(`/panel/api/inbounds/resetTraffic/${encodeURIComponent(String(id))}`, { method: 'POST' });
+    return this.request(`/panel/api/inbounds/${encodeURIComponent(String(id))}/resetTraffic`, { method: 'POST' });
   }
 
   listClients() {
@@ -196,45 +193,28 @@ export class XuiClient {
   }
 
   addClient(inboundId: number, client: unknown) {
-    const body = this.clientMutationBody(inboundId, client);
-    if (this.isV36()) return this.request('/panel/api/clients/add', {
+    return this.request('/panel/api/clients/add', {
       method: 'POST',
       body: { client: this.v36ClientPayload(client), inboundIds: [inboundId] }
     });
-    return this.withLegacyFallback(
-      () => this.formRequest('/panel/api/inbounds/addClient', { method: 'POST', body }),
-      () => this.request('/panel/api/clients/add', { method: 'POST', body: { client, inboundIds: [inboundId] } })
-    );
   }
 
   async updateClient(inboundId: number, clientId: string, client: unknown) {
-    const body = this.clientMutationBody(inboundId, client);
     const email = this.clientEmail(client) || clientId;
-    if (this.isV36()) {
-      const current = await this.getClientRecord(clientId || email);
-      return this.request(`/panel/api/clients/update/${encodeURIComponent(clientId || email)}`, {
-        method: 'POST',
-        body: this.v36ClientPayload(client, current)
-      });
-    }
-    return this.withLegacyFallback(
-      () => this.formRequest(`/panel/api/inbounds/updateClient/${encodeURIComponent(clientId)}`, { method: 'POST', body }),
-      () => this.request(`/panel/api/clients/update/${encodeURIComponent(email)}`, { method: 'POST', body: client })
-    );
+    const current = await this.getClientRecord(clientId || email);
+    return this.request(`/panel/api/clients/update/${encodeURIComponent(clientId || email)}`, {
+      method: 'POST',
+      body: this.v36ClientPayload(client, current)
+    });
   }
 
-  deleteClient(inboundId: number, email: string, clientId?: string, keepTraffic = false) {
-    if (this.isV36()) {
-      return this.request(`/panel/api/clients/${encodeURIComponent(email)}/detach`, { method: 'POST', body: { inboundIds: [inboundId] } });
-    }
-    const endpoint = clientId
-      ? `/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/delClient/${encodeURIComponent(clientId)}`
-      : `/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/delClientByEmail/${encodeURIComponent(email)}`;
-    const legacyQuery = keepTraffic ? '?keepTraffic=1' : '';
-    return this.withLegacyFallback(
-      () => this.request(endpoint, { method: 'POST' }),
-      () => this.request(`/panel/api/clients/del/${encodeURIComponent(email)}${legacyQuery}`, { method: 'POST' })
-    );
+  deleteClient(_inboundId: number, email: string, _clientId?: string, keepTraffic = false) {
+    const query = keepTraffic ? '?keepTraffic=1' : '';
+    return this.request(`/panel/api/clients/del/${encodeURIComponent(email)}${query}`, { method: 'POST' });
+  }
+
+  detachClient(inboundId: number, email: string) {
+    return this.request(`/panel/api/clients/${encodeURIComponent(email)}/detach`, { method: 'POST', body: { inboundIds: [inboundId] } });
   }
 
   getClient(email: string) {
@@ -242,11 +222,8 @@ export class XuiClient {
   }
 
   resetClientTraffic(inboundId: number, email: string) {
-    if (this.isV36()) return this.request(`/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`, { method: 'POST' });
-    return this.withLegacyFallback(
-      () => this.request(`/panel/api/inbounds/${encodeURIComponent(String(inboundId))}/resetClientTraffic/${encodeURIComponent(email)}`, { method: 'POST' }),
-      () => this.request(`/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`, { method: 'POST' })
-    );
+    void inboundId;
+    return this.request(`/panel/api/clients/resetTraffic/${encodeURIComponent(email)}`, { method: 'POST' });
   }
 
   resetTraffic(inboundId: number, email: string) {
@@ -254,11 +231,7 @@ export class XuiClient {
   }
 
   getClientTraffic(email: string) {
-    if (this.isV36()) return this.request(`/panel/api/clients/traffic/${encodeURIComponent(email)}`);
-    return this.withLegacyFallback(
-      () => this.request(`/panel/api/inbounds/getClientTraffics/${encodeURIComponent(email)}`),
-      () => this.request(`/panel/api/clients/traffic/${encodeURIComponent(email)}`)
-    );
+    return this.request(`/panel/api/clients/traffic/${encodeURIComponent(email)}`);
   }
 
   clientTraffic(email: string) {
@@ -266,19 +239,11 @@ export class XuiClient {
   }
 
   clientsLastOnline() {
-    if (this.isV36()) return this.request('/panel/api/clients/lastOnline', { method: 'POST' });
-    return this.withLegacyFallback(
-      () => this.request('/panel/api/inbounds/lastOnline', { method: 'POST' }),
-      () => this.request('/panel/api/clients/lastOnline', { method: 'POST' })
-    );
+    return this.request('/panel/api/clients/lastOnline', { method: 'POST' });
   }
 
   onlineClients() {
-    if (this.isV36()) return this.request('/panel/api/clients/onlines', { method: 'POST' });
-    return this.withLegacyFallback(
-      () => this.request('/panel/api/inbounds/onlines', { method: 'POST' }),
-      () => this.request('/panel/api/clients/onlines', { method: 'POST' })
-    );
+    return this.request('/panel/api/clients/onlines', { method: 'POST' });
   }
 
   clientLinks(email: string) {
@@ -290,7 +255,7 @@ export class XuiClient {
   }
 
   getXrayConfig() {
-    return this.sessionRequest('/panel/xray/', { method: 'POST' });
+    return this.request('/panel/api/xray/', { method: 'POST' });
   }
 
   listOutboundSubscriptions() {
@@ -302,7 +267,7 @@ export class XuiClient {
   }
 
   updateXrayConfig(body: { xraySetting: string; outboundTestUrl?: string }) {
-    return this.sessionFormRequest('/panel/xray/update', { method: 'POST', body });
+    return this.formRequest('/panel/api/xray/update', { method: 'POST', body });
   }
 
   restartXrayService() {
@@ -323,37 +288,23 @@ export class XuiClient {
     return `${baseUrl}${basePath}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   }
 
+  private async fetchWithTimeout(endpoint: string, init: RequestInit) {
+    const controller = new AbortController();
+    const timeoutMs = this.options.timeoutMs ?? 30_000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await this.fetchImpl(this.url(endpoint), { ...init, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) throw new XuiClientError(`3x-ui 请求超时（${timeoutMs}ms）：${endpoint}`);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private authHeaders(): Record<string, string> {
     if (this.options.auth?.kind === 'token') return { Authorization: `Bearer ${this.options.auth.token}` };
     return {};
-  }
-
-  private async sessionRequest<T>(endpoint: string, options: XuiRequestOptions = {}): Promise<T> {
-    this.assertSessionAuth(endpoint);
-    await this.ensureCsrfToken();
-    try {
-      return await this.request<T>(endpoint, { ...options, headers: { ...this.csrfHeaders(), ...options.headers } });
-    } catch (error) {
-      if (!(error instanceof XuiClientError) || error.status !== 403) throw error;
-      await this.refreshCsrfToken(true);
-      return this.request<T>(endpoint, { ...options, headers: { ...this.csrfHeaders(), ...options.headers } });
-    }
-  }
-
-  private async sessionFormRequest<T>(endpoint: string, options: XuiFormRequestOptions = {}): Promise<T> {
-    this.assertSessionAuth(endpoint);
-    await this.ensureCsrfToken();
-    try {
-      return await this.formRequest<T>(endpoint, { ...options, headers: { ...this.csrfHeaders(), ...options.headers } });
-    } catch (error) {
-      if (!(error instanceof XuiClientError) || error.status !== 403) throw error;
-      await this.refreshCsrfToken(true);
-      return this.formRequest<T>(endpoint, { ...options, headers: { ...this.csrfHeaders(), ...options.headers } });
-    }
-  }
-
-  private async ensureCsrfToken() {
-    if (!this.csrfToken) await this.refreshCsrfToken(true);
   }
 
   private async refreshCsrfToken(authenticated: boolean) {
@@ -366,12 +317,6 @@ export class XuiClient {
 
   private csrfHeaders(): Record<string, string> {
     return this.csrfToken ? { 'X-CSRF-Token': this.csrfToken } : {};
-  }
-
-  private assertSessionAuth(endpoint: string) {
-    if (!this.sessionCookie) {
-      throw new XuiClientError(`${endpoint} requires 3x-ui username/password session authentication; API token authentication only covers /panel/api endpoints`);
-    }
   }
 
   private cookieHeaders(): Record<string, string> {
@@ -413,7 +358,7 @@ export class XuiClient {
     return body as Record<string, unknown>;
   }
 
-  private inboundFormBody(body: unknown): Record<string, unknown> {
+  private inboundJsonBody(body: unknown): Record<string, unknown> {
     const source = this.formBody(body);
     const result: Record<string, unknown> = {};
     for (const key of [
@@ -438,13 +383,14 @@ export class XuiClient {
     for (const key of ['settings', 'streamSettings', 'sniffing']) {
       const value = source[key];
       if (value === undefined || value === null) continue;
-      result[key] = typeof value === 'string' ? value : JSON.stringify(value);
+      if (typeof value !== 'string') result[key] = value;
+      else try {
+          result[key] = JSON.parse(value) as unknown;
+        } catch {
+          throw new XuiClientError(`3x-ui v3.6 inbound field ${key} must contain valid JSON`);
+        }
     }
     return result;
-  }
-
-  private clientMutationBody(inboundId: number, client: unknown): Record<string, unknown> {
-    return { id: inboundId, settings: JSON.stringify({ clients: [client] }) };
   }
 
   private clientEmail(client: unknown) {
@@ -506,10 +452,6 @@ export class XuiClient {
     return new XuiClientError(`3x-ui request failed: ${status}${suffix}`, status, payload);
   }
 
-  private isV36() {
-    return this.options.apiProfile === 'v3.6';
-  }
-
   private openApiDocument(payload: unknown): Record<string, unknown> {
     const root = this.objectValue(payload);
     const candidate = root.obj ?? root.data ?? payload;
@@ -524,15 +466,6 @@ export class XuiClient {
 
   private semanticVersion(value: string) {
     return value.match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/)?.[0];
-  }
-
-  private async withLegacyFallback<T>(primary: () => Promise<T>, legacy: () => Promise<T>): Promise<T> {
-    try {
-      return await primary();
-    } catch (error) {
-      if (!(error instanceof XuiClientError) || (error.status !== 404 && error.status !== 405)) throw error;
-      return legacy();
-    }
   }
 
   private extractCsrfToken(payload: unknown) {

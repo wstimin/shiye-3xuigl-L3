@@ -32,7 +32,9 @@ import {
   TriangleAlert,
   XCircle
 } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { notifyError } from '../notify';
 
 type CheckStatus = 'ok' | 'warning' | 'error' | 'skipped';
 type CheckMeta = { label: string; value: string };
@@ -164,9 +166,9 @@ async function loadDiagnostics(notify = false) {
   try {
     diagnostics.value = await api<DiagnosticsPayload>('/api/admin/diagnostics');
     if (notify) ElMessage.success('诊断成功');
-  } catch {
-    error.value = '诊断失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    if (notify) notifyError(caught, '诊断失败');
+    else error.value = readableError(caught, '诊断失败');
   } finally {
     loading.value = false;
     initialized.value = true;

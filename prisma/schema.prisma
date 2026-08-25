@@ -48,6 +48,24 @@ enum RenewalStatus {
   failed
 }
 
+enum ResourceOwnership {
+  managed
+  referenced
+  shared
+}
+
+enum ClientControlMode {
+  reference
+  subscription_managed
+  fully_managed
+}
+
+enum NodeDisabledReason {
+  expired
+  traffic_exceeded
+  admin
+}
+
 model AdminUser {
   id           String        @id @default(cuid())
   username     String        @unique @db.VarChar(80)
@@ -102,6 +120,8 @@ model XuiServer {
   serviceNodes ServiceNode[]
   syncLogs     SyncLog[]
   socksNodes   SocksNode[]
+  networkOutbounds NetworkOutbound[]
+  networkRoutes NetworkRoute[]
 
   @@index([enabled])
   @@map("xui_servers")
@@ -116,6 +136,7 @@ model ServiceNode {
   priceMonthly   Decimal        @default(0) @db.Decimal(12, 2)
   trafficLimitGb Decimal        @default(0) @db.Decimal(12, 2)
   config         Json?
+  ownership      ResourceOwnership @default(referenced)
   enabled        Boolean        @default(true)
   remark         String?        @db.Text
   createdAt      DateTime       @default(now())
@@ -123,6 +144,7 @@ model ServiceNode {
 
   server         XuiServer      @relation(fields: [serverId], references: [id], onDelete: Cascade)
   customerNodes  CustomerNode[]
+  networkRoutes  NetworkRoute[]
 
   @@index([serverId])
   @@unique([serverId, inboundId])
@@ -140,8 +162,10 @@ model CustomerNode {
   trafficLimitGb Decimal       @default(0) @db.Decimal(12, 2)
   usedTrafficGb  Decimal       @default(0) @db.Decimal(12, 2)
   status         AccountStatus @default(active)
+  disabledReason NodeDisabledReason?
   lastSyncedAt   DateTime?
   config         Json?
+  remoteControl  ClientControlMode @default(reference)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -150,6 +174,7 @@ model CustomerNode {
   renewalLogs    RenewalLog[]
 
   @@unique([customerId, serviceNodeId])
+  @@index([serviceNodeId, xuiEmail])
   @@index([status])
   @@index([expireAt])
   @@map("customer_nodes")
@@ -175,6 +200,57 @@ model SocksNode {
   @@index([sourceServerId])
   @@index([remoteOutboundTag])
   @@map("socks_nodes")
+}
+
+model NetworkOutbound {
+  id                String            @id @default(cuid())
+  serverId          String
+  name              String            @db.VarChar(120)
+  tag               String            @db.VarChar(160)
+  protocol          String            @db.VarChar(40)
+  ownership         ResourceOwnership @default(referenced)
+  sourceFormat      String?           @db.VarChar(40)
+  sourceServerId    String?           @db.VarChar(191)
+  rawInput          Json?
+  normalizedConfig  Json
+  remoteFingerprint String?           @db.VarChar(64)
+  lastSyncedAt      DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  server            XuiServer          @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  routes            NetworkRoute[]
+
+  @@unique([serverId, tag])
+  @@index([serverId, ownership])
+  @@map("network_outbounds")
+}
+
+model NetworkRoute {
+  id                String            @id @default(cuid())
+  serverId          String
+  serviceNodeId     String?
+  outboundId        String?
+  name              String            @db.VarChar(120)
+  remoteKey         String            @db.VarChar(191)
+  remoteOrder       Int?
+  ownership         ResourceOwnership @default(referenced)
+  matchConfig       Json?
+  normalizedConfig  Json
+  remoteFingerprint String?           @db.VarChar(64)
+  lastSyncedAt      DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  server            XuiServer          @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serviceNode       ServiceNode?       @relation(fields: [serviceNodeId], references: [id], onDelete: SetNull)
+  outbound          NetworkOutbound?   @relation(fields: [outboundId], references: [id], onDelete: SetNull)
+
+  @@unique([serverId, remoteKey])
+  @@index([serverId, ownership])
+  @@index([serviceNodeId])
+  @@index([outboundId])
+  @@map("network_routes")
 }
 
 model CardBatch {
@@ -310,8 +386,10 @@ model BalanceLog {
 
 model RenewalLog {
   id             String        @id @default(cuid())
+  idempotencyKey String?       @unique @db.VarChar(160)
   customerId     String
   customerNodeId String?
+  balanceLogId   String?       @db.VarChar(191)
   months         Int
   amount         Decimal       @db.Decimal(12, 2)
   status         RenewalStatus
@@ -319,11 +397,13 @@ model RenewalLog {
   afterExpireAt  DateTime?
   detail         Json?
   createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   customerNode   CustomerNode? @relation(fields: [customerNodeId], references: [id], onDelete: SetNull)
 
   @@index([customerId, createdAt])
+  @@index([status, updatedAt])
   @@map("renewal_logs")
 }
 

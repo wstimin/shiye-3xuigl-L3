@@ -24,7 +24,9 @@ import {
   Upload,
   X
 } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { notifyError } from '../notify';
 
 type BrandSettings = { brandName: string; logoDataUrl: string };
 type BusinessSettings = { cardPurchaseUrl: string };
@@ -100,7 +102,7 @@ async function loadSettings() {
     applySettings(await fetchSettings());
     return true;
   } catch (err) {
-    showError(err, '加载系统配置失败');
+    error.value = readableError(err, '加载系统配置失败');
     return false;
   } finally {
     loading.value = false;
@@ -260,17 +262,17 @@ async function onLogoSelected(event: Event) {
   input.value = '';
   if (!file) return;
   if (!file.type.startsWith('image/')) {
-    ElMessage.error('请选择图片文件');
+    notifyError('请选择图片文件');
     return;
   }
   if (file.size > 3 * 1024 * 1024) {
-    ElMessage.error('Logo 图片不能超过 3MB');
+    notifyError('Logo 图片不能超过 3MB');
     return;
   }
   try {
     brandForm.logoDataUrl = await imageToDataUrl(file, 256);
-  } catch {
-    ElMessage.error('图片读取失败');
+  } catch (caught) {
+    notifyError(caught, '图片读取失败');
   }
 }
 
@@ -312,8 +314,8 @@ async function copyText(value: string, message = '地址已复制') {
       textarea.remove();
     }
     ElMessage.success(message);
-  } catch {
-    ElMessage.error('复制失败，请手动复制');
+  } catch (caught) {
+    notifyError(caught, '复制失败，请手动复制');
   }
 }
 
@@ -344,9 +346,7 @@ function validateAdminPath(value: string) {
 }
 
 function showError(err: unknown, fallback: string) {
-  const message = err instanceof Error && err.message ? err.message : fallback;
-  error.value = message;
-  ElMessage.error(message);
+  notifyError(err, fallback);
 }
 
 function imageToDataUrl(file: File, maxSize: number) {

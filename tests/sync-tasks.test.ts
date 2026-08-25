@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NodesService } from '../apps/api/src/modules/nodes/nodes.service.js';
+import { testLocks } from './test-locks.js';
 
 const encryption = {} as any;
 
@@ -17,7 +18,7 @@ test('repeated sync failures upsert one task and increment the attempt count', a
       }
     }
   };
-  const service = new NodesService(prisma, encryption, {} as any) as any;
+  const service = new NodesService(prisma, encryption, {} as any, testLocks()) as any;
   await service.failSyncTask('service-node', 'node-1', 'service-config', new Error('remote offline'));
   await service.failSyncTask('service-node', 'node-1', 'service-config', new Error('remote offline'));
   assert.equal(records.size, 1);
@@ -35,7 +36,7 @@ test('failed task retry keeps the task unresolved and records another attempt', 
       updateMany: async () => { resolved += 1; return { count: 1 }; }
     }
   };
-  const service = new NodesService(prisma, encryption, { syncServiceNodeRemoteConfig: async () => { throw new Error('still offline'); } } as any);
+  const service = new NodesService(prisma, encryption, { syncServiceNodeRemoteConfig: async () => { throw new Error('still offline'); } } as any, testLocks());
   await assert.rejects(() => service.retrySyncTask('task-1'), /still offline/);
   assert.equal(attempts, 2);
   assert.equal(resolved, 0);

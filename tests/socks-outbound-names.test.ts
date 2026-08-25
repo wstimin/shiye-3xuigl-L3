@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { XuiService } from '../apps/api/src/modules/xui/xui.service.js';
+import { testLocks } from './test-locks.js';
 
 function serviceNode(config: Record<string, unknown>) {
   return {
@@ -8,6 +9,7 @@ function serviceNode(config: Record<string, unknown>) {
     serverId: 'server-1',
     inboundId: 12,
     name: '香港路由',
+    ownership: 'managed',
     config,
     server: { id: 'server-1', enabled: true, baseUrl: 'https://panel.example.com', config: {} }
   };
@@ -16,7 +18,7 @@ function serviceNode(config: Record<string, unknown>) {
 function remoteClient(xraySetting: Record<string, unknown>, submitted: { value?: Record<string, unknown> }) {
   return {
     getInbound: async () => ({ success: true, obj: { id: 12, tag: 'inbound-12' } }),
-    getXrayConfig: async () => ({ success: true, obj: { xraySetting } }),
+    getXrayConfig: async () => ({ success: true, obj: { xraySetting: submitted.value || xraySetting } }),
     updateXrayConfig: async (payload: { xraySetting: string }) => {
       submitted.value = JSON.parse(payload.xraySetting);
       return { success: true };
@@ -68,7 +70,7 @@ test('SOCKS synchronization replaces the legacy tag with the readable outbound n
     syncTask: { updateMany: async () => ({ count: 0 }) },
     syncLog: { create: async () => ({}) }
   };
-  const service = new XuiService(prisma as never, { decrypt: (value: string) => value } as never) as any;
+  const service = new XuiService(prisma as never, { decrypt: (value: string) => value } as never, testLocks()) as any;
   service.createAuthenticatedClient = async () => remoteClient(xraySetting, submitted);
 
   const result = await service.syncServiceNodeRemoteConfig(node.id);
@@ -115,7 +117,7 @@ test('SOCKS remove-only synchronization removes the stored readable tag and clea
     syncTask: { updateMany: async () => ({ count: 0 }) },
     syncLog: { create: async () => ({}) }
   };
-  const service = new XuiService(prisma as never, { decrypt: (value: string) => value } as never) as any;
+  const service = new XuiService(prisma as never, { decrypt: (value: string) => value } as never, testLocks()) as any;
   const client = remoteClient(xraySetting, submitted);
   client.getInbound = async () => {
     throw new Error('remove-only must not load the inbound');

@@ -15,7 +15,9 @@ import 'element-plus/es/components/table-column/style/css';
 import 'element-plus/es/components/tag/style/css';
 import { ElAlert, ElButton, ElCollapse, ElCollapseItem, ElDatePicker, ElEmpty, ElInput, ElMessage, ElMessageBox, ElOption, ElPagination, ElSelect, ElTable, ElTableColumn, ElTag } from 'element-plus';
 import { CircleCheckBig, Landmark, ReceiptText, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2, WalletCards } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { notifyError } from '../notify';
 
 type RechargeOrder = {
   id: string;
@@ -82,8 +84,8 @@ async function loadFinance() {
     logPage.page = logResult.page;
     logPage.pageSize = logResult.pageSize;
     paymentChannels.value = channelResult;
-  } catch {
-    error.value = '加载失败';
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -99,8 +101,8 @@ async function loadOrders(resetPage = false) {
     orderTotal.value = result.total;
     orderPage.page = result.page;
     orderPage.pageSize = result.pageSize;
-  } catch {
-    error.value = '加载失败';
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -116,8 +118,8 @@ async function loadLogs(resetPage = false) {
     logTotal.value = result.total;
     logPage.page = result.page;
     logPage.pageSize = result.pageSize;
-  } catch {
-    error.value = '加载失败';
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -181,9 +183,8 @@ async function clearRechargeHistory() {
     await api('/api/admin/recharge-orders/history', { method: 'DELETE', body: { ...range, confirmText: 'CLEAR_RECHARGE_HISTORY' } });
     ElMessage.success('清除成功');
     await loadFinance();
-  } catch {
-    error.value = '清除失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '清除失败');
   } finally {
     clearingOrders.value = false;
   }
@@ -198,9 +199,8 @@ async function clearBalanceHistory() {
     await api('/api/admin/balance-logs/history', { method: 'DELETE', body: { ...range, confirmText: 'CLEAR_BALANCE_HISTORY' } });
     ElMessage.success('清除成功');
     await loadFinance();
-  } catch {
-    error.value = '清除失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '清除失败');
   } finally {
     clearingLogs.value = false;
   }

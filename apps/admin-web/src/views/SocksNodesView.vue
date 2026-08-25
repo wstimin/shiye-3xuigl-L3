@@ -30,8 +30,10 @@ import {
   ShieldCheck,
   Trash2
 } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { entityAvatarStyle, entityInitial } from '../entity-avatar';
+import { notifyError } from '../notify';
 
 type SyncTask = { id: string; action: string; status: string; message?: string | null; attemptCount: number; updatedAt: string };
 type OperationResult = { state?: 'success' | 'partial' | 'failed'; message?: string; pendingActions?: string[] };
@@ -112,7 +114,7 @@ async function loadNodes() {
     const firstEnabledServer = enabledServers.value[0];
     if (!syncServerId.value && firstEnabledServer) syncServerId.value = firstEnabledServer.id;
   } catch (err) {
-    showError(err, '加载出站节点失败');
+    error.value = readableError(err, '加载出站节点失败');
   } finally {
     loading.value = false;
   }
@@ -125,7 +127,7 @@ async function saveNode() {
   try {
     const path = editingId.value ? `/api/admin/socks-nodes/${editingId.value}` : '/api/admin/socks-nodes';
     const result = await api<OperationResult>(path, { method: editingId.value ? 'PATCH' : 'POST', body: cleanFormBody() });
-    if (result.state === 'partial') ElMessage.warning(result.message || '保存成功，同步失败');
+    if (result.state === 'partial') ElMessage.warning(readableError(result.message, '保存成功，但部分同步失败'));
     else ElMessage.success(editingId.value ? '出站节点已更新' : '出站节点已添加');
     dialogVisible.value = false;
     resetForm();
@@ -205,7 +207,7 @@ async function revealNodeSecret() {
 async function removeNode(node: SocksNode) {
   if (deletingIds.value.has(node.id)) return;
   const remoteHint = isImportedNode(node)
-    ? '该节点来自远端，删除时会同步删除远端对应 SOCKS 出站和引用规则。'
+    ? '该节点来自官方面板。本次操作表示确认接管删除，并会同步删除远端对应 SOCKS 出站和全部引用规则。'
     : '该节点由本地创建，只会删除本地记录。';
   try {
     await ElMessageBox.confirm(
@@ -219,7 +221,8 @@ async function removeNode(node: SocksNode) {
   deletingIds.value = addPendingId(deletingIds.value, node.id);
   error.value = '';
   try {
-    await api(`/api/admin/socks-nodes/${node.id}`, { method: 'DELETE' });
+    const takeover = isImportedNode(node) ? '?takeover=true' : '';
+    await api(`/api/admin/socks-nodes/${node.id}${takeover}`, { method: 'DELETE' });
     ElMessage.success('出站节点已删除');
     await loadNodes();
   } catch (err) {
@@ -353,9 +356,7 @@ function removePendingId(source: Set<string>, id: string) {
 }
 
 function showError(err: unknown, fallback: string) {
-  const message = err instanceof Error && err.message ? err.message : fallback;
-  error.value = message;
-  ElMessage.error(message);
+  notifyError(err, fallback);
 }
 
 onMounted(loadNodes);

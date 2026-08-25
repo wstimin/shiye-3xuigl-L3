@@ -4,4 +4,5 @@ export * from './schemas/customer.js';
 export * from './schemas/node.js';
 export * from './schemas/payment.js';
 export * from './schemas/settings.js';
+export * from './error-message.js';
 export * from './types.js';

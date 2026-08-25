@@ -10,6 +10,7 @@
     "typecheck": "vue-tsc -b"
   },
   "dependencies": {
+    "@shiye/shared": "file:../../packages/shared",
     "@vitejs/plugin-vue": "^5.2.1",
     "element-plus": "^2.9.1",
     "lucide-vue-next": "^0.468.0",

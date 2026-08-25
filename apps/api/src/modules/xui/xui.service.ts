@@ -1,11 +1,12 @@
-import { createPrivateKey, createPublicKey, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, randomBytes, randomUUID } from 'node:crypto';
 import { BadGatewayException, BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, type AccountStatus } from '@prisma/client';
-import { xuiServerUpsertSchema } from '@shiye/shared';
+import { Prisma } from '@prisma/client';
+import { networkRouteUpsertSchema, outboundImportPreviewSchema, outboundImportSchema, remoteClientCreateSchema, remoteClientPatchSchema, xuiServerUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { XuiClient, type XuiApiProfile } from '@shiye/xui-client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EncryptionService } from '../security/encryption.service.js';
+import { DatabaseLockService } from '../../shared/database-lock.service.js';
 
 type XuiServerConfig = {
   baseUrl: string;
@@ -22,19 +23,8 @@ type PanelCompatibility = {
   detectedVersion?: string;
   apiProfile: XuiApiProfile;
   detectedAt: string;
-  source: 'openapi' | 'fallback';
+  source: 'openapi';
   openApiVersion?: string;
-};
-
-type SyncOptions = {
-  expireAt?: Date | null;
-  status?: AccountStatus;
-  trafficLimitGb?: Prisma.Decimal | number | string | null;
-  createIfMissing?: boolean;
-  requireExisting?: boolean;
-  syncServiceConfig?: boolean;
-  persistLocal?: boolean;
-  preferredClientEmail?: string;
 };
 
 type SyncLogQuery = {
@@ -66,6 +56,10 @@ type ServiceNodeConfig = {
   remoteInboundTag?: string;
   remoteInboundRemark?: string;
   remoteInboundPort?: number;
+  remoteInboundFingerprint?: string;
+  remoteInboundObservedFingerprint?: string;
+  remoteInboundDrift?: boolean;
+  remoteInboundLastCheckedAt?: string;
   remoteClientEmail?: string;
   remoteClientUuid?: string;
   remoteClientSubId?: string;
@@ -167,7 +161,11 @@ const REALITY_TARGET_CANDIDATES = [
 
 @Injectable()
 export class XuiService {
-  constructor(private readonly prisma: PrismaService, private readonly encryption: EncryptionService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
+    private readonly locks: DatabaseLockService
+  ) {}
 
   async testConnection(input: z.infer<typeof xuiServerUpsertSchema>) {
     const client = await this.createAuthenticatedClient({
@@ -176,7 +174,7 @@ export class XuiService {
       token: input.token,
       username: input.username,
       password: input.password
-    });
+    }, true, true);
 
     const inbounds = await client.listInbounds();
     this.assertXuiSuccess(inbounds);
@@ -184,7 +182,7 @@ export class XuiService {
   }
 
   async testStoredServerDraft(id: string, input: z.infer<typeof xuiServerUpsertSchema>) {
-    const client = await this.createAuthenticatedClient(await this.storedServerDraftConfig(id, input));
+    const client = await this.createAuthenticatedClient(await this.storedServerDraftConfig(id, input), true, true);
     const inbounds = await client.listInbounds();
     this.assertXuiSuccess(inbounds);
     return { connected: true, serverId: id, inboundCount: this.xuiArray(inbounds).length, inbounds };
@@ -209,7 +207,7 @@ export class XuiService {
     return {
       serverId: id,
       ...compatibility,
-      label: compatibility.detectedVersion || (compatibility.apiProfile === 'v3.6' ? '3.6 API 兼容' : 'Legacy/旧版 API')
+      label: compatibility.detectedVersion || '3.6 官方 API'
     };
   }
 
@@ -231,7 +229,7 @@ export class XuiService {
 
   async storedServerCertFiles(id: string) {
     const server = await this.prisma.xuiServer.findUnique({ where: { id } });
-    if (!server) throw new NotFoundException('3x-ui server not found');
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
 
     const client = await this.createAuthenticatedClient(server);
     return this.readWebCertFiles(client);
@@ -239,7 +237,7 @@ export class XuiService {
 
   async storedServerStatus(id: string) {
     const server = await this.prisma.xuiServer.findUnique({ where: { id } });
-    if (!server) throw new NotFoundException('3x-ui server not found');
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
 
     const client = await this.createAuthenticatedClient(server);
     const [statusPayload, versionPayload] = await Promise.all([client.serverStatus(), client.getXrayVersion()]);
@@ -255,7 +253,7 @@ export class XuiService {
 
   async storedServerClientPresence(id: string) {
     const server = await this.prisma.xuiServer.findUnique({ where: { id } });
-    if (!server) throw new NotFoundException('3x-ui server not found');
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
 
     const client = await this.createAuthenticatedClient(server);
     const [onlinePayload, lastOnlinePayload] = await Promise.all([client.onlineClients(), client.clientsLastOnline()]);
@@ -305,9 +303,20 @@ export class XuiService {
   }
 
   async syncServiceNodeRemoteConfig(serviceNodeId: string, options: { removeOnly?: boolean } = {}) {
+    const node = await this.assertManagedServiceNode(serviceNodeId);
+    return this.locks.withLock(this.locks.panelOperationKey(node.serverId), () =>
+      this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), async () => {
+        const lockedNode = await this.assertManagedServiceNode(serviceNodeId);
+        if (lockedNode.serverId !== node.serverId) throw new BadRequestException('服务节点绑定面板已被其他操作修改，请刷新后重试');
+        return this.locks.withLock(this.locks.xrayConfigKey(node.serverId), () => this.syncServiceNodeRemoteConfigUnlocked(serviceNodeId, options));
+      })
+    );
+  }
+
+  private async syncServiceNodeRemoteConfigUnlocked(serviceNodeId: string, options: { removeOnly?: boolean } = {}) {
     const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
-    if (!serviceNode) throw new NotFoundException('Service node not found');
-    if (!serviceNode.inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
+    if (!serviceNode) throw new NotFoundException('服务节点不存在');
+    if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
 
     const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
     const client = await this.createAuthenticatedClient(serviceNode.server);
@@ -325,17 +334,17 @@ export class XuiService {
     const xrayObj = this.xuiObject(this.xuiObject(xrayPayload).obj || this.xuiObject(xrayPayload).data || xrayPayload);
     const rawSetting = xrayObj.xraySetting ?? xrayObj;
     const xraySetting = this.xuiObject(rawSetting);
-    if (!Object.keys(xraySetting).length) throw new BadGatewayException('3x-ui returned an empty Xray config');
+    if (!Object.keys(xraySetting).length) throw new BadGatewayException('3x-ui 返回了空 Xray 配置');
 
     const nextConfig = this.removeManagedSocksRoute(xraySetting, serviceNode.id, inboundTag, config.remoteSocksOutboundTag);
     let action: 'removed' | 'updated' = 'removed';
     let socksDetail: Record<string, unknown> | null = null;
 
     if (!options.removeOnly && config.socksRelayEnabled) {
-      if (!config.socksNodeId) throw new BadRequestException('Socks relay enabled but no Socks node selected');
+      if (!config.socksNodeId) throw new BadRequestException('启用 Socks 中转时必须选择 Socks 节点');
       const socksNode = await this.prisma.socksNode.findUnique({ where: { id: config.socksNodeId } });
-      if (!socksNode) throw new NotFoundException('Socks node not found');
-      if (!socksNode.enabled) throw new BadRequestException('Selected Socks node is disabled');
+      if (!socksNode) throw new NotFoundException('Socks 节点不存在');
+      if (!socksNode.enabled) throw new BadRequestException('所选 Socks 节点已停用');
 
       outboundTag = this.socksOutboundTag(serviceNode.id, socksNode.name);
       const outbound = this.buildSocksOutbound(outboundTag, socksNode, serviceNode.id);
@@ -369,13 +378,15 @@ export class XuiService {
     else delete nextServiceConfig.remoteSocksOutboundTag;
     await this.prisma.serviceNode.update({
       where: { id: serviceNodeId },
-      data: { config: this.toJsonValue(nextServiceConfig) }
+      data: {
+        config: this.toJsonValue({ ...nextServiceConfig, remoteManaged: true })
+      }
     });
     await this.prisma.syncTask.updateMany({
       where: { entityType: 'service-node', entityId: serviceNodeId, action: 'service-config', status: { not: 'resolved' } },
       data: { status: 'resolved', message: null, resolvedAt: new Date() }
     });
-    await this.writeSyncLog(serviceNode.serverId, 'service-node-config-sync', 'success', `Service node ${serviceNode.name} remote config ${action}`, {
+    await this.writeSyncLog(serviceNode.serverId, 'service-node-config-sync', 'success', `服务节点 ${serviceNode.name} 的远端配置已${action === 'removed' ? '移除' : '同步'}`, {
       serviceNodeId,
       inboundId: serviceNode.inboundId,
       inboundTag,
@@ -389,6 +400,10 @@ export class XuiService {
   }
 
   async createServiceNodeInbound(input: CreateServiceInboundInput) {
+    return this.locks.withLock(this.locks.panelOperationKey(input.serverId), () => this.createServiceNodeInboundUnlocked(input));
+  }
+
+  private async createServiceNodeInboundUnlocked(input: CreateServiceInboundInput) {
     const server = await this.prisma.xuiServer.findUnique({ where: { id: input.serverId } });
     if (!server) throw new NotFoundException('3x-ui 服务器不存在');
     if (!server.enabled) throw new BadRequestException('3x-ui 服务器已停用');
@@ -460,12 +475,21 @@ export class XuiService {
           server,
           uuid: remoteClientUuid
         }).catch(() => [] as string[]);
-      await this.writeSyncLog(server.id, 'service-node-inbound-create', 'success', `Created inbound ${inboundId} for ${input.name}`, {
+      const verifiedPayload = await client.getInbound(inboundId);
+      this.assertXuiSuccess(verifiedPayload);
+      const verifiedInbound = this.remoteInboundFromPayload(verifiedPayload);
+      const verifiedStreamSettings = this.xuiObject(this.parseMaybeJson(verifiedInbound.streamSettings));
+      const verifiedTag = String(verifiedInbound.tag || tag);
+      const verifiedRemark = String(verifiedInbound.remark || payload.remark);
+      const verifiedPort = this.positiveInteger(verifiedInbound.port) || port;
+      const verifiedProtocol = String(verifiedInbound.protocol || input.protocol);
+      const verifiedEnabled = this.booleanValue(verifiedInbound.enable, input.enabled);
+      await this.writeSyncLog(server.id, 'service-node-inbound-create', 'success', `已为 ${input.name} 创建入站 ${inboundId}`, {
         inboundId,
-        port,
-        protocol: input.protocol,
-        tag,
-        reality: this.realityLogDetail(streamSettings),
+        port: verifiedPort,
+        protocol: verifiedProtocol,
+        tag: verifiedTag,
+        reality: this.realityLogDetail(verifiedStreamSettings),
         remoteClientEmail,
         remoteClientUuid,
         remoteClientSubId,
@@ -473,12 +497,24 @@ export class XuiService {
         response: this.toJsonValue(response),
         clientResponse: this.toJsonValue(clientResponse)
       }, true);
-      const reality = this.realityLogDetail(streamSettings);
+      const reality = this.realityLogDetail(verifiedStreamSettings);
+      const remoteInboundLastCheckedAt = new Date().toISOString();
+      const remoteInboundFingerprint = this.inboundFingerprint({
+        name: this.remoteInboundName(verifiedInbound, inboundId),
+        protocol: verifiedProtocol,
+        enabled: verifiedEnabled,
+        tag: verifiedTag,
+        remark: verifiedRemark,
+        port: verifiedPort,
+        streamSettings: verifiedStreamSettings
+      });
       return {
         inboundId,
-        port,
-        tag,
-        remark: String(payload.remark),
+        port: verifiedPort,
+        tag: verifiedTag,
+        remark: verifiedRemark,
+        remoteInboundFingerprint,
+        remoteInboundLastCheckedAt,
         remoteClientEmail,
         remoteClientUuid,
         remoteClientSubId,
@@ -525,30 +561,56 @@ export class XuiService {
     this.assertXuiSuccess(payload);
     const inbound = this.remoteInboundFromPayload(payload);
     const remoteClient = await this.firstClientIdentityForInbound(client, inbound, inboundId);
-    if (!remoteClient.email && !remoteClient.uuid && !remoteClient.subId) throw new BadRequestException('This 3x-ui inbound has no client. Create a client in 3x-ui first, or use automatic service-node creation.');
+    if (!remoteClient.email && !remoteClient.uuid && !remoteClient.subId) {
+      throw new BadRequestException('该 3x-ui 入站没有可绑定的客户端，请先在官方面板创建客户端，或改用自动创建入站');
+    }
     const streamSettings = this.xuiObject(this.parseMaybeJson(inbound.streamSettings));
+    const reality = this.realityLogDetail(streamSettings);
+    const name = this.remoteInboundName(inbound, inboundId);
+    const protocol = String(inbound.protocol || 'vless').trim() || 'vless';
+    const enabled = this.booleanValue(inbound.enable, true);
+    const port = this.positiveInteger(inbound.port);
+    const tag = String(inbound.tag || `inbound-${inboundId}`);
+    const remark = String(inbound.remark || '');
+    const remoteInboundLastCheckedAt = new Date().toISOString();
     return {
       inboundId,
       valid: true,
       remoteClient,
-      protocol: String(inbound.protocol || 'vless').trim() || 'vless',
+      name,
+      protocol,
       encryption: String(streamSettings.security || 'none').trim() || 'none',
-      enabled: this.booleanValue(inbound.enable, true),
-      port: this.positiveInteger(inbound.port),
-      transportConfig: this.transportConfigFromStream(streamSettings)
+      enabled,
+      port,
+      tag,
+      remark,
+      realityTarget: reality?.target,
+      realityServerName: reality?.serverName,
+      realityMinClientVersion: reality?.minClientVersion,
+      transportConfig: this.transportConfigFromStream(streamSettings),
+      remoteInboundFingerprint: this.inboundFingerprint({
+        name,
+        protocol,
+        enabled,
+        tag,
+        remark,
+        port: port || null,
+        streamSettings
+      }),
+      remoteInboundLastCheckedAt
     };
   }
 
   async updateServiceNodeInbound(input: UpdateServiceInboundInput) {
     const server = await this.prisma.xuiServer.findUnique({ where: { id: input.serverId } });
-    if (!server) throw new NotFoundException('3x-ui server not found');
-    if (!server.enabled) throw new BadRequestException('3x-ui server is disabled');
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
+    if (!server.enabled) throw new BadRequestException('3x-ui 服务器已停用');
 
     const client = await this.createAuthenticatedClient(server);
     const currentPayload = await client.getInbound(input.inboundId);
     this.assertXuiSuccess(currentPayload);
     const currentInbound = this.remoteInboundFromPayload(currentPayload);
-    if (!this.inboundIdOf(currentInbound)) throw new BadRequestException(`3x-ui inbound ${input.inboundId} does not exist`);
+    if (!this.inboundIdOf(currentInbound)) throw new BadRequestException(`3x-ui 入站 ${input.inboundId} 不存在`);
 
     const serverConfig: Record<string, unknown> = { ...this.xuiObject(server.config), baseUrl: server.baseUrl };
     if ((input.encryption || 'none') === 'reality') {
@@ -565,10 +627,10 @@ export class XuiService {
     const requestedTransport = String(input.transport || 'tcp').trim().toLowerCase() || 'tcp';
     const selectableTransport = ['tcp', 'ws', 'grpc', 'httpupgrade', 'xhttp'].includes(requestedTransport);
     if (!selectableTransport && requestedTransport !== currentTransport.transport) {
-      throw new BadRequestException(`Transport ${requestedTransport} can only be preserved from an existing 3x-ui inbound`);
+      throw new BadRequestException(`传输方式 ${requestedTransport} 只能保留现有 3x-ui 入站配置，不能在本面板中重新创建`);
     }
     if (!selectableTransport && currentSecurity !== nextSecurity) {
-      throw new BadRequestException(`Transport ${requestedTransport} does not support changing security from this panel`);
+      throw new BadRequestException(`传输方式 ${requestedTransport} 不支持在本面板中修改安全配置`);
     }
     const nextTransport = this.normalizeTransportConfig(input);
     const crossesHysteriaBoundary = this.isHysteriaProtocol(currentProtocol) !== this.isHysteriaProtocol(input.protocol);
@@ -599,12 +661,12 @@ export class XuiService {
     }
     const currentSettings = this.xuiObject(this.parseMaybeJson(currentInbound.settings));
     const port = input.port || this.positiveInteger(currentInbound.port);
-    if (!port) throw new BadRequestException('3x-ui inbound is missing a valid port');
+    if (!port) throw new BadRequestException('3x-ui 入站缺少有效端口');
     if (port !== this.positiveInteger(currentInbound.port)) {
       const rawInbounds = await client.listInbounds();
       this.assertXuiSuccess(rawInbounds);
       const occupied = this.xuiArray(rawInbounds).some((item) => this.inboundIdOf(item) !== input.inboundId && this.positiveInteger(this.xuiObject(item).port) === port);
-      if (occupied) throw new BadRequestException(`3x-ui inbound port ${port} is already in use`);
+      if (occupied) throw new BadRequestException(`3x-ui 入站端口 ${port} 已被占用`);
     }
 
     const payload = {
@@ -652,7 +714,7 @@ export class XuiService {
         verifiedApplied: true
       });
     }
-    await this.writeSyncLog(server.id, 'service-node-inbound-update', 'success', `Updated inbound ${input.inboundId} for ${input.name}`, {
+    await this.writeSyncLog(server.id, 'service-node-inbound-update', 'success', `已更新 ${input.name} 的入站 ${input.inboundId}`, {
       inboundId: input.inboundId,
       port,
       protocol: input.protocol,
@@ -662,18 +724,80 @@ export class XuiService {
       reloadResponse: reloadResponse === undefined ? undefined : this.toJsonValue(reloadResponse),
       runtimeStatus: runtimeStatus === undefined ? undefined : this.toJsonValue(runtimeStatus)
     });
-    return { updated: true, inboundId: input.inboundId, port, response, clientIdentities, runtimeReloadRequired };
+    const remoteInboundTag = String(verifiedInbound.tag || payload.tag || '');
+    const remoteInboundRemark = String(verifiedInbound.remark || input.remark || input.name);
+    const remoteInboundLastCheckedAt = new Date().toISOString();
+    const remoteInboundFingerprint = this.inboundFingerprint({
+      name: this.remoteInboundName(verifiedInbound, input.inboundId),
+      protocol: String(verifiedInbound.protocol || input.protocol),
+      enabled: this.booleanValue(verifiedInbound.enable, input.enabled),
+      tag: remoteInboundTag,
+      remark: remoteInboundRemark,
+      port: this.positiveInteger(verifiedInbound.port) || port,
+      streamSettings: this.xuiObject(this.parseMaybeJson(verifiedInbound.streamSettings))
+    });
+    return {
+      updated: true,
+      inboundId: input.inboundId,
+      port,
+      response,
+      clientIdentities,
+      runtimeReloadRequired,
+      remoteInboundTag,
+      remoteInboundRemark,
+      remoteInboundFingerprint,
+      remoteInboundLastCheckedAt
+    };
   }
 
   async setServiceNodeRemoteEnable(serviceNodeId: string, enable: boolean) {
-    const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
-    if (!serviceNode) throw new NotFoundException('Service node not found');
-    if (!serviceNode.inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
+    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.setServiceNodeRemoteEnableUnlocked(serviceNodeId, enable));
+  }
 
+  private async setServiceNodeRemoteEnableUnlocked(serviceNodeId: string, enable: boolean) {
+    const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
+    if (!serviceNode) throw new NotFoundException('服务节点不存在');
+    if (serviceNode.ownership !== 'managed') throw new BadRequestException('引用入站不能修改远端启用状态，请先明确接管');
+    if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
+    await this.assertNoPendingRenewalsForServiceNode(serviceNodeId, '修改远端入站启用状态');
     const client = await this.createAuthenticatedClient(serviceNode.server);
     const response = await client.setInboundEnable(serviceNode.inboundId, enable);
     this.assertXuiSuccess(response);
-    await this.writeSyncLog(serviceNode.serverId, 'service-node-enable-sync', 'success', `${enable ? 'Enabled' : 'Disabled'} inbound ${serviceNode.inboundId}`, {
+    const verifiedPayload = await client.getInbound(serviceNode.inboundId);
+    this.assertXuiSuccess(verifiedPayload);
+    const verifiedInbound = this.remoteInboundFromPayload(verifiedPayload);
+    if (this.booleanValue(verifiedInbound.enable, true) !== enable) throw new BadGatewayException('远端入站启用状态回读校验失败');
+    const previousConfig = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+    const verifiedStreamSettings = this.xuiObject(this.parseMaybeJson(verifiedInbound.streamSettings));
+    const remoteInboundTag = String(verifiedInbound.tag || previousConfig.remoteInboundTag || `inbound-${serviceNode.inboundId}`);
+    const remoteInboundRemark = String(verifiedInbound.remark || previousConfig.remoteInboundRemark || serviceNode.name);
+    const remoteInboundPort = this.positiveInteger(verifiedInbound.port) || previousConfig.remoteInboundPort || null;
+    const remoteInboundFingerprint = this.inboundFingerprint({
+      name: this.remoteInboundName(verifiedInbound, serviceNode.inboundId),
+      protocol: String(verifiedInbound.protocol || serviceNode.protocol),
+      enabled: enable,
+      tag: remoteInboundTag,
+      remark: remoteInboundRemark,
+      port: remoteInboundPort,
+      streamSettings: verifiedStreamSettings
+    });
+    await this.prisma.serviceNode.update({
+      where: { id: serviceNodeId },
+      data: {
+        config: this.toJsonValue({
+          ...previousConfig,
+          remoteManaged: true,
+          remoteInboundTag,
+          remoteInboundRemark,
+          remoteInboundPort: remoteInboundPort || undefined,
+          remoteInboundFingerprint,
+          remoteInboundObservedFingerprint: remoteInboundFingerprint,
+          remoteInboundDrift: false,
+          remoteInboundLastCheckedAt: new Date().toISOString()
+        })
+      }
+    });
+    await this.writeSyncLog(serviceNode.serverId, 'service-node-enable-sync', 'success', `已${enable ? '启用' : '停用'}入站 ${serviceNode.inboundId}`, {
       serviceNodeId,
       inboundId: serviceNode.inboundId,
       enable,
@@ -683,87 +807,35 @@ export class XuiService {
   }
 
   async syncServiceNodeTrafficLimit(serviceNodeId: string) {
+    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.syncServiceNodeTrafficLimitUnlocked(serviceNodeId));
+  }
+
+  private async syncServiceNodeTrafficLimitUnlocked(serviceNodeId: string) {
     const serviceNode = await this.prisma.serviceNode.findUnique({
       where: { id: serviceNodeId },
       include: {
         server: true,
-        customerNodes: { select: { id: true, customerId: true, status: true } }
+        customerNodes: { select: { id: true, customerId: true, status: true, remoteControl: true } }
       }
     });
-    if (!serviceNode) throw new NotFoundException('Service node not found');
-    if (!serviceNode.inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
-
-    const client = await this.createAuthenticatedClient(serviceNode.server);
-    const rawInbounds = await client.listInbounds();
-    this.assertXuiSuccess(rawInbounds);
-    const inbounds = this.xuiArray(rawInbounds);
+    if (!serviceNode) throw new NotFoundException('服务节点不存在');
+    if (serviceNode.ownership !== 'managed') throw new BadRequestException('引用入站不能同步远端客户端额度，请先明确接管');
+    if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
+    await this.assertNoPendingRenewalsForServiceNode(serviceNodeId, '同步客户端额度');
     const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
-    const remoteClientEmail = this.stringValue(config.remoteClientEmail);
-    const remoteClientUuid = this.stringValue(config.remoteClientUuid);
-    const remoteClientSubId = this.stringValue(config.remoteClientSubId);
     const results: Array<{ target: string; updated: boolean; skipped?: boolean; message?: string }> = [];
-    let serviceLinks: string[] | undefined;
-
-    if (remoteClientEmail || remoteClientUuid || remoteClientSubId) {
-      try {
-        const existing = await this.findClient(client, { email: remoteClientEmail, uuid: remoteClientUuid, subId: remoteClientSubId, inboundId: serviceNode.inboundId }, inbounds);
-        if (existing.exists) {
-          const uuid = existing.uuid || remoteClientUuid || randomUUID();
-          const subId = existing.subId || remoteClientSubId || this.subscriptionId(uuid);
-          const email = existing.email || remoteClientEmail || this.serviceClientEmail(serviceNode.name, serviceNode.inboundId);
-          const updateIdentifier = client.usesApiProfile('v3.6') ? existing.email || email : existing.clientId || existing.uuid || uuid;
-          const payload = await client.updateClient(existing.inboundId || serviceNode.inboundId, updateIdentifier, this.buildXuiClient({
-              protocol: serviceNode.protocol,
-              uuid,
-              subId,
-              email,
-              enabled: serviceNode.enabled,
-              expireAt: null,
-              trafficLimitGb: serviceNode.trafficLimitGb,
-              flow: this.clientFlowForServiceNode(serviceNode)
-            }));
-          this.assertXuiSuccess(payload);
-          if (serviceNode.enabled) {
-            serviceLinks = await this.requireLinksForServiceNode(client, email, subId, {
-              serverId: serviceNode.serverId,
-              inboundId: serviceNode.inboundId,
-              serviceNodeName: serviceNode.name,
-              protocol: serviceNode.protocol,
-              encryption: String(config.encryption || 'none'),
-              server: serviceNode.server,
-              uuid
-            });
-          }
-          results.push({ target: `service:${email}`, updated: true });
-        } else {
-          results.push({ target: 'service-client', updated: false, message: 'remote service client not found' });
-        }
-      } catch (error) {
-        results.push({ target: 'service-client', updated: false, message: this.errorMessage(error) });
-      }
-    } else {
-      results.push({ target: 'service-client', updated: false, skipped: true, message: 'service node has no remote client identity' });
-    }
-
-    if (serviceLinks) {
-      await this.prisma.serviceNode.update({
-        where: { id: serviceNode.id },
-        data: { config: this.toJsonValue({ ...config, remoteClientLinks: serviceLinks }) }
-      });
-    }
 
     for (const node of serviceNode.customerNodes) {
+      if (node.remoteControl === 'reference') {
+        results.push({ target: `customer:${node.id}`, updated: false, skipped: true, message: '只读引用绑定不修改远端额度' });
+        continue;
+      }
       if (!serviceNode.enabled && node.status === 'active') {
         results.push({ target: `customer:${node.id}`, updated: false, skipped: true, message: '服务节点已停用，用户节点无需继续同步为启用' });
         continue;
       }
       try {
-        await this.syncCustomerNode(node.customerId, node.id, {
-          status: node.status,
-          trafficLimitGb: serviceNode.trafficLimitGb,
-          createIfMissing: false,
-          requireExisting: true
-        });
+        await this.updateCustomerNodeRemoteQuota(node.customerId, node.id, serviceNode.trafficLimitGb);
         results.push({ target: `customer:${node.id}`, updated: true });
       } catch (error) {
         results.push({ target: `customer:${node.id}`, updated: false, message: this.errorMessage(error) });
@@ -773,7 +845,8 @@ export class XuiService {
     const updated = results.filter((item) => item.updated).length;
     const skipped = results.filter((item) => item.skipped).length;
     const failed = results.length - updated - skipped;
-    await this.writeSyncLog(serviceNode.serverId, 'service-node-traffic-limit-sync', failed ? 'partial' : 'success', `Synced traffic limit for ${serviceNode.name}`, {
+    if (failed === 0) await this.prisma.serviceNode.update({ where: { id: serviceNodeId }, data: { config: this.toJsonValue({ ...config, remoteManaged: true }) } });
+    await this.writeSyncLog(serviceNode.serverId, 'service-node-traffic-limit-sync', failed ? 'partial' : 'success', `已同步 ${serviceNode.name} 的流量额度`, {
       serviceNodeId,
       inboundId: serviceNode.inboundId,
       trafficLimitGb: String(serviceNode.trafficLimitGb),
@@ -786,14 +859,34 @@ export class XuiService {
   }
 
   async resetServiceNodeTraffic(serviceNodeId: string) {
-    const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
-    if (!serviceNode) throw new NotFoundException('Service node not found');
-    if (!serviceNode.inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
+    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.resetServiceNodeTrafficUnlocked(serviceNodeId));
+  }
 
+  private async resetServiceNodeTrafficUnlocked(serviceNodeId: string) {
+    const serviceNode = await this.prisma.serviceNode.findUnique({
+      where: { id: serviceNodeId },
+      include: { server: true, customerNodes: { select: { remoteControl: true } } }
+    });
+    if (!serviceNode) throw new NotFoundException('服务节点不存在');
+    if (serviceNode.ownership !== 'managed') throw new BadRequestException('引用入站不能重置远端流量，请先明确接管');
+    if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
+    await this.assertNoPendingRenewalsForServiceNode(serviceNodeId, '重置远端入站流量');
+    const protectedBindings = serviceNode.customerNodes.filter((node) => node.remoteControl !== 'fully_managed').length;
+    if (protectedBindings > 0) {
+      throw new BadRequestException(`该入站仍绑定 ${protectedBindings} 个非完全托管账号，整入站重置会影响这些官方账号，请改为逐个重置完全托管账号`);
+    }
     const client = await this.createAuthenticatedClient(serviceNode.server);
     const response = await client.resetInboundTraffic(serviceNode.inboundId);
     this.assertXuiSuccess(response);
-    await this.writeSyncLog(serviceNode.serverId, 'service-node-reset-traffic', 'success', `Reset inbound traffic ${serviceNode.inboundId}`, {
+    await this.prisma.serviceNode.update({
+      where: { id: serviceNodeId },
+      data: { config: this.toJsonValue({ ...this.xuiObject(serviceNode.config), remoteManaged: true }) }
+    });
+    await this.prisma.customerNode.updateMany({
+      where: { serviceNodeId },
+      data: { usedTrafficGb: new Prisma.Decimal(0), lastSyncedAt: new Date() }
+    });
+    await this.writeSyncLog(serviceNode.serverId, 'service-node-reset-traffic', 'success', `已重置入站 ${serviceNode.inboundId} 的流量`, {
       serviceNodeId,
       inboundId: serviceNode.inboundId,
       response: this.toJsonValue(response)
@@ -802,18 +895,28 @@ export class XuiService {
   }
 
   async resetCustomerNodeTraffic(customerId: string, customerNodeId: string) {
+    return this.withCustomerNodeLock(customerId, customerNodeId, () => this.resetCustomerNodeTrafficUnlocked(customerId, customerNodeId));
+  }
+
+  private async resetCustomerNodeTrafficUnlocked(customerId: string, customerNodeId: string) {
     const customerNode = await this.prisma.customerNode.findFirst({
       where: { id: customerNodeId, customerId },
       include: { serviceNode: { include: { server: true } } }
     });
-    if (!customerNode) throw new NotFoundException('Customer node not found');
+    if (!customerNode) throw new NotFoundException('用户节点不存在');
+    if (customerNode.remoteControl !== 'fully_managed') throw new BadRequestException('只有完全托管账号允许重置远端流量');
+    await this.assertNoPendingRenewal(customerNodeId, '重置远端流量');
 
     const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
     const inboundId = customerNode.serviceNode.inboundId;
-    if (!inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
+    if (!inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
     const response = await client.resetClientTraffic(inboundId, customerNode.xuiEmail);
     this.assertXuiSuccess(response);
-    await this.writeSyncLog(customerNode.serviceNode.serverId, 'customer-node-reset-traffic', 'success', `Reset client traffic ${customerNode.xuiEmail}`, {
+    await this.prisma.customerNode.update({
+      where: { id: customerNodeId },
+      data: { usedTrafficGb: new Prisma.Decimal(0), lastSyncedAt: new Date() }
+    });
+    await this.writeSyncLog(customerNode.serviceNode.serverId, 'customer-node-reset-traffic', 'success', `已重置客户端 ${customerNode.xuiEmail} 的流量`, {
       customerId,
       customerNodeId,
       serviceNodeId: customerNode.serviceNodeId,
@@ -828,7 +931,7 @@ export class XuiService {
       where: { id: customerNodeId, customerId },
       include: { serviceNode: { include: { server: true } } }
     });
-    if (!customerNode) throw new NotFoundException('Customer node not found');
+    if (!customerNode) throw new NotFoundException('用户节点不存在');
 
     const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
     const payload = await client.clientTraffic(customerNode.xuiEmail);
@@ -843,19 +946,26 @@ export class XuiService {
   }
 
   async deleteManagedServiceNodeInbound(serviceNodeId: string) {
+    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.deleteManagedServiceNodeInboundUnlocked(serviceNodeId));
+  }
+
+  private async deleteManagedServiceNodeInboundUnlocked(serviceNodeId: string) {
     const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
     if (!serviceNode?.inboundId) return { deleted: false, skipped: true };
-    const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+    if (serviceNode.ownership !== 'managed') return { deleted: false, skipped: true, reason: '引用入站保留在官方面板' };
+    const protectedClients = await this.prisma.customerNode.count({
+      where: { serviceNodeId, remoteControl: { not: 'fully_managed' } }
+    });
+    if (protectedClients > 0) {
+      throw new BadRequestException(`该托管入站仍绑定 ${protectedClients} 个非完全托管账号，拒绝删除远端入站`);
+    }
 
     try {
       const client = await this.createAuthenticatedClient(serviceNode.server);
-      const remoteClientEmail = this.stringValue(config.remoteClientEmail);
-      const remoteClientCleanup = remoteClientEmail
-        ? await this.deleteRemoteClientWithClient(client, serviceNode.server.id, serviceNode.inboundId, remoteClientEmail, false, { serviceNodeId, inboundId: serviceNode.inboundId, action: 'service-node-delete' }).catch((error) => ({ deleted: false, xuiEmail: remoteClientEmail, message: this.errorMessage(error) }))
-        : { skipped: true, reason: 'service node has no remote client email' };
+      const remoteClientCleanup = { skipped: true, reason: '客户端将随入站一并删除' };
       const beforeDelete = await this.remoteInboundExists(client, serviceNode.inboundId);
       if (!beforeDelete.exists) {
-        await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'success', `Inbound ${serviceNode.inboundId} already absent`, {
+        await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'success', `入站 ${serviceNode.inboundId} 已不存在`, {
           serviceNodeId,
           inboundId: serviceNode.inboundId,
           alreadyAbsent: true,
@@ -866,7 +976,7 @@ export class XuiService {
       const response = await client.deleteInbound(serviceNode.inboundId);
       this.assertXuiSuccess(response);
       const verified = await this.verifyRemoteInboundDeleted(client, serviceNode.inboundId);
-      await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'success', `Deleted inbound ${serviceNode.inboundId}`, {
+      await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'success', `已删除入站 ${serviceNode.inboundId}`, {
         serviceNodeId,
         inboundId: serviceNode.inboundId,
         remoteClientCleanup,
@@ -894,6 +1004,19 @@ export class XuiService {
   }
 
   async syncServer(serverId: string) {
+    return this.locks.withLock(this.locks.panelOperationKey(serverId), async () => {
+      const serviceNodeIds = (await this.prisma.serviceNode.findMany({
+        where: { serverId },
+        select: { id: true },
+        orderBy: { id: 'asc' }
+      })).map((node) => node.id);
+      return this.locks.withLocks(serviceNodeIds.map((id) => this.locks.serviceNodeKey(id)), () =>
+        this.locks.withLock(this.locks.xrayConfigKey(serverId), () => this.syncServerUnlocked(serverId))
+      );
+    });
+  }
+
+  private async syncServerUnlocked(serverId: string) {
     const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId } });
     if (!server) throw new NotFoundException('3x-ui 服务器不存在');
     if (!server.enabled) throw new BadRequestException('3x-ui 服务器已停用');
@@ -902,7 +1025,14 @@ export class XuiService {
     const payload = await client.listInbounds();
     this.assertXuiSuccess(payload);
     const inbounds = this.xuiArray(payload);
-    const remoteSocksState = await this.loadRemoteSocksRouteState(client);
+    const remoteInboundIds = new Set(inbounds.map((inbound) => this.inboundIdOf(inbound)).filter((id) => id > 0));
+    const xrayPayload = await client.getXrayConfig();
+    this.assertXuiSuccess(xrayPayload);
+    const xrayObj = this.xuiObject(this.xuiObject(xrayPayload).obj || this.xuiObject(xrayPayload).data || xrayPayload);
+    const xraySetting = this.xuiObject(xrayObj.xraySetting ?? xrayObj);
+    if (!Object.keys(xraySetting).length) throw new BadGatewayException('3x-ui 返回了空 Xray 配置');
+    const remoteSocksState = this.remoteSocksRouteState(xraySetting);
+    await this.mergeOutboundSubscriptions(client, remoteSocksState);
     const importedSocks = await this.importRemoteSocksOutbounds(server.id, server.name, remoteSocksState);
 
     const results: Array<{ inboundId: number; name: string; action: 'created' | 'updated' | 'skipped'; serviceNodeId?: string; message?: string }> = [];
@@ -953,6 +1083,20 @@ export class XuiService {
             uuid: remoteClient.uuid
           }).catch(() => Array.isArray(previousConfig.remoteClientLinks) ? previousConfig.remoteClientLinks.filter((item): item is string => typeof item === 'string') : [])
           : [];
+        const remoteInboundFingerprint = this.inboundFingerprint({
+          name,
+          protocol,
+          enabled,
+          tag: inboundTag,
+          remark: String(inbound.remark || ''),
+          port: port || null,
+          streamSettings
+        });
+        const previousInboundFingerprint = this.stringValue(previousConfig.remoteInboundFingerprint);
+        const managedInboundDrifted = Boolean(
+          existing && existing.ownership !== 'referenced' && previousInboundFingerprint && previousInboundFingerprint !== remoteInboundFingerprint
+        );
+        const preserveManagedClientIdentity = Boolean(existing && existing.ownership !== 'referenced');
         const config = {
           ...previousConfig,
           ...remoteSocksConfig,
@@ -961,23 +1105,57 @@ export class XuiService {
           remoteInboundTag: inboundTag,
           remoteInboundRemark: String(inbound.remark || previousConfig.remoteInboundRemark || ''),
           remoteInboundPort: port || previousConfig.remoteInboundPort || undefined,
-          remoteClientEmail: remoteClient.email || previousConfig.remoteClientEmail || undefined,
-          remoteClientUuid: remoteClient.uuid || previousConfig.remoteClientUuid || undefined,
-          remoteClientSubId: remoteClient.subId || previousConfig.remoteClientSubId || undefined,
+          remoteClientEmail: remoteClient.email || (preserveManagedClientIdentity ? previousConfig.remoteClientEmail : undefined),
+          remoteClientUuid: remoteClient.uuid || (preserveManagedClientIdentity ? previousConfig.remoteClientUuid : undefined),
+          remoteClientSubId: remoteClient.subId || (preserveManagedClientIdentity ? previousConfig.remoteClientSubId : undefined),
           remoteClientLinks,
           encryption: String(streamSettings.security || previousConfig.encryption || 'none'),
           ...this.transportConfigFromStream(streamSettings),
-          importedFromRemote: existing ? Boolean(previousConfig.importedFromRemote) : true
+          importedFromRemote: existing ? Boolean(previousConfig.importedFromRemote) : true,
+          remoteInboundFingerprint,
+          remoteInboundObservedFingerprint: remoteInboundFingerprint,
+          remoteInboundDrift: false,
+          remoteInboundLastCheckedAt: new Date().toISOString()
         };
 
         if (existing) {
+          if (managedInboundDrifted) {
+            await this.prisma.serviceNode.update({
+              where: { id: existing.id },
+              data: {
+                config: this.toJsonValue({
+                  ...previousConfig,
+                  remoteInboundObservedFingerprint: remoteInboundFingerprint,
+                  remoteInboundDrift: true,
+                  remoteInboundLastCheckedAt: new Date().toISOString()
+                })
+              }
+            });
+            results.push({
+              inboundId,
+              name: existing.name,
+              action: 'skipped',
+              serviceNodeId: existing.id,
+              message: '托管入站与官方面板状态不一致，已保留本地配置，请核对后明确同步或接管'
+            });
+            continue;
+          }
           const updated = await this.prisma.serviceNode.update({
             where: { id: existing.id },
-            data: {
+            data: existing.ownership === 'referenced' ? {
               name,
               protocol,
               enabled,
+              ownership: existing.ownership,
               config: this.toJsonValue(config)
+            } : {
+              config: this.toJsonValue({
+                ...previousConfig,
+                remoteInboundFingerprint,
+                remoteInboundObservedFingerprint: remoteInboundFingerprint,
+                remoteInboundDrift: false,
+                remoteInboundLastCheckedAt: new Date().toISOString()
+              })
             }
           });
           results.push({ inboundId, name, action: 'updated', serviceNodeId: updated.id });
@@ -993,6 +1171,7 @@ export class XuiService {
               protocol,
               priceMonthly: new Prisma.Decimal(0),
               trafficLimitGb: new Prisma.Decimal(0),
+              ownership: 'referenced',
               enabled,
               config: this.toJsonValue(config),
               remark: String(inbound.remark || '').trim() || null
@@ -1003,35 +1182,251 @@ export class XuiService {
           if (!this.isUniqueConstraintError(error)) throw error;
           const winner = await this.prisma.serviceNode.findFirst({ where: { serverId, inboundId } });
           if (!winner) throw error;
-          const updated = await this.prisma.serviceNode.update({
-            where: { id: winner.id },
-            data: { name, protocol, enabled, config: this.toJsonValue(config) }
-          });
-          results.push({ inboundId, name, action: 'updated', serviceNodeId: updated.id, message: 'Concurrent import reused the existing local service node' });
+          if (winner.ownership !== 'referenced') {
+            results.push({ inboundId, name: winner.name, action: 'skipped', serviceNodeId: winner.id, message: '并发同步时发现托管入站，已保留本地配置' });
+          } else {
+            const updated = await this.prisma.serviceNode.update({
+              where: { id: winner.id },
+              data: { name, protocol, enabled, config: this.toJsonValue(config) }
+            });
+            results.push({ inboundId, name, action: 'updated', serviceNodeId: updated.id, message: '并发导入已复用现有本地路由节点' });
+          }
         }
       } catch (error) {
         results.push({ inboundId, name: inboundId ? `Inbound ${inboundId}` : 'unknown', action: 'skipped', message: this.errorMessage(error) });
       }
     }
 
+    const missingLocalInbounds = await this.prisma.serviceNode.findMany({
+      where: { serverId, inboundId: { not: null, notIn: [...remoteInboundIds] } },
+      select: { id: true, inboundId: true, name: true, config: true }
+    });
+    for (const missing of missingLocalInbounds) {
+      const previousConfig = this.xuiObject(missing.config);
+      await this.prisma.serviceNode.update({
+        where: { id: missing.id },
+        data: {
+          config: this.toJsonValue({
+            ...previousConfig,
+            remoteInboundDrift: true,
+            remoteInboundLastCheckedAt: new Date().toISOString()
+          })
+        }
+      });
+      results.push({
+        inboundId: missing.inboundId || 0,
+        name: missing.name,
+        action: 'skipped',
+        serviceNodeId: missing.id,
+        message: '官方面板中已找不到该入站，已保留本地记录并标记异常，请核对后删除或重新绑定'
+      });
+    }
+
     const created = results.filter((item) => item.action === 'created').length;
     const updated = results.filter((item) => item.action === 'updated').length;
     const skipped = results.filter((item) => item.action === 'skipped').length;
-    await this.writeSyncLog(serverId, 'server-inbounds-import', skipped ? 'partial' : 'success', `Imported remote inbounds from ${server.name}`, {
+    const networkResources = await this.syncNetworkResourcesFromRemote(server.id, xraySetting);
+    await this.writeSyncLog(serverId, 'server-inbounds-import', skipped ? 'partial' : 'success', `已从 ${server.name} 导入远端入站`, {
       created,
       updated,
       skipped,
       remoteSocksFound: remoteSocksState.socksOutbounds.size,
       remoteSocksImported: importedSocks.length,
+      networkResources,
       results
     });
-    return { serverId, serverName: server.name, total: results.length, created, updated, skipped, remoteSocksFound: remoteSocksState.socksOutbounds.size, remoteSocksImported: importedSocks.length, results };
+    return {
+      serverId,
+      serverName: server.name,
+      total: results.length,
+      created,
+      updated,
+      skipped,
+      remoteSocksFound: remoteSocksState.socksOutbounds.size,
+      remoteSocksImported: importedSocks.length,
+      networkResources,
+      results
+    };
+  }
+
+  private async syncNetworkResourcesFromRemote(serverId: string, setting: Record<string, unknown>) {
+    const syncedAt = new Date();
+    const remoteOutbounds = (Array.isArray(setting.outbounds) ? setting.outbounds : [])
+      .map((item) => this.xuiObject(item))
+      .filter((item) => this.stringValue(item.tag));
+    const existingOutbounds = await this.prisma.networkOutbound.findMany({ where: { serverId } });
+    const existingOutboundByTag = new Map(existingOutbounds.map((item) => [item.tag, item]));
+    const remoteOutboundTags = new Set<string>();
+    const outboundIdsByTag = new Map<string, string>();
+    let outboundsCreated = 0;
+    let outboundsUpdated = 0;
+    let managedOutboundDrift = 0;
+
+    for (const outbound of remoteOutbounds) {
+      const tag = this.stringValue(outbound.tag)!;
+      remoteOutboundTags.add(tag);
+      const protocol = this.stringValue(outbound.protocol) || 'unknown';
+      const fingerprint = this.configFingerprint(outbound);
+      const existing = existingOutboundByTag.get(tag);
+      const managedResourceDrifted = Boolean(existing && existing.ownership !== 'referenced' && existing.remoteFingerprint !== fingerprint);
+      if (managedResourceDrifted) managedOutboundDrift += 1;
+      const saved = existing
+        ? await this.prisma.networkOutbound.update({
+          where: { id: existing.id },
+          data: managedResourceDrifted ? {
+            lastSyncedAt: null
+          } : {
+            name: existing.name || tag,
+            protocol,
+            normalizedConfig: this.toJsonValue(outbound),
+            remoteFingerprint: fingerprint,
+            lastSyncedAt: syncedAt
+          }
+        })
+        : await this.prisma.networkOutbound.create({
+          data: {
+            serverId,
+            name: tag,
+            tag,
+            protocol,
+            ownership: 'referenced',
+            sourceFormat: 'xray_json',
+            sourceServerId: serverId,
+            normalizedConfig: this.toJsonValue(outbound),
+            remoteFingerprint: fingerprint,
+            lastSyncedAt: syncedAt
+          }
+        });
+      outboundIdsByTag.set(tag, saved.id);
+      if (!existing) outboundsCreated += 1;
+      else if (!managedResourceDrifted) outboundsUpdated += 1;
+    }
+
+    const serviceNodes = await this.prisma.serviceNode.findMany({ where: { serverId }, select: { id: true, config: true } });
+    const serviceNodeByInboundTag = new Map<string, string>();
+    for (const node of serviceNodes) {
+      const tag = this.stringValue(this.xuiObject(node.config).remoteInboundTag);
+      if (tag) serviceNodeByInboundTag.set(tag, node.id);
+    }
+
+    const routing = this.xuiObject(setting.routing);
+    const remoteRules = (Array.isArray(routing.rules) ? routing.rules : []).map((item) => this.xuiObject(item));
+    const existingRoutes = await this.prisma.networkRoute.findMany({ where: { serverId } });
+    const unusedRoutes = new Set(existingRoutes.map((item) => item.id));
+    const fingerprintOccurrences = new Map<string, number>();
+    const remoteRouteFingerprints = new Set(remoteRules.map((rule) => this.configFingerprint(rule)));
+    let routesCreated = 0;
+    let routesUpdated = 0;
+    let managedRouteDrift = 0;
+
+    for (let index = 0; index < remoteRules.length; index += 1) {
+      const rule = remoteRules[index]!;
+      const fingerprint = this.configFingerprint(rule);
+      const occurrence = (fingerprintOccurrences.get(fingerprint) || 0) + 1;
+      fingerprintOccurrences.set(fingerprint, occurrence);
+      let existing = existingRoutes
+        .filter((item) => unusedRoutes.has(item.id) && item.remoteFingerprint === fingerprint)
+        .sort((left, right) => Math.abs((left.remoteOrder ?? index) - index) - Math.abs((right.remoteOrder ?? index) - index))[0];
+      let managedRemoteDrifted = false;
+      if (!existing) {
+        const orderedManaged = existingRoutes.find((item) =>
+          unusedRoutes.has(item.id) &&
+          item.ownership !== 'referenced' &&
+          item.remoteOrder === index &&
+          (!item.remoteFingerprint || !remoteRouteFingerprints.has(item.remoteFingerprint))
+        );
+        if (orderedManaged) {
+          existing = orderedManaged;
+          managedRemoteDrifted = true;
+        }
+      }
+      if (existing) unusedRoutes.delete(existing.id);
+      const outboundTag = this.stringList(rule.outboundTag)[0];
+      const inboundTag = this.stringList(rule.inboundTag)[0];
+      const remoteKey = existing?.remoteKey || `route-${fingerprint.slice(0, 20)}-${occurrence}`;
+      const data = {
+        serviceNodeId: inboundTag ? serviceNodeByInboundTag.get(inboundTag) || null : null,
+        outboundId: outboundTag ? outboundIdsByTag.get(outboundTag) || null : null,
+        name: existing?.name || `Route ${index + 1}`,
+        remoteOrder: index,
+        matchConfig: this.toJsonValue(rule),
+        normalizedConfig: this.toJsonValue(rule),
+        remoteFingerprint: fingerprint,
+        lastSyncedAt: syncedAt
+      };
+      if (existing) {
+        const localConfigChanged = existing.ownership !== 'referenced' && this.configFingerprint(existing.normalizedConfig) !== fingerprint;
+        const managedResourceDrifted = managedRemoteDrifted || localConfigChanged;
+        await this.prisma.networkRoute.update({
+          where: { id: existing.id },
+          data: managedResourceDrifted ? { remoteOrder: index, lastSyncedAt: null } : data
+        });
+        if (managedResourceDrifted) managedRouteDrift += 1;
+        else routesUpdated += 1;
+      } else {
+        await this.prisma.networkRoute.upsert({
+          where: { serverId_remoteKey: { serverId, remoteKey } },
+          create: { serverId, remoteKey, ownership: 'referenced', ...data },
+          update: data
+        });
+        routesCreated += 1;
+      }
+    }
+
+    const referencedRouteIdsToDelete = existingRoutes
+      .filter((item) => unusedRoutes.has(item.id) && item.ownership === 'referenced')
+      .map((item) => item.id);
+    if (referencedRouteIdsToDelete.length) {
+      await this.prisma.networkRoute.deleteMany({ where: { id: { in: referencedRouteIdsToDelete } } });
+    }
+    const missingManagedRouteIds = existingRoutes
+      .filter((item) => unusedRoutes.has(item.id) && item.ownership !== 'referenced')
+      .map((item) => item.id);
+    if (missingManagedRouteIds.length) {
+      await this.prisma.networkRoute.updateMany({ where: { id: { in: missingManagedRouteIds } }, data: { lastSyncedAt: null } });
+    }
+    managedRouteDrift += missingManagedRouteIds.length;
+
+    const referencedOutboundIdsToDelete = existingOutbounds
+      .filter((item) => !remoteOutboundTags.has(item.tag) && item.ownership === 'referenced')
+      .map((item) => item.id);
+    if (referencedOutboundIdsToDelete.length) {
+      await this.prisma.networkOutbound.deleteMany({ where: { id: { in: referencedOutboundIdsToDelete } } });
+    }
+    const missingManagedOutboundIds = existingOutbounds
+      .filter((item) => !remoteOutboundTags.has(item.tag) && item.ownership !== 'referenced')
+      .map((item) => item.id);
+    if (missingManagedOutboundIds.length) {
+      await this.prisma.networkOutbound.updateMany({ where: { id: { in: missingManagedOutboundIds } }, data: { lastSyncedAt: null } });
+    }
+    managedOutboundDrift += missingManagedOutboundIds.length;
+
+    return {
+      outbounds: {
+        total: remoteOutbounds.length,
+        created: outboundsCreated,
+        updated: outboundsUpdated,
+        removedReferences: referencedOutboundIdsToDelete.length,
+        managedDrift: managedOutboundDrift
+      },
+      routes: {
+        total: remoteRules.length,
+        created: routesCreated,
+        updated: routesUpdated,
+        removedReferences: referencedRouteIdsToDelete.length,
+        managedDrift: managedRouteDrift
+      }
+    };
   }
 
   async syncServerSocksOutbounds(serverId: string) {
+    return this.withPanelXrayLock(serverId, () => this.syncServerSocksOutboundsUnlocked(serverId));
+  }
+
+  private async syncServerSocksOutboundsUnlocked(serverId: string) {
     const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId } });
-    if (!server) throw new NotFoundException('3x-ui server not found');
-    if (!server.enabled) throw new BadRequestException('3x-ui server is disabled');
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
+    if (!server.enabled) throw new BadRequestException('3x-ui 服务器已停用');
 
     try {
       const client = await this.createAuthenticatedClient(server);
@@ -1044,57 +1439,466 @@ export class XuiService {
         remoteSocksImported: importedSocks.length,
         importedSocks
       };
-      await this.writeSyncLog(serverId, 'server-socks-outbounds-import', 'success', `Imported remote SOCKS outbounds from ${server.name}`, result);
+      await this.writeSyncLog(serverId, 'server-socks-outbounds-import', 'success', `已从 ${server.name} 同步远端 SOCKS 出站`, result);
       return result;
     } catch (error) {
       await this.writeSyncLog(serverId, 'server-socks-outbounds-import', 'failed', this.errorMessage(error), { message: this.errorMessage(error) });
-      throw new BadGatewayException(`Sync remote SOCKS outbounds failed: ${this.errorMessage(error)}`);
+      throw new BadGatewayException(`同步远端 Socks 出站失败：${this.errorMessage(error)}`);
     }
   }
 
-  async deleteRemoteSocksOutbound(serverId: string, outboundTag: string) {
-    const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId } });
-    if (!server) throw new NotFoundException('3x-ui server not found');
-    if (!server.enabled) throw new BadRequestException('3x-ui server is disabled');
-    if (!outboundTag) throw new BadRequestException('Remote outbound tag is required');
+  async listNetworkOutbounds(serverId?: string) {
+    return this.prisma.networkOutbound.findMany({
+      where: { serverId: serverId || undefined },
+      orderBy: { createdAt: 'desc' },
+      include: { server: { select: { id: true, name: true, enabled: true } }, _count: { select: { routes: true } } }
+    });
+  }
+
+  previewOutboundImport(input: z.infer<typeof outboundImportPreviewSchema>) {
+    const items = this.parseOutboundInput(input.input, input.format);
+    return {
+      format: input.format,
+      count: items.length,
+      items: items.map((item) => ({
+        name: item.name,
+        tag: item.outbound.tag,
+        protocol: item.outbound.protocol,
+        outbound: item.outbound,
+        fingerprint: this.configFingerprint(item.outbound)
+      }))
+    };
+  }
+
+  async importNetworkOutbounds(input: z.infer<typeof outboundImportSchema>) {
+    return this.withPanelXrayLock(input.serverId, () => this.importNetworkOutboundsUnlocked(input));
+  }
+
+  private async importNetworkOutboundsUnlocked(input: z.infer<typeof outboundImportSchema>) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id: input.serverId } });
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
+    if (input.strategy === 'local_only' && input.conflict === 'takeover') {
+      throw new BadRequestException('接管远端出站必须选择写入目标官方面板');
+    }
+    const parsed = this.parseOutboundInput(input.input, input.format);
+    if (!parsed.length) throw new BadRequestException('没有识别到可导入的出站');
+
+    let remoteState: { client: XuiClient; xrayObj: Record<string, unknown>; setting: Record<string, unknown> } | null = null;
+    if (input.strategy === 'target_panel') remoteState = await this.loadXrayState(server);
+    const existingOutbounds = await this.prisma.networkOutbound.findMany({ where: { serverId: server.id } });
+    const existingByTag = new Map(existingOutbounds.map((item) => [item.tag, item]));
+    const occupiedTags = new Set([
+      ...existingOutbounds.map((item) => item.tag),
+      ...(remoteState && Array.isArray(remoteState.setting.outbounds)
+        ? remoteState.setting.outbounds.map((item) => this.stringValue(this.xuiObject(item).tag)).filter((item): item is string => Boolean(item))
+        : [])
+    ]);
+    const pending: Array<{
+      name: string;
+      tag: string;
+      protocol: string;
+      format: string;
+      outbound: Record<string, unknown>;
+      fingerprint: string;
+      action: 'created' | 'updated';
+      existing: (typeof existingOutbounds)[number] | undefined;
+    }> = [];
+
+    for (let index = 0; index < parsed.length; index += 1) {
+      const parsedItem = parsed[index]!;
+      const outbound = { ...parsedItem.outbound };
+      if (input.name && parsed.length === 1) parsedItem.name = input.name;
+      let tag = this.stringValue(outbound.tag) || this.importedOutboundTag(parsedItem.name, index);
+      let existingLocal = existingByTag.get(tag);
+      const remoteOutbounds = remoteState && Array.isArray(remoteState.setting.outbounds) ? remoteState.setting.outbounds : [];
+      const remoteIndex = remoteOutbounds.findIndex((item) => this.stringValue(this.xuiObject(item).tag) === tag);
+      const pendingConflict = pending.some((item) => item.tag === tag);
+      const conflict = Boolean(existingLocal || remoteIndex >= 0 || pendingConflict);
+
+      if (pendingConflict && input.conflict !== 'rename') {
+        throw new BadRequestException(`导入内容中出站标签 ${tag} 重复；请修正输入或使用自动重命名`);
+      }
+      if (conflict && input.conflict === 'reject') throw new BadRequestException(`出站标签 ${tag} 已存在`);
+      if (conflict && input.conflict === 'rename') {
+        tag = this.availableOutboundTag(tag, occupiedTags);
+        existingLocal = undefined;
+      }
+      if (conflict && input.conflict === 'replace_managed' && (!existingLocal || existingLocal.ownership !== 'managed')) {
+        throw new BadRequestException(`出站 ${tag} 不是本系统管理资源，不能替换`);
+      }
+      if (remoteIndex >= 0 && input.conflict === 'replace_managed') {
+        const currentRemoteFingerprint = this.configFingerprint(this.xuiObject(remoteOutbounds[remoteIndex]));
+        if (!existingLocal?.remoteFingerprint || currentRemoteFingerprint !== existingLocal.remoteFingerprint) {
+          throw new BadRequestException(`远端出站 ${tag} 已变化或未经本系统确认；请同步核对后使用明确接管`);
+        }
+      }
+      outbound.tag = tag;
+      occupiedTags.add(tag);
+
+      if (remoteState) {
+        const currentOutbounds = Array.isArray(remoteState.setting.outbounds) ? remoteState.setting.outbounds : [];
+        const currentIndex = currentOutbounds.findIndex((item) => this.stringValue(this.xuiObject(item).tag) === tag);
+        if (currentIndex >= 0) currentOutbounds.splice(currentIndex, 1, outbound);
+        else currentOutbounds.push(outbound);
+        remoteState.setting.outbounds = currentOutbounds;
+      }
+
+      const fingerprint = this.configFingerprint(outbound);
+      pending.push({
+        name: parsedItem.name,
+        tag,
+        protocol: String(outbound.protocol),
+        format: parsedItem.format,
+        outbound,
+        fingerprint,
+        action: existingLocal ? 'updated' : 'created',
+        existing: existingLocal
+      });
+    }
+
+    let remoteWritten = false;
+    if (remoteState) {
+      await this.writeAndVerifyXrayState(server.id, remoteState, pending.map((item) => item.tag));
+      remoteWritten = true;
+    }
+
+    const syncedAt = remoteState ? new Date() : null;
+    const savedOwnership = remoteState ? 'managed' : input.ownership;
+    let savedOutbounds: Array<(typeof existingOutbounds)[number]>;
+    try {
+      savedOutbounds = await this.prisma.$transaction(pending.map((item) => this.prisma.networkOutbound.upsert({
+        where: { serverId_tag: { serverId: server.id, tag: item.tag } },
+        create: {
+          serverId: server.id,
+          name: item.name,
+          tag: item.tag,
+          protocol: item.protocol,
+          ownership: savedOwnership,
+          sourceFormat: item.format,
+          rawInput: this.toJsonValue(input.input),
+          normalizedConfig: this.toJsonValue(item.outbound),
+          remoteFingerprint: remoteState ? item.fingerprint : null,
+          lastSyncedAt: syncedAt
+        },
+        update: {
+          name: item.name,
+          protocol: item.protocol,
+          ownership: savedOwnership,
+          sourceFormat: item.format,
+          rawInput: this.toJsonValue(input.input),
+          normalizedConfig: this.toJsonValue(item.outbound),
+          remoteFingerprint: remoteState ? item.fingerprint : item.existing?.remoteFingerprint,
+          lastSyncedAt: remoteState
+            ? syncedAt
+            : item.existing && this.configFingerprint(item.existing.normalizedConfig) === item.fingerprint
+              ? item.existing.lastSyncedAt
+              : null
+        }
+      })));
+    } catch (error) {
+      if (remoteWritten) {
+        await this.writeSyncLog(server.id, 'network-outbound-import-local-save', 'failed', '官方出站已写入，但本地记录保存失败，请立即执行面板同步并核对', {
+          tags: pending.map((item) => item.tag),
+          message: this.errorMessage(error)
+        });
+        throw new BadGatewayException('官方出站已写入，但本地记录保存失败。请立即执行面板同步并核对，避免重复导入');
+      }
+      throw error;
+    }
+    const results = savedOutbounds.map((saved, index) => ({
+      id: saved.id,
+      tag: saved.tag,
+      protocol: saved.protocol,
+      action: pending[index]!.action
+    }));
+
+    const routeResults: Array<{ outboundId: string; outboundTag: string; created: boolean; routeId?: string; message?: string }> = [];
+    if (input.createRoute && input.inboundTags.length) {
+      for (const result of results) {
+        const outbound = await this.prisma.networkOutbound.findUnique({ where: { id: result.id } });
+        if (!outbound) continue;
+        try {
+          const route = await this.upsertNetworkRouteUnlocked({
+            serverId: server.id,
+            name: `${outbound.name} route`,
+            outboundId: outbound.id,
+            ownership: remoteState ? 'managed' : input.ownership,
+            rule: { type: 'field', inboundTag: input.inboundTags, outboundTag: outbound.tag },
+            pushRemote: input.strategy === 'target_panel',
+            conflict: input.conflict === 'takeover' ? 'takeover' : input.conflict === 'replace_managed' ? 'replace_managed' : 'reject'
+          });
+          routeResults.push({ outboundId: outbound.id, outboundTag: outbound.tag, created: true, routeId: route.id });
+        } catch (error) {
+          routeResults.push({ outboundId: outbound.id, outboundTag: outbound.tag, created: false, message: this.errorMessage(error) });
+        }
+      }
+    }
+
+    const failedRoutes = routeResults.filter((item) => !item.created);
+    const state = failedRoutes.length ? 'partial' : 'success';
+    const message = failedRoutes.length
+      ? `已导入 ${results.length} 个出站，但有 ${failedRoutes.length} 条自动路由创建失败`
+      : `已导入 ${results.length} 个出站`;
+    await this.writeSyncLog(server.id, 'network-outbound-import', state, message, {
+      strategy: input.strategy,
+      results,
+      routeResults
+    });
+    return { imported: results.length, strategy: input.strategy, state, message, results, routeResults };
+  }
+
+  async deleteNetworkOutbound(id: string, deleteRemote = false, takeover = false) {
+    const outbound = await this.prisma.networkOutbound.findUnique({ where: { id }, include: { server: true, routes: true } });
+    if (!outbound) throw new NotFoundException('出站不存在');
+    return this.withPanelXrayLock(outbound.serverId, () => this.deleteNetworkOutboundUnlocked(id, deleteRemote, takeover));
+  }
+
+  private async deleteNetworkOutboundUnlocked(id: string, deleteRemote = false, takeover = false) {
+    const outbound = await this.prisma.networkOutbound.findUnique({ where: { id }, include: { server: true, routes: true } });
+    if (!outbound) throw new NotFoundException('出站不存在');
+    const routes = await this.prisma.networkRoute.findMany({
+      where: { serverId: outbound.serverId },
+      select: { id: true, outboundId: true, normalizedConfig: true }
+    });
+    const referencedRoutes = routes.filter((route) =>
+      route.outboundId === outbound.id || this.stringList(this.xuiObject(route.normalizedConfig).outboundTag).includes(outbound.tag)
+    );
+    if (referencedRoutes.length) {
+      throw new BadRequestException(`该出站仍被 ${referencedRoutes.length} 条路由规则引用，请先删除关联路由`);
+    }
+    if (deleteRemote && outbound.ownership !== 'managed' && !takeover) {
+      throw new BadRequestException('该出站来自官方面板或由其他来源共享，删除远端配置前必须明确确认接管删除');
+    }
+    if (deleteRemote && !outbound.remoteFingerprint) throw new BadRequestException('该出站尚未由本系统写入或确认远端状态，不能删除官方面板配置');
+    let remote = { deleted: false, skipped: true } as Record<string, unknown>;
+    if (deleteRemote) {
+      const state = await this.loadXrayState(outbound.server);
+      const outbounds = Array.isArray(state.setting.outbounds) ? state.setting.outbounds : [];
+      const index = outbounds.findIndex((item) => this.stringValue(this.xuiObject(item).tag) === outbound.tag);
+      if (index >= 0) {
+        const current = this.xuiObject(outbounds[index]);
+        const expectedFingerprint = outbound.remoteFingerprint || this.configFingerprint(outbound.normalizedConfig);
+        if (this.configFingerprint(current) !== expectedFingerprint) {
+          throw new BadRequestException('远端出站已被其他来源修改，拒绝覆盖删除');
+        }
+        outbounds.splice(index, 1);
+        state.setting.outbounds = outbounds;
+        await this.writeAndVerifyXrayState(outbound.serverId, state, [], [outbound.tag]);
+        remote = { deleted: true, tag: outbound.tag };
+      }
+    }
+    try {
+      await this.prisma.networkOutbound.delete({ where: { id } });
+    } catch (error) {
+      if (Boolean(remote.deleted)) {
+        await this.writeSyncLog(outbound.serverId, 'network-outbound-delete-local-save', 'failed', '官方出站已删除，但本地记录删除失败，请执行面板同步并核对', {
+          outboundId: id,
+          tag: outbound.tag,
+          message: this.errorMessage(error)
+        });
+        throw new BadGatewayException('官方出站已删除，但本地记录删除失败。请执行面板同步并核对后再操作');
+      }
+      throw error;
+    }
+    return { deleted: true, id, remote };
+  }
+
+  async listNetworkRoutes(serverId?: string) {
+    return this.prisma.networkRoute.findMany({
+      where: { serverId: serverId || undefined },
+      orderBy: [{ serverId: 'asc' }, { remoteOrder: 'asc' }, { createdAt: 'asc' }],
+      include: { server: { select: { id: true, name: true } }, outbound: true, serviceNode: { select: { id: true, name: true, inboundId: true } } }
+    });
+  }
+
+  async upsertNetworkRoute(input: z.infer<typeof networkRouteUpsertSchema>, id?: string) {
+    const current = id ? await this.prisma.networkRoute.findUnique({ where: { id }, select: { serverId: true } }) : null;
+    if (id && !current) throw new NotFoundException('路由规则不存在');
+    const serverIds = [...new Set([input.serverId, current?.serverId].filter((value): value is string => Boolean(value)))];
+    return this.locks.withLocks(serverIds.map((serverId) => this.locks.panelOperationKey(serverId)), () =>
+      this.locks.withLock(this.locks.xrayConfigKey(input.serverId), () => this.upsertNetworkRouteUnlocked(input, id))
+    );
+  }
+
+  private async upsertNetworkRouteUnlocked(input: z.infer<typeof networkRouteUpsertSchema>, id?: string) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id: input.serverId } });
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
+    const current = id ? await this.prisma.networkRoute.findUnique({ where: { id } }) : null;
+    if (id && !current) throw new NotFoundException('路由规则不存在');
+    if (current && current.serverId !== input.serverId) throw new BadRequestException('路由规则不能跨 3x-ui 面板迁移，请在目标面板重新创建');
+    if (current && current.ownership !== 'managed' && input.pushRemote && input.conflict !== 'takeover') {
+      throw new BadRequestException('同步导入的路由需要使用接管模式后才能写回远端');
+    }
+    if (current && current.ownership !== 'managed' && !input.pushRemote && input.ownership === 'managed') {
+      throw new BadRequestException('引用或共享路由不能仅通过本地修改变为托管；请写回官方面板并明确选择接管');
+    }
+    const outbound = input.outboundId ? await this.prisma.networkOutbound.findUnique({ where: { id: input.outboundId } }) : null;
+    if (input.outboundId && (!outbound || outbound.serverId !== server.id)) throw new BadRequestException('出站不存在或不属于目标面板');
+    const serviceNode = input.serviceNodeId ? await this.prisma.serviceNode.findUnique({ where: { id: input.serviceNodeId }, select: { id: true, serverId: true } }) : null;
+    if (input.serviceNodeId && (!serviceNode || serviceNode.serverId !== server.id)) throw new BadRequestException('服务节点不存在或不属于目标面板');
+    const rule = { ...input.rule } as Record<string, unknown>;
+    if (outbound && !rule.outboundTag) rule.outboundTag = outbound.tag;
+    if (!this.stringValue(rule.outboundTag)) throw new BadRequestException('路由规则缺少 outboundTag');
+    const fingerprint = this.configFingerprint(rule);
+    const localConfigChanged = current ? this.configFingerprint(current.normalizedConfig) !== fingerprint : false;
+    const remoteKey = current?.remoteKey || `route-${fingerprint.slice(0, 20)}`;
+    let remoteOrder = current?.remoteOrder ?? null;
+
+    if (input.pushRemote) {
+      const state = await this.loadXrayState(server);
+      const routing = this.ensureRouting(state.setting);
+      const rules = Array.isArray(routing.rules) ? routing.rules : [];
+      let index = current?.remoteFingerprint
+        ? this.findRemoteRouteIndex(rules, current.remoteFingerprint, current.remoteOrder)
+        : -1;
+      if (current?.remoteFingerprint && index < 0) {
+        if (input.conflict !== 'takeover') throw new BadRequestException('远端路由已变化，拒绝覆盖');
+        const takeoverIndex = this.findRemoteRouteIndex(rules, fingerprint, current.remoteOrder);
+        if (takeoverIndex < 0) {
+          throw new BadRequestException('当前绑定的远端路由已变化且无法精确定位，请先同步官方面板后再接管，系统不会追加重复规则');
+        }
+        index = takeoverIndex;
+      }
+      if (index < 0) {
+        const duplicate = this.findRemoteRouteIndex(rules, fingerprint, current?.remoteOrder);
+        if (duplicate >= 0 && input.conflict === 'reject') throw new BadRequestException('相同远端路由规则已存在');
+        if (duplicate >= 0 && input.conflict === 'replace_managed' && (!current || current.ownership !== 'managed')) {
+          throw new BadRequestException('相同远端路由不是已确认的本系统托管规则，不能直接替换；请使用明确接管');
+        }
+        index = duplicate;
+      }
+      if (index >= 0) rules.splice(index, 1, rule);
+      else rules.push(rule);
+      routing.rules = rules;
+      state.setting.routing = routing;
+      remoteOrder = index >= 0 ? index : rules.length - 1;
+      await this.writeAndVerifyXrayState(server.id, state, [], [], fingerprint, undefined, {
+        expectedRoute: { fingerprint, index: remoteOrder }
+      });
+    }
 
     try {
-      const client = await this.createAuthenticatedClient(server);
-      const xrayPayload = await client.getXrayConfig();
-      this.assertXuiSuccess(xrayPayload);
-      const xrayObj = this.xuiObject(this.xuiObject(xrayPayload).obj || this.xuiObject(xrayPayload).data || xrayPayload);
-      const rawSetting = xrayObj.xraySetting ?? xrayObj;
-      const xraySetting = this.xuiObject(rawSetting);
-      if (!Object.keys(xraySetting).length) throw new BadGatewayException('3x-ui returned an empty Xray config');
+      return current
+        ? await this.prisma.networkRoute.update({ where: { id: current.id }, data: {
+          name: input.name,
+          serviceNodeId: input.serviceNodeId,
+          outboundId: input.outboundId,
+          ownership: input.pushRemote ? 'managed' : input.ownership,
+          matchConfig: this.toJsonValue(rule),
+          normalizedConfig: this.toJsonValue(rule),
+          remoteFingerprint: input.pushRemote ? fingerprint : current.remoteFingerprint,
+          remoteOrder,
+          lastSyncedAt: input.pushRemote ? new Date() : localConfigChanged ? null : current.lastSyncedAt
+        } })
+        : await this.prisma.networkRoute.create({ data: {
+          serverId: server.id,
+          name: input.name,
+          serviceNodeId: input.serviceNodeId,
+          outboundId: input.outboundId,
+          ownership: input.pushRemote ? 'managed' : input.ownership,
+          remoteKey,
+          remoteOrder,
+          matchConfig: this.toJsonValue(rule),
+          normalizedConfig: this.toJsonValue(rule),
+          remoteFingerprint: input.pushRemote ? fingerprint : null,
+          lastSyncedAt: input.pushRemote ? new Date() : null
+        } });
+    } catch (error) {
+      if (input.pushRemote) {
+        await this.writeSyncLog(server.id, 'network-route-local-save', 'failed', '官方路由已写入，但本地记录保存失败，请立即执行面板同步并核对', {
+          routeId: current?.id,
+          remoteOrder,
+          fingerprint,
+          message: this.errorMessage(error)
+        });
+        throw new BadGatewayException('官方路由已写入，但本地记录保存失败。请立即执行面板同步并核对，避免重复添加');
+      }
+      throw error;
+    }
+  }
 
-      const outbounds = Array.isArray(xraySetting.outbounds) ? xraySetting.outbounds : [];
+  async deleteNetworkRoute(id: string, deleteRemote = false, takeover = false) {
+    const route = await this.prisma.networkRoute.findUnique({ where: { id }, include: { server: true } });
+    if (!route) throw new NotFoundException('路由规则不存在');
+    return this.withPanelXrayLock(route.serverId, () => this.deleteNetworkRouteUnlocked(id, deleteRemote, takeover));
+  }
+
+  private async deleteNetworkRouteUnlocked(id: string, deleteRemote = false, takeover = false) {
+    const route = await this.prisma.networkRoute.findUnique({ where: { id }, include: { server: true } });
+    if (!route) throw new NotFoundException('路由规则不存在');
+    if (deleteRemote && route.ownership !== 'managed' && !takeover) {
+      throw new BadRequestException('该路由来自官方面板或由其他来源共享，删除远端配置前必须明确确认接管删除');
+    }
+    if (deleteRemote && !route.remoteFingerprint) throw new BadRequestException('该路由尚未由本系统写入或确认远端状态，不能删除官方面板配置');
+    if (deleteRemote) {
+      const state = await this.loadXrayState(route.server);
+      const routing = this.ensureRouting(state.setting);
+      const rules = Array.isArray(routing.rules) ? routing.rules : [];
+      const expectedFingerprint = route.remoteFingerprint || this.configFingerprint(route.normalizedConfig);
+      const index = this.findRemoteRouteIndex(rules, expectedFingerprint, route.remoteOrder);
+      if (index < 0) throw new BadRequestException('远端路由已变化或不存在，拒绝误删');
+      const remainingFingerprintCount = rules.filter((item) => this.configFingerprint(this.xuiObject(item)) === expectedFingerprint).length - 1;
+      rules.splice(index, 1);
+      routing.rules = rules;
+      state.setting.routing = routing;
+      await this.writeAndVerifyXrayState(route.serverId, state, [], [], undefined, undefined, {
+        expectedRouteFingerprintCount: { fingerprint: expectedFingerprint, count: remainingFingerprintCount }
+      });
+    }
+    try {
+      await this.prisma.networkRoute.delete({ where: { id } });
+    } catch (error) {
+      if (deleteRemote) {
+        await this.writeSyncLog(route.serverId, 'network-route-delete-local-save', 'failed', '官方路由已删除，但本地记录删除失败，请执行面板同步并核对', {
+          routeId: id,
+          remoteOrder: route.remoteOrder,
+          message: this.errorMessage(error)
+        });
+        throw new BadGatewayException('官方路由已删除，但本地记录删除失败。请执行面板同步并核对后再操作');
+      }
+      throw error;
+    }
+    return { deleted: true, id, remoteDeleted: deleteRemote };
+  }
+
+  async deleteRemoteSocksOutbound(serverId: string, outboundTag: string) {
+    return this.withPanelXrayLock(serverId, () => this.deleteRemoteSocksOutboundUnlocked(serverId, outboundTag));
+  }
+
+  private async deleteRemoteSocksOutboundUnlocked(serverId: string, outboundTag: string) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId } });
+    if (!server) throw new NotFoundException('3x-ui 服务器不存在');
+    if (!server.enabled) throw new BadRequestException('3x-ui 服务器已停用');
+    if (!outboundTag) throw new BadRequestException('远端出站标签不能为空');
+
+    try {
+      const state = await this.loadXrayState(server);
+      const outbounds = Array.isArray(state.setting.outbounds) ? state.setting.outbounds : [];
       const beforeOutbounds = outbounds.length;
-      xraySetting.outbounds = outbounds.filter((item) => this.stringValue(this.xuiObject(item).tag) !== outboundTag);
+      state.setting.outbounds = outbounds.filter((item) => this.stringValue(this.xuiObject(item).tag) !== outboundTag);
 
-      const routing = this.xuiObject(xraySetting.routing);
+      const routing = this.xuiObject(state.setting.routing);
       const rules = Array.isArray(routing.rules) ? routing.rules : [];
       const beforeRules = rules.length;
       const nextRules = rules.filter((item) => !this.stringList(this.xuiObject(item).outboundTag).includes(outboundTag));
       routing.rules = nextRules;
-      xraySetting.routing = routing;
+      state.setting.routing = routing;
 
-      const removedOutbounds = beforeOutbounds - (xraySetting.outbounds as unknown[]).length;
+      const removedOutbounds = beforeOutbounds - (state.setting.outbounds as unknown[]).length;
       const removedRules = beforeRules - nextRules.length;
       if (removedOutbounds || removedRules) {
-        const outboundTestUrl = typeof xrayObj.outboundTestUrl === 'string' ? xrayObj.outboundTestUrl : undefined;
-        const response = await client.updateXrayConfig({ xraySetting: JSON.stringify(xraySetting, null, 2), outboundTestUrl });
-        this.assertXuiSuccess(response);
-        const reloadResponse = await client.restartXrayService();
-        this.assertXuiSuccess(reloadResponse);
-        await this.writeSyncLog(serverId, 'server-socks-outbound-delete', 'success', `Deleted remote SOCKS outbound ${outboundTag} from ${server.name}`, {
+        const verified = await this.writeAndVerifyXrayState(serverId, state, [], [outboundTag], undefined, undefined, {
+          absentRouteOutboundTags: [outboundTag]
+        });
+        await this.writeSyncLog(serverId, 'server-socks-outbound-delete', 'success', `已从 ${server.name} 删除远端 SOCKS 出站 ${outboundTag} 及其引用路由`, {
           outboundTag,
           removedOutbounds,
           removedRules,
-          response: this.toJsonValue(response),
-          reloadResponse: this.toJsonValue(reloadResponse)
+          response: this.toJsonValue(verified.response),
+          reloadResponse: this.toJsonValue(verified.reloadResponse)
         });
       } else {
-        await this.writeSyncLog(serverId, 'server-socks-outbound-delete', 'success', `Remote SOCKS outbound ${outboundTag} already absent from ${server.name}`, {
+        await this.writeSyncLog(serverId, 'server-socks-outbound-delete', 'success', `${server.name} 中的远端 SOCKS 出站 ${outboundTag} 及其引用路由已不存在`, {
           outboundTag,
           removedOutbounds,
           removedRules
@@ -1104,44 +1908,72 @@ export class XuiService {
       return { deleted: true, serverId, serverName: server.name, outboundTag, removedOutbounds, removedRules };
     } catch (error) {
       await this.writeSyncLog(serverId, 'server-socks-outbound-delete', 'failed', this.errorMessage(error), { outboundTag, message: this.errorMessage(error) });
-      throw new BadGatewayException(`Delete remote SOCKS outbound failed: ${this.errorMessage(error)}`);
+      throw new BadGatewayException(`删除远端 Socks 出站失败：${this.errorMessage(error)}`);
     }
   }
 
   async deleteCustomerNode(customerId: string, customerNodeId: string, keepTraffic = false) {
+    return this.withCustomerNodeLock(customerId, customerNodeId, () => this.deleteCustomerNodeUnlocked(customerId, customerNodeId, keepTraffic));
+  }
+
+  private async deleteCustomerNodeUnlocked(customerId: string, customerNodeId: string, keepTraffic = false) {
     const customerNode = await this.prisma.customerNode.findFirst({
       where: { id: customerNodeId, customerId },
       include: { serviceNode: { include: { server: true } } }
     });
     if (!customerNode) throw new NotFoundException('用户节点不存在');
-    if (!customerNode.serviceNode.inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
-    return this.deleteRemoteClient(customerNode.serviceNode.server, customerNode.serviceNode.inboundId, customerNode.xuiEmail, keepTraffic, {
+    const pendingRenewal = await this.prisma.renewalLog.findFirst({
+      where: { customerNodeId, status: 'pending' },
+      select: { id: true }
+    });
+    if (pendingRenewal) throw new BadRequestException('该用户节点存在待处理续费，完成自动恢复或人工对账后才能删除远端账号');
+    if (customerNode.remoteControl !== 'fully_managed') throw new BadRequestException('只有完全托管账号允许从远端删除');
+    if (!customerNode.serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
+    const result = await this.deleteRemoteClient(customerNode.serviceNode.server, customerNode.serviceNode.inboundId, customerNode.xuiEmail, keepTraffic, {
       customerId,
       customerNodeId,
       serviceNodeId: customerNode.serviceNodeId
     });
+    await this.prisma.customerNode.update({
+      where: { id: customerNode.id },
+      data: { status: 'disabled', disabledReason: 'admin', lastSyncedAt: null }
+    });
+    return { ...result, bindingRetained: true };
   }
 
   async deleteServiceNodeClients(serviceNodeId: string, keepTraffic = false) {
+    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.deleteServiceNodeClientsUnlocked(serviceNodeId, keepTraffic));
+  }
+
+  private async deleteServiceNodeClientsUnlocked(serviceNodeId: string, keepTraffic = false) {
     const serviceNode = await this.prisma.serviceNode.findUnique({
       where: { id: serviceNodeId },
-      include: { server: true, customerNodes: { select: { id: true, customerId: true, xuiEmail: true } } }
+      include: { server: true, customerNodes: { select: { id: true, customerId: true, xuiEmail: true, remoteControl: true } } }
     });
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
+    await this.assertNoPendingRenewalsForServiceNode(serviceNodeId, '批量删除远端账号');
 
     const results: Array<{ customerNodeId: string; customerId: string; xuiEmail: string; deleted: boolean; skipped?: boolean; message?: string }> = [];
     for (const node of serviceNode.customerNodes) {
       try {
-        const customerNode = await this.prisma.customerNode.findUnique({ where: { id: node.id }, select: { lastSyncedAt: true, config: true } });
-        if (!this.shouldDeleteRemoteClient(customerNode)) {
-          results.push({ customerNodeId: node.id, customerId: node.customerId, xuiEmail: node.xuiEmail, deleted: false, skipped: true, message: 'not synced to remote' });
+        if (node.remoteControl !== 'fully_managed') {
+          results.push({ customerNodeId: node.id, customerId: node.customerId, xuiEmail: node.xuiEmail, deleted: false, skipped: true, message: '非完全托管账号不会从官方面板删除' });
           continue;
         }
-        if (!serviceNode.inboundId) throw new BadRequestException('Service node missing 3x-ui inbound ID');
+        const customerNode = await this.prisma.customerNode.findUnique({ where: { id: node.id }, select: { lastSyncedAt: true, config: true } });
+        if (!this.shouldDeleteRemoteClient(customerNode)) {
+          results.push({ customerNodeId: node.id, customerId: node.customerId, xuiEmail: node.xuiEmail, deleted: false, skipped: true, message: '该账号没有远端同步记录' });
+          continue;
+        }
+        if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
         await this.deleteRemoteClient(serviceNode.server, serviceNode.inboundId, node.xuiEmail, keepTraffic, {
           customerId: node.customerId,
           customerNodeId: node.id,
           serviceNodeId
+        });
+        await this.prisma.customerNode.update({
+          where: { id: node.id },
+          data: { status: 'disabled', disabledReason: 'admin', lastSyncedAt: null }
         });
         results.push({ customerNodeId: node.id, customerId: node.customerId, xuiEmail: node.xuiEmail, deleted: true });
       } catch (error) {
@@ -1155,23 +1987,34 @@ export class XuiService {
     return { serviceNodeId, total: results.length, success, skipped, failed, results };
   }
 
-  async syncCustomerNode(customerId: string, customerNodeId: string, options: SyncOptions = {}) {
+  async refreshCustomerNodeBinding(customerId: string, customerNodeId: string) {
+    const node = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      select: { serviceNodeId: true }
+    });
+    if (!node) throw new NotFoundException('用户节点不存在');
+    return this.locks.withLock(this.locks.serviceNodeKey(node.serviceNodeId), () =>
+      this.locks.withLock(this.locks.customerNodeKey(customerNodeId), () =>
+        this.refreshCustomerNodeBindingUnlocked(customerId, customerNodeId, node.serviceNodeId)
+      )
+    );
+  }
+
+  private async refreshCustomerNodeBindingUnlocked(customerId: string, customerNodeId: string, lockedServiceNodeId: string) {
     const customerNode = await this.prisma.customerNode.findFirst({
       where: { id: customerNodeId, customerId },
       include: {
-        customer: true,
         serviceNode: { include: { server: true } }
       }
     });
     if (!customerNode) throw new NotFoundException('用户节点不存在');
+    if (customerNode.serviceNodeId !== lockedServiceNodeId) throw new BadRequestException('绑定关系已被其他操作修改，请刷新后重试');
+    await this.assertNoPendingRenewal(customerNodeId, '刷新绑定');
 
     const server = customerNode.serviceNode.server;
     const serverId = server.id;
 
     try {
-      const targetStatus = options.status || customerNode.status;
-      if (!server.enabled && targetStatus === 'active') throw new BadRequestException('3x-ui 服务器已停用');
-      if (!customerNode.serviceNode.enabled && targetStatus === 'active') throw new BadRequestException('服务节点已停用');
       if (!customerNode.serviceNode.inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
 
       const client = await this.createAuthenticatedClient(server);
@@ -1186,93 +2029,22 @@ export class XuiService {
       }
 
       const savedConfig = this.xuiObject(customerNode.config);
-      const serviceConfig = this.xuiObject(customerNode.serviceNode.config) as ServiceNodeConfig;
-      const remoteClientEmail = this.stringValue(serviceConfig.remoteClientEmail);
-      const remoteClientUuid = this.stringValue(serviceConfig.remoteClientUuid);
-      const remoteClientSubId = this.stringValue(serviceConfig.remoteClientSubId);
       const savedUuid = typeof savedConfig.uuid === 'string' ? savedConfig.uuid : undefined;
       const savedSubId = typeof savedConfig.subId === 'string' ? savedConfig.subId : undefined;
-      const lookupEmail = remoteClientEmail || customerNode.xuiEmail;
       const existing = await this.findClient(client, {
-        email: lookupEmail,
-        uuid: remoteClientUuid || customerNode.uuid || savedUuid,
-        subId: remoteClientSubId || savedSubId,
+        email: customerNode.xuiEmail,
+        uuid: customerNode.uuid || savedUuid,
+        subId: savedSubId,
         inboundId
       }, inbounds);
+      if (!existing.exists) throw new BadRequestException('远端 3x-ui 客户端不存在；绑定刷新不会创建或修改远端账号');
 
-      if (!existing.exists && options.createIfMissing === false) {
-        if (options.requireExisting) {
-          throw new BadRequestException('Remote 3x-ui client was not found. This operation only updates an existing client and will not create a duplicate client.');
-        }
-        const uuid = customerNode.uuid || savedUuid || randomUUID();
-        const subId = savedSubId || this.subscriptionId(uuid);
-        const syncedAt = new Date();
-        const updatedNode = await this.prisma.customerNode.update({
-          where: { id: customerNode.id },
-          data: { uuid, lastSyncedAt: syncedAt, config: this.toJsonValue({ ...savedConfig, uuid, subId, links: [] }) },
-          include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
-        });
-        const detail = {
-          customerId,
-          customerNodeId,
-          inboundId,
-          xuiEmail: lookupEmail,
-          route: 'clients/get',
-          action: 'already-absent',
-          subId,
-          links: [] as string[],
-          remoteConfig: null as unknown
-        };
-        const remoteConfigSync = options.syncServiceConfig ? await this.syncServiceNodeRemoteConfig(customerNode.serviceNodeId) : null;
-        detail.remoteConfig = remoteConfigSync ? this.toJsonValue(remoteConfigSync) : null;
-        await this.writeSyncLog(serverId, 'customer-node-sync', 'success', `Remote client already absent: ${lookupEmail}`, detail);
-        return { synced: true, action: 'already-absent', route: 'clients/get', node: updatedNode, detail, remoteConfig: remoteConfigSync };
-      }
-
-      if (!existing.exists) throw new BadRequestException('Remote 3x-ui client was not found for this service node. Customer binding sync will not create a new client. Sync/import the service node first or fill the existing remote client email/UUID.');
-
-      const allowCreate = false;
-      if (!existing.exists && !allowCreate) {
-        throw new BadRequestException('绑定已有 3x-ui 入站时未找到对应远端客户端，为避免重复创建，请填写已有客户端的远端标识/email 或 UUID 后再同步');
-      }
-
-      let uuid = existing.uuid || remoteClientUuid || customerNode.uuid || savedUuid || randomUUID();
-      let subId = existing.subId || remoteClientSubId || savedSubId || this.subscriptionId(uuid);
-      let xuiEmail = this.stringValue(options.preferredClientEmail) || existing.email || remoteClientEmail || customerNode.xuiEmail;
-      if (client.usesApiProfile('v3.6')) {
-        xuiEmail = await this.availableV36ClientEmail(client, xuiEmail, existing, {
-          customerId,
-          loginUsername: customerNode.customer.loginUsername
-        });
-      }
-      const xuiClient = this.buildXuiClient({
-        protocol: customerNode.serviceNode.protocol,
-        uuid,
-        subId,
-        email: xuiEmail,
-        enabled: targetStatus === 'active',
-        expireAt: options.expireAt === undefined ? customerNode.expireAt : options.expireAt,
-        trafficLimitGb: options.trafficLimitGb ?? customerNode.trafficLimitGb,
-        flow: this.clientFlowForServiceNode(customerNode.serviceNode)
-      });
-      const route = 'clients/update';
-      const updateIdentifier = client.usesApiProfile('v3.6') ? existing.email || xuiEmail : existing.clientId || existing.uuid || uuid;
-      const payload = await client.updateClient(existing.inboundId || inboundId, updateIdentifier, xuiClient);
-      this.assertXuiSuccess(payload);
-      if (client.usesApiProfile('v3.6')) {
-        const confirmed = await this.confirmV36ClientUpdate(client, {
-          requestedEmail: xuiEmail,
-          previousEmail: existing.email,
-          inboundId,
-          uuid,
-          subId
-        });
-        xuiEmail = confirmed.email;
-        uuid = confirmed.uuid || uuid;
-        subId = confirmed.subId || subId;
-      }
-      const links = targetStatus === 'active'
-        ? await this.requireLinksForServiceNode(client, xuiEmail, subId, {
+      const uuid = existing.uuid || customerNode.uuid || savedUuid;
+      const subId = existing.subId || savedSubId;
+      const xuiEmail = existing.email || customerNode.xuiEmail;
+      await this.assertRemoteClientBindingAvailable(customerNode.serviceNodeId, xuiEmail, customerNode.id);
+      const serviceConfig = this.xuiObject(customerNode.serviceNode.config) as ServiceNodeConfig;
+      const links = await this.linksForClient(client, xuiEmail, subId, {
           serverId,
           inboundId,
           serviceNodeName: customerNode.serviceNode.name,
@@ -1280,80 +2052,379 @@ export class XuiService {
           encryption: String(serviceConfig.encryption || 'none'),
           server,
           uuid
-        })
-        : await this.linksForClient(client, xuiEmail, subId, {
-          serverId,
-          inboundId,
-          serviceNodeName: customerNode.serviceNode.name,
-          protocol: customerNode.serviceNode.protocol,
-          encryption: String(serviceConfig.encryption || 'none'),
-          server,
-          uuid
-        }).catch(() => [] as string[]);
+        }).catch(() => Array.isArray(savedConfig.links) ? savedConfig.links.filter((item): item is string => typeof item === 'string') : []);
       const syncedAt = new Date();
-      const localPatch = {
+      const updatedNode = await this.prisma.customerNode.update({
+        where: { id: customerNode.id },
+        data: {
         xuiEmail,
-        uuid,
+          uuid: uuid || null,
         lastSyncedAt: syncedAt,
         config: this.toJsonValue({ ...savedConfig, uuid, subId, links })
-      };
-      const remoteIdentityChanged = xuiEmail !== remoteClientEmail
-        || uuid !== remoteClientUuid
-        || subId !== remoteClientSubId;
-      const updatedNode = options.persistLocal === false
-        ? customerNode
-        : remoteIdentityChanged
-          ? await this.prisma.$transaction(async (tx) => {
-            const node = await tx.customerNode.update({
-              where: { id: customerNode.id },
-              data: localPatch,
-              include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
-            });
-            await tx.serviceNode.update({
-              where: { id: customerNode.serviceNodeId },
-              data: {
-                config: this.toJsonValue({
-                  ...serviceConfig,
-                  remoteClientEmail: xuiEmail,
-                  remoteClientUuid: uuid,
-                  remoteClientSubId: subId,
-                  remoteClientLinks: links
-                })
-              }
-            });
-            return node;
-          })
-          : await this.prisma.customerNode.update({
-            where: { id: customerNode.id },
-            data: localPatch,
-            include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
-          });
+        },
+        include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+      });
 
       const detail = {
         customerId,
         customerNodeId,
         inboundId,
         xuiEmail,
-        route,
-        action: 'update',
+        route: 'clients/get',
+        action: 'refresh',
         subId,
-        links,
-        remoteConfig: null as unknown,
-        response: this.toJsonValue(payload)
+        links
       };
-      const remoteConfigSync = options.syncServiceConfig ? await this.syncServiceNodeRemoteConfig(customerNode.serviceNodeId) : null;
-      detail.remoteConfig = remoteConfigSync ? this.toJsonValue(remoteConfigSync) : null;
-      await this.writeSyncLog(serverId, 'customer-node-sync', 'success', `Synced ${xuiEmail}`, detail);
-      return { synced: true, action: 'update', route, node: updatedNode, detail, localPatch, remoteConfig: remoteConfigSync };
+      await this.writeSyncLog(serverId, 'customer-node-refresh', 'success', `已刷新客户端 ${xuiEmail} 的绑定`, detail);
+      return { synced: true, action: 'refresh', route: 'clients/get', remoteWrite: false, node: updatedNode, detail };
     } catch (error) {
-      await this.writeSyncLog(serverId, 'customer-node-sync', 'failed', this.errorMessage(error), {
+      await this.writeSyncLog(serverId, 'customer-node-refresh', 'failed', this.errorMessage(error), {
         customerId,
         customerNodeId,
         xuiEmail: customerNode.xuiEmail
       });
       if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
-      throw new BadGatewayException(`同步 3x-ui 失败：${this.errorMessage(error)}`);
+      throw new BadGatewayException(`刷新 3x-ui 绑定失败：${this.errorMessage(error)}`);
     }
+  }
+
+  async syncCustomerNode(customerId: string, customerNodeId: string) {
+    return this.refreshCustomerNodeBinding(customerId, customerNodeId);
+  }
+
+  async createCustomerNodeRemoteClient(customerId: string, customerNodeId: string, input: z.infer<typeof remoteClientCreateSchema>) {
+    const node = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      select: { serviceNodeId: true }
+    });
+    if (!node) throw new NotFoundException('用户节点不存在');
+    return this.locks.withLock(this.locks.serviceNodeKey(node.serviceNodeId), () =>
+      this.locks.withLock(this.locks.customerNodeKey(customerNodeId), () =>
+        this.createCustomerNodeRemoteClientUnlocked(customerId, customerNodeId, input, node.serviceNodeId)
+      )
+    );
+  }
+
+  private async createCustomerNodeRemoteClientUnlocked(customerId: string, customerNodeId: string, input: z.infer<typeof remoteClientCreateSchema>, lockedServiceNodeId: string) {
+    const node = await this.customerNodeForRemoteOperation(customerId, customerNodeId);
+    if (node.serviceNodeId !== lockedServiceNodeId) throw new BadRequestException('绑定关系已被其他操作修改，请刷新后重试');
+    if (node.remoteControl !== 'fully_managed') throw new BadRequestException('只有完全托管绑定允许创建远端账号');
+    await this.assertNoPendingRenewal(customerNodeId, '创建远端账号');
+    if (input.email !== node.xuiEmail) throw new BadRequestException('创建远端客户端必须使用当前绑定的官方标识；如需更换标识，请先修改本地绑定并明确确认接管');
+    await this.assertRemoteClientBindingAvailable(node.serviceNodeId, input.email, node.id);
+    const inboundId = node.serviceNode.inboundId;
+    if (!inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
+    const client = await this.createAuthenticatedClient(node.serviceNode.server);
+    const occupied = await this.optionalV36ClientRecord(client, input.email);
+    if (occupied) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
+
+    const uuid = input.uuid || randomUUID();
+    const subId = input.subId || this.randomSecret(12);
+    const payload = this.buildXuiClient({
+      protocol: node.serviceNode.protocol,
+      uuid,
+      subId,
+      email: input.email,
+      enabled: input.enabled,
+      expireAt: input.expireAt,
+      trafficLimitGb: input.trafficLimitGb,
+      flow: this.clientFlowForServiceNode(node.serviceNode)
+    });
+    let response: unknown;
+    try {
+      response = await client.addClient(inboundId, payload);
+      this.assertXuiSuccess(response);
+    } catch (error) {
+      await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-create', 'failed', this.errorMessage(error), {
+        customerId,
+        customerNodeId,
+        serviceNodeId: node.serviceNodeId,
+        inboundId,
+        xuiEmail: input.email,
+        phase: 'remote-create'
+      });
+      throw error;
+    }
+    try {
+      const verified = await this.findClient(client, { email: input.email, uuid, subId, inboundId }, []);
+      if (!verified.exists) throw new BadGatewayException('远端客户端创建后回读失败');
+      const savedConfig = this.xuiObject(node.config);
+      const binding = await this.prisma.customerNode.update({
+        where: { id: node.id },
+        data: {
+          xuiEmail: input.email,
+          uuid: verified.uuid || uuid,
+          expireAt: input.expireAt || null,
+          trafficLimitGb: new Prisma.Decimal(input.trafficLimitGb),
+          status: input.enabled ? 'active' : 'disabled',
+          disabledReason: input.enabled ? null : 'admin',
+          lastSyncedAt: new Date(),
+          config: this.toJsonValue({ ...savedConfig, uuid: verified.uuid || uuid, subId: verified.subId || subId })
+        },
+        include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+      });
+      await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-create', 'success', `已创建客户端 ${input.email}`, {
+        customerId,
+        customerNodeId,
+        serviceNodeId: node.serviceNodeId,
+        inboundId,
+        xuiEmail: input.email,
+        uuid: verified.uuid || uuid,
+        subId: verified.subId || subId,
+        response: this.toJsonValue(response)
+      });
+      return { created: true, remoteWrite: true, route: 'clients/add', response, binding };
+    } catch (error) {
+      await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-create', 'failed', this.errorMessage(error), {
+        customerId,
+        customerNodeId,
+        serviceNodeId: node.serviceNodeId,
+        inboundId,
+        xuiEmail: input.email,
+        phase: 'verify-or-save',
+        rollbackAttempted: true
+      });
+      try {
+        await this.deleteRemoteClientWithClient(client, node.serviceNode.serverId, inboundId, input.email, false, {
+          customerId,
+          customerNodeId,
+          serviceNodeId: node.serviceNodeId,
+          rollbackOf: 'clients/add'
+        });
+      } catch (cleanupError) {
+        throw new BadGatewayException(`远端客户端已创建，但本地保存失败且自动回滚失败，请立即人工核对 ${input.email}：${this.errorMessage(cleanupError)}`);
+      }
+      throw error;
+    }
+  }
+
+  async patchCustomerNodeRemoteClient(customerId: string, customerNodeId: string, input: z.infer<typeof remoteClientPatchSchema>) {
+    return this.withCustomerNodeLock(customerId, customerNodeId, () => this.patchCustomerNodeRemoteClientUnlocked(customerId, customerNodeId, input));
+  }
+
+  private async patchCustomerNodeRemoteClientUnlocked(customerId: string, customerNodeId: string, input: z.infer<typeof remoteClientPatchSchema>) {
+    const node = await this.customerNodeForRemoteOperation(customerId, customerNodeId);
+    if (node.remoteControl === 'reference') throw new BadRequestException('只读引用绑定不能修改远端账号');
+    await this.assertNoPendingRenewal(customerNodeId, '修改远端账号');
+    const patch = {
+      ...(input.expireAt === undefined ? {} : { expiryTime: input.expireAt ? input.expireAt.getTime() : 0 }),
+      ...(input.trafficLimitGb === undefined ? {} : { totalGB: this.gbToBytes(input.trafficLimitGb) }),
+      ...(input.enabled === undefined ? {} : { enable: input.enabled })
+    };
+    const result = await this.patchCustomerNodeRemote(customerId, customerNodeId, patch, 'account');
+    const before = 'before' in result ? result.before : undefined;
+    if (!before) throw new BadGatewayException('远端客户端修改前状态缺失，无法保证本地保存一致性');
+    try {
+      await this.prisma.customerNode.update({
+        where: { id: customerNodeId },
+        data: {
+          expireAt: input.expireAt === undefined ? undefined : input.expireAt,
+          trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb),
+          status: input.enabled === undefined ? undefined : input.enabled ? 'active' : 'disabled',
+          disabledReason: input.enabled === undefined ? undefined : input.enabled ? null : 'admin'
+        }
+      });
+      return result;
+    } catch (error) {
+      try {
+        await this.patchCustomerNodeRemote(customerId, customerNodeId, before, 'account', true);
+        await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-account-save', 'failed', this.errorMessage(error), {
+          customerId,
+          customerNodeId,
+          xuiEmail: node.xuiEmail,
+          remoteRolledBack: true
+        });
+      } catch (rollbackError) {
+        await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-account-save', 'failed', this.errorMessage(error), {
+          customerId,
+          customerNodeId,
+          xuiEmail: node.xuiEmail,
+          remoteRolledBack: false,
+          rollbackError: this.errorMessage(rollbackError)
+        });
+        throw new BadGatewayException(`官方客户端已修改，但本地保存及自动回滚失败，请立即人工核对 ${node.xuiEmail}：${this.errorMessage(rollbackError)}`);
+      }
+      throw new BadGatewayException(`本地保存失败，官方客户端修改已自动回滚：${this.errorMessage(error)}`);
+    }
+  }
+
+  async deleteCustomerNodeRemoteClient(customerId: string, customerNodeId: string, keepTraffic = false) {
+    return this.deleteCustomerNode(customerId, customerNodeId, keepTraffic);
+  }
+
+  async updateCustomerNodeExpiry(customerId: string, customerNodeId: string, expireAt: Date | null, enable?: boolean, allowPendingRenewal = false) {
+    return this.withCustomerNodeLock(customerId, customerNodeId, () => this.patchCustomerNodeRemote(customerId, customerNodeId, {
+      expiryTime: expireAt ? expireAt.getTime() : 0,
+      ...(enable === undefined ? {} : { enable })
+    }, 'expiry', allowPendingRenewal));
+  }
+
+  async customerNodeRemoteState(customerId: string, customerNodeId: string) {
+    const node = await this.customerNodeForRemoteOperation(customerId, customerNodeId);
+    const inboundId = node.serviceNode.inboundId;
+    if (!inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
+    const client = await this.createAuthenticatedClient(node.serviceNode.server);
+    const rawInbounds = await client.listInbounds();
+    this.assertXuiSuccess(rawInbounds);
+    const config = this.xuiObject(node.config);
+    const existing = await this.findClient(client, {
+      email: node.xuiEmail,
+      uuid: node.uuid || this.stringValue(config.uuid),
+      subId: this.stringValue(config.subId),
+      inboundId
+    }, this.xuiArray(rawInbounds));
+    if (!existing.exists) throw new BadRequestException('远端 3x-ui 客户端不存在');
+    const raw = this.xuiObject(existing.raw);
+    const expiryTime = Number(raw.expiryTime);
+    return {
+      customerId,
+      customerNodeId,
+      inboundId: existing.inboundId || inboundId,
+      xuiEmail: existing.email || node.xuiEmail,
+      expiryTime: Number.isFinite(expiryTime) && expiryTime > 0 ? expiryTime : 0,
+      enable: this.booleanValue(raw.enable, false)
+    };
+  }
+
+  async setCustomerNodeRemoteEnabled(customerId: string, customerNodeId: string, enable: boolean) {
+    return this.withCustomerNodeLock(customerId, customerNodeId, () => this.patchCustomerNodeRemote(customerId, customerNodeId, { enable }, 'enable'));
+  }
+
+  async updateCustomerNodeRemoteQuota(customerId: string, customerNodeId: string, trafficLimitGb: Prisma.Decimal | number | string | null) {
+    return this.withCustomerNodeLock(customerId, customerNodeId, () => this.patchCustomerNodeRemote(customerId, customerNodeId, { totalGB: this.gbToBytes(trafficLimitGb) }, 'quota'));
+  }
+
+  private async patchCustomerNodeRemote(
+    customerId: string,
+    customerNodeId: string,
+    patch: Record<string, unknown>,
+    operation: 'expiry' | 'enable' | 'quota' | 'account',
+    allowPendingRenewal = false
+  ) {
+    const node = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      include: { serviceNode: { include: { server: true } } }
+    });
+    if (!node) throw new NotFoundException('用户节点不存在');
+    if (node.remoteControl === 'reference') {
+      return { synced: false, skipped: true, remoteWrite: false, reason: '该绑定为只读引用，不修改远端账号', operation };
+    }
+    if (!allowPendingRenewal) await this.assertNoPendingRenewal(customerNodeId, '修改远端账号');
+    const inboundId = node.serviceNode.inboundId;
+    if (!inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
+    const client = await this.createAuthenticatedClient(node.serviceNode.server);
+    const rawInbounds = await client.listInbounds();
+    this.assertXuiSuccess(rawInbounds);
+    const existing = await this.findClient(client, {
+      email: node.xuiEmail,
+      uuid: node.uuid || this.stringValue(this.xuiObject(node.config).uuid),
+      subId: this.stringValue(this.xuiObject(node.config).subId),
+      inboundId
+    }, this.xuiArray(rawInbounds));
+    if (!existing.exists) throw new BadRequestException('远端 3x-ui 客户端不存在，精确更新不会创建新账号');
+
+    const current = this.xuiObject(existing.raw);
+    const next = { ...current, ...patch };
+    const before = Object.fromEntries(Object.keys(patch).map((key) => [key, current[key]]));
+    const identifier = existing.email || node.xuiEmail;
+    const response = await client.updateClient(existing.inboundId || inboundId, identifier, next);
+    this.assertXuiSuccess(response);
+
+    const verifyPayload = await client.listInbounds();
+    this.assertXuiSuccess(verifyPayload);
+    const refreshed = await this.findClient(client, {
+      email: existing.email || node.xuiEmail,
+      uuid: existing.uuid || node.uuid || undefined,
+      subId: existing.subId,
+      inboundId
+    }, this.xuiArray(verifyPayload));
+    if (!refreshed.exists) throw new BadGatewayException('远端客户端更新后回读失败');
+    const verified = this.xuiObject(refreshed.raw);
+    for (const [key, value] of Object.entries(patch)) {
+      if (!this.remoteClientFieldMatches(key, verified[key], value)) throw new BadGatewayException(`远端客户端字段 ${key} 未按预期更新`);
+    }
+    const syncedAt = new Date();
+    await this.prisma.customerNode.update({ where: { id: node.id }, data: { lastSyncedAt: syncedAt } });
+    const detail = { customerId, customerNodeId, inboundId, xuiEmail: existing.email || node.xuiEmail, operation, fields: Object.keys(patch) };
+    const operationName = operation === 'expiry' ? '到期时间' : operation === 'enable' ? '启用状态' : operation === 'quota' ? '流量额度' : '账号配置';
+    await this.writeSyncLog(node.serviceNode.serverId, `customer-node-${operation}-update`, 'success', `已更新客户端 ${node.xuiEmail} 的${operationName}`, detail);
+    return {
+      synced: true,
+      remoteWrite: true,
+      route: 'clients/update',
+      operation,
+      fields: Object.keys(patch),
+      before,
+      detail,
+      response,
+      verified: {
+        expiryTime: Number(verified.expiryTime) > 0 ? Number(verified.expiryTime) : 0,
+        enable: this.booleanValue(verified.enable, false)
+      }
+    };
+  }
+
+  private async customerNodeForRemoteOperation(customerId: string, customerNodeId: string) {
+    const node = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      include: { serviceNode: { include: { server: true } } }
+    });
+    if (!node) throw new NotFoundException('用户节点不存在');
+    return node;
+  }
+
+  private async withCustomerNodeLock<T>(customerId: string, customerNodeId: string, operation: () => Promise<T>) {
+    const node = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      select: { serviceNodeId: true }
+    });
+    if (!node) throw new NotFoundException('用户节点不存在');
+    return this.locks.withLock(this.locks.serviceNodeKey(node.serviceNodeId), () =>
+      this.locks.withLock(this.locks.customerNodeKey(customerNodeId), operation)
+    );
+  }
+
+  private async assertRemoteClientBindingAvailable(serviceNodeId: string, xuiEmail: string, excludeCustomerNodeId?: string) {
+    const occupied = await this.prisma.customerNode.findFirst({
+      where: {
+        serviceNodeId,
+        xuiEmail,
+        ...(excludeCustomerNodeId ? { id: { not: excludeCustomerNodeId } } : {})
+      },
+      select: { id: true }
+    });
+    if (occupied) {
+      throw new BadRequestException('该官方 3x-ui 客户端已绑定其他本地用户；请先解绑原关系，系统不会自动修改或删除远端账号');
+    }
+  }
+
+  private async assertNoPendingRenewal(customerNodeId: string, action: string) {
+    const pending = await this.prisma.renewalLog.findFirst({
+      where: { customerNodeId, status: 'pending' },
+      select: { id: true }
+    });
+    if (pending) throw new BadRequestException(`该用户节点存在待处理续费，完成自动恢复或人工对账后才能${action}`);
+  }
+
+  private async assertNoPendingRenewalsForServiceNode(serviceNodeId: string, action: string) {
+    const pending = await this.prisma.renewalLog.findFirst({
+      where: { status: 'pending', customerNode: { serviceNodeId } },
+      select: { id: true }
+    });
+    if (pending) throw new BadRequestException(`该路由节点存在待处理续费，完成自动恢复或人工对账后才能${action}`);
+  }
+
+  private async assertManagedServiceNode(serviceNodeId: string) {
+    const node = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, select: { id: true, serverId: true, ownership: true } });
+    if (!node) throw new NotFoundException('服务节点不存在');
+    if (node.ownership !== 'managed') throw new BadRequestException('该入站为官方面板引用资源，请明确接管后再执行远端写操作');
+    return node;
+  }
+
+  private remoteClientFieldMatches(key: string, actual: unknown, expected: unknown) {
+    if (key === 'expiryTime' || key === 'totalGB') return Number(actual) === Number(expected);
+    if (key === 'enable') return this.booleanValue(actual, false) === this.booleanValue(expected, false);
+    return actual === expected;
   }
 
   async customerNodeLinks(customerId: string, customerNodeId: string) {
@@ -1361,7 +2432,7 @@ export class XuiService {
       where: { id: customerNodeId, customerId },
       include: { serviceNode: { include: { server: true } } }
     });
-    if (!customerNode) throw new NotFoundException('Customer node not found');
+    if (!customerNode) throw new NotFoundException('用户节点不存在');
     const config = this.xuiObject(customerNode.config);
     const savedLinks = Array.isArray(config.links) ? config.links.filter((item): item is string => typeof item === 'string' && item.length > 0) : [];
     const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
@@ -1405,13 +2476,280 @@ export class XuiService {
     }
   }
 
+  private parseOutboundInput(input: string, requestedFormat: string) {
+    const trimmed = input.trim();
+    const parseJson = () => {
+      let value: unknown;
+      try {
+        value = JSON.parse(trimmed) as unknown;
+      } catch {
+        throw new BadRequestException('Xray JSON 格式不正确');
+      }
+      const root = this.xuiObject(value);
+      const values = Array.isArray(value)
+        ? value
+        : Array.isArray(root.outbounds)
+          ? root.outbounds
+          : Object.keys(root).length
+            ? [root]
+            : [];
+      return values.map((item, index) => this.normalizeImportedOutbound(this.xuiObject(item), 'xray_json', index));
+    };
+
+    if (requestedFormat === 'xray_json' || (requestedFormat === 'auto' && /^[\[{]/.test(trimmed))) return parseJson();
+    const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
+    if (requestedFormat === 'subscription' || lines.length > 1) {
+      return lines.flatMap((line) => this.parseOutboundLink(line, requestedFormat === 'subscription' ? 'auto' : requestedFormat));
+    }
+    return this.parseOutboundLink(trimmed, requestedFormat);
+  }
+
+  private parseOutboundLink(input: string, requestedFormat: string) {
+    const scheme = input.match(/^([a-z][a-z0-9+.-]*):\/\//i)?.[1]?.toLowerCase() || '';
+    const format = requestedFormat === 'auto' ? scheme : requestedFormat;
+    if (format === 'vmess') return [this.parseVmessOutbound(input)];
+    if (format === 'shadowsocks' || format === 'ss') return [this.parseShadowsocksOutbound(input)];
+    if (['socks', 'socks5', 'http', 'https', 'vless', 'trojan'].includes(format)) return [this.parseUrlOutbound(input, format)];
+    throw new BadRequestException(`暂不支持的出站导入格式：${format || 'unknown'}`);
+  }
+
+  private parseUrlOutbound(input: string, format: string) {
+    let url: URL;
+    try {
+      url = new URL(input);
+    } catch {
+      throw new BadRequestException(`${format} 出站链接格式不正确`);
+    }
+    const name = decodeURIComponent(url.hash.replace(/^#/, '')) || `${format}-${url.hostname}`;
+    const tag = this.importedOutboundTag(name, 0);
+    const port = Number(url.port || (format === 'https' ? 443 : format === 'http' ? 80 : 1080));
+    if (!url.hostname || !Number.isInteger(port) || port <= 0 || port > 65535) throw new BadRequestException(`${format} 出站地址或端口不正确`);
+
+    if (format === 'socks' || format === 'socks5' || format === 'http' || format === 'https') {
+      const protocol = format.startsWith('socks') ? 'socks' : 'http';
+      const username = decodeURIComponent(url.username || '');
+      const password = decodeURIComponent(url.password || '');
+      return this.normalizeImportedOutbound({
+        tag,
+        protocol,
+        settings: {
+          servers: [{
+            address: url.hostname,
+            port,
+            ...(username ? { users: [{ user: username, pass: password }] } : {})
+          }]
+        },
+        streamSettings: { network: 'tcp', ...(format === 'https' ? { security: 'tls' } : {}) }
+      }, protocol, 0, name);
+    }
+
+    const credential = decodeURIComponent(url.username || '');
+    if (!credential) throw new BadRequestException(`${format} 出站缺少账号凭据`);
+    const network = url.searchParams.get('type') || 'tcp';
+    const security = url.searchParams.get('security') || 'none';
+    const streamSettings: Record<string, unknown> = { network, security };
+    const host = url.searchParams.get('host') || '';
+    const path = url.searchParams.get('path') || '';
+    if (network === 'ws') streamSettings.wsSettings = { path: path || '/', headers: host ? { Host: host } : {} };
+    if (network === 'grpc') streamSettings.grpcSettings = { serviceName: url.searchParams.get('serviceName') || path };
+    if (security === 'tls') streamSettings.tlsSettings = { serverName: url.searchParams.get('sni') || host || url.hostname };
+    if (security === 'reality') streamSettings.realitySettings = {
+      serverName: url.searchParams.get('sni') || '',
+      fingerprint: url.searchParams.get('fp') || 'chrome',
+      publicKey: url.searchParams.get('pbk') || '',
+      shortId: url.searchParams.get('sid') || '',
+      spiderX: url.searchParams.get('spx') || '/'
+    };
+    const protocol = format;
+    const user = protocol === 'trojan'
+      ? { password: credential, email: name }
+      : { id: credential, encryption: url.searchParams.get('encryption') || 'none', flow: url.searchParams.get('flow') || '' };
+    return this.normalizeImportedOutbound({
+      tag,
+      protocol,
+      settings: { servers: [{ address: url.hostname, port, users: [user] }] },
+      streamSettings
+    }, protocol, 0, name);
+  }
+
+  private parseVmessOutbound(input: string) {
+    try {
+      const raw = input.replace(/^vmess:\/\//i, '');
+      const value = JSON.parse(Buffer.from(this.normalizeBase64(raw), 'base64').toString('utf8')) as Record<string, unknown>;
+      const name = this.stringValue(value.ps) || `vmess-${this.stringValue(value.add) || 'outbound'}`;
+      const network = this.stringValue(value.net) || 'tcp';
+      const host = this.stringValue(value.host);
+      const path = this.stringValue(value.path);
+      const streamSettings: Record<string, unknown> = { network, security: this.stringValue(value.tls) || 'none' };
+      if (network === 'ws') streamSettings.wsSettings = { path: path || '/', headers: host ? { Host: host } : {} };
+      if (network === 'grpc') streamSettings.grpcSettings = { serviceName: path };
+      if (streamSettings.security === 'tls') streamSettings.tlsSettings = { serverName: this.stringValue(value.sni) || host || this.stringValue(value.add) };
+      return this.normalizeImportedOutbound({
+        tag: this.importedOutboundTag(name, 0),
+        protocol: 'vmess',
+        settings: { vnext: [{ address: this.stringValue(value.add), port: Number(value.port), users: [{ id: this.stringValue(value.id), alterId: Number(value.aid || 0), security: this.stringValue(value.scy) || 'auto' }] }] },
+        streamSettings
+      }, 'vmess', 0, name);
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('VMess 出站链接格式不正确');
+    }
+  }
+
+  private parseShadowsocksOutbound(input: string) {
+    try {
+      const raw = input.replace(/^ss:\/\//i, '');
+      const hashIndex = raw.indexOf('#');
+      const name = hashIndex >= 0 ? decodeURIComponent(raw.slice(hashIndex + 1)) : 'shadowsocks-outbound';
+      const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+      const atIndex = withoutHash.lastIndexOf('@');
+      const decoded = atIndex >= 0
+        ? `${Buffer.from(this.normalizeBase64(withoutHash.slice(0, atIndex)), 'base64').toString('utf8')}@${withoutHash.slice(atIndex + 1)}`
+        : Buffer.from(this.normalizeBase64(withoutHash), 'base64').toString('utf8');
+      const match = decoded.match(/^([^:]+):(.+)@([^:]+):(\d+)$/);
+      if (!match) throw new Error('invalid');
+      const [, method, password, address, portValue] = match;
+      return this.normalizeImportedOutbound({
+        tag: this.importedOutboundTag(name, 0),
+        protocol: 'shadowsocks',
+        settings: { servers: [{ address, port: Number(portValue), method, password }] }
+      }, 'shadowsocks', 0, name);
+    } catch {
+      throw new BadRequestException('Shadowsocks 出站链接格式不正确');
+    }
+  }
+
+  private normalizeImportedOutbound(outbound: Record<string, unknown>, format: string, index: number, suppliedName?: string) {
+    const protocol = String(this.stringValue(outbound.protocol) || '').toLowerCase();
+    if (!protocol) throw new BadRequestException('出站缺少 protocol');
+    const name = suppliedName || this.stringValue(outbound.tag) || `${protocol}-${index + 1}`;
+    return {
+      name: this.truncateText(name, 120),
+      format,
+      outbound: { ...outbound, tag: this.stringValue(outbound.tag) || this.importedOutboundTag(name, index), protocol }
+    };
+  }
+
+  private importedOutboundTag(name: string, index: number) {
+    const readable = this.readableIdentifier(name, 'outbound', 120).toLowerCase();
+    return this.truncateText(`${readable}${index ? `-${index + 1}` : ''}`, 160);
+  }
+
+  private availableOutboundTag(base: string, occupied: Set<string>) {
+    if (!occupied.has(base)) return base;
+    for (let suffix = 2; suffix < 10000; suffix += 1) {
+      const candidate = this.truncateText(`${base}-${suffix}`, 160);
+      if (!occupied.has(candidate)) return candidate;
+    }
+    throw new BadRequestException(`无法为出站 ${base} 生成可用标签`);
+  }
+
+  private configFingerprint(value: unknown) {
+    return createHash('sha256').update(this.stableJson(value)).digest('hex');
+  }
+
+  private findRemoteRouteIndex(rules: unknown[], fingerprint: string, remoteOrder: number | null | undefined) {
+    if (remoteOrder !== null && remoteOrder !== undefined && remoteOrder >= 0 && remoteOrder < rules.length) {
+      if (this.configFingerprint(this.xuiObject(rules[remoteOrder])) === fingerprint) return remoteOrder;
+    }
+    const matches = rules
+      .map((item, index) => ({ index, fingerprint: this.configFingerprint(this.xuiObject(item)) }))
+      .filter((item) => item.fingerprint === fingerprint);
+    if (!matches.length) return -1;
+    if (matches.length === 1) return matches[0]!.index;
+    if (remoteOrder === null || remoteOrder === undefined) {
+      throw new BadRequestException('官方面板存在多条完全相同的路由，缺少顺序信息，拒绝误改或误删');
+    }
+    const sorted = matches.sort((left, right) => Math.abs(left.index - remoteOrder) - Math.abs(right.index - remoteOrder));
+    const nearestDistance = Math.abs(sorted[0]!.index - remoteOrder);
+    if (sorted[1] && Math.abs(sorted[1].index - remoteOrder) === nearestDistance) {
+      throw new BadRequestException('官方面板存在多条无法唯一定位的相同路由，请先同步核对后再操作');
+    }
+    return sorted[0]!.index;
+  }
+
+  private stableJson(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map((item) => this.stableJson(item)).join(',')}]`;
+    if (value && typeof value === 'object') {
+      const object = value as Record<string, unknown>;
+      return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${this.stableJson(object[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value ?? null);
+  }
+
+  private async loadXrayState(server: XuiServerConfig & { id?: string | null }) {
+    if (!server.id) throw new BadRequestException('3x-ui 服务器 ID 缺失');
+    const client = await this.createAuthenticatedClient(server);
+    const payload = await client.getXrayConfig();
+    this.assertXuiSuccess(payload);
+    const xrayObj = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
+    const setting = this.xuiObject(xrayObj.xraySetting ?? xrayObj);
+    if (!Object.keys(setting).length) throw new BadGatewayException('3x-ui 返回了空 Xray 配置');
+    return { client, xrayObj, setting };
+  }
+
+  private async writeAndVerifyXrayState(
+    serverId: string,
+    state: { client: XuiClient; xrayObj: Record<string, unknown>; setting: Record<string, unknown> },
+    expectedTags: string[] = [],
+    absentTags: string[] = [],
+    expectedRouteFingerprint?: string,
+    absentRouteFingerprint?: string,
+    routeVerification: {
+      expectedRoute?: { fingerprint: string; index: number | null };
+      expectedRouteFingerprintCount?: { fingerprint: string; count: number };
+      absentRouteOutboundTags?: string[];
+    } = {}
+  ) {
+    const outboundTestUrl = typeof state.xrayObj.outboundTestUrl === 'string' ? state.xrayObj.outboundTestUrl : undefined;
+    const response = await state.client.updateXrayConfig({ xraySetting: JSON.stringify(state.setting, null, 2), outboundTestUrl });
+    this.assertXuiSuccess(response);
+    const reloadResponse = await state.client.restartXrayService();
+    this.assertXuiSuccess(reloadResponse);
+    const verifiedPayload = await state.client.getXrayConfig();
+    this.assertXuiSuccess(verifiedPayload);
+    const verifiedRoot = this.xuiObject(this.xuiObject(verifiedPayload).obj || this.xuiObject(verifiedPayload).data || verifiedPayload);
+    const verified = this.xuiObject(verifiedRoot.xraySetting ?? verifiedRoot);
+    const tags = new Set((Array.isArray(verified.outbounds) ? verified.outbounds : []).map((item) => this.stringValue(this.xuiObject(item).tag)).filter(Boolean));
+    for (const tag of expectedTags) if (!tags.has(tag)) throw new BadGatewayException(`远端出站 ${tag} 写后回读失败`);
+    for (const tag of absentTags) if (tags.has(tag)) throw new BadGatewayException(`远端出站 ${tag} 删除后仍然存在`);
+    const rules = Array.isArray(this.xuiObject(verified.routing).rules) ? this.xuiObject(verified.routing).rules as unknown[] : [];
+    const fingerprints = rules.map((item) => this.configFingerprint(this.xuiObject(item)));
+    const routeFingerprints = new Set(fingerprints);
+    if (expectedRouteFingerprint && !routeFingerprints.has(expectedRouteFingerprint)) throw new BadGatewayException('远端路由写后回读失败');
+    if (absentRouteFingerprint && routeFingerprints.has(absentRouteFingerprint)) throw new BadGatewayException('远端路由删除后仍然存在');
+    if (routeVerification.expectedRoute) {
+      const expectedIndex = routeVerification.expectedRoute.index;
+      if (expectedIndex === null || expectedIndex < 0 || fingerprints[expectedIndex] !== routeVerification.expectedRoute.fingerprint) {
+        throw new BadGatewayException('远端路由顺序或内容写后回读不一致');
+      }
+    }
+    if (routeVerification.expectedRouteFingerprintCount) {
+      const expected = routeVerification.expectedRouteFingerprintCount;
+      const actualCount = fingerprints.filter((fingerprint) => fingerprint === expected.fingerprint).length;
+      if (actualCount !== expected.count) throw new BadGatewayException('远端重复路由删除后回读数量不一致');
+    }
+    for (const outboundTag of routeVerification.absentRouteOutboundTags || []) {
+      if (rules.some((item) => this.stringList(this.xuiObject(item).outboundTag).includes(outboundTag))) {
+        throw new BadGatewayException(`远端出站 ${outboundTag} 删除后仍被路由引用`);
+      }
+    }
+    return { response, reloadResponse };
+  }
+
+  private async withPanelXrayLock<T>(serverId: string, operation: () => Promise<T>) {
+    return this.locks.withLock(this.locks.panelOperationKey(serverId), () =>
+      this.locks.withLock(this.locks.xrayConfigKey(serverId), operation)
+    );
+  }
+
   private async createAuthenticatedClient(config: XuiServerConfig, autoDetect = true, detectDraft = false) {
     const password = config.password || (config.passwordEnc ? this.encryption.decrypt(config.passwordEnc) : '');
     const token = config.token || (config.tokenEnc ? this.encryption.decrypt(config.tokenEnc) : '');
     const client = new XuiClient({
       baseUrl: config.baseUrl,
       basePath: config.basePath || undefined,
-      apiProfile: this.panelCompatibility(config.config)?.apiProfile,
+      apiProfile: 'v3.6',
       auth: token
         ? { kind: 'token', token }
         : config.username && password
@@ -1425,16 +2763,11 @@ export class XuiService {
 
     const serverId = this.stringValue(this.xuiObject(config).id);
     if (autoDetect && (serverId || detectDraft) && !this.panelCompatibility(config.config)) {
-      let compatibility: PanelCompatibility;
-      try {
-        compatibility = await this.detectAndPersistPanelCompatibility(config, client);
-      } catch {
-        return client;
-      }
+      await this.detectAndPersistPanelCompatibility(config, client);
       const detectedClient = new XuiClient({
         baseUrl: config.baseUrl,
         basePath: config.basePath || undefined,
-        apiProfile: compatibility.apiProfile,
+        apiProfile: 'v3.6',
         auth: token
           ? { kind: 'token', token }
           : config.username && password
@@ -1464,12 +2797,12 @@ export class XuiService {
   private panelCompatibility(value: unknown): PanelCompatibility | undefined {
     const compatibility = this.xuiObject(this.xuiObject(value).panelCompatibility);
     const apiProfile = compatibility.apiProfile;
-    if (apiProfile !== 'legacy' && apiProfile !== 'v3.6') return undefined;
+    if (apiProfile !== 'v3.6') return undefined;
     return {
       apiProfile,
       detectedVersion: this.stringValue(compatibility.detectedVersion),
       detectedAt: String(compatibility.detectedAt || ''),
-      source: compatibility.source === 'openapi' ? 'openapi' : 'fallback',
+      source: 'openapi',
       openApiVersion: this.stringValue(compatibility.openApiVersion)
     };
   }
@@ -1501,7 +2834,7 @@ export class XuiService {
       return await this.deleteRemoteClientWithClient(client, server.id || null, inboundId, xuiEmail, keepTraffic, detail);
     } catch (error) {
       if (this.isRemoteNotFound(error)) {
-        await this.writeSyncLog(server.id || null, 'customer-node-delete', 'success', `Remote client already absent: ${xuiEmail}`, { ...detail, xuiEmail, keepTraffic });
+        await this.writeSyncLog(server.id || null, 'customer-node-delete', 'success', `远端客户端 ${xuiEmail} 已不存在`, { ...detail, xuiEmail, keepTraffic });
         return { deleted: true, xuiEmail, alreadyAbsent: true };
       }
       await this.writeSyncLog(server.id || null, 'customer-node-delete', 'failed', this.errorMessage(error), { ...detail, xuiEmail, keepTraffic });
@@ -1512,26 +2845,18 @@ export class XuiService {
   private async deleteRemoteClientWithClient(client: XuiClient, serverId: string | null | undefined, inboundId: number, xuiEmail: string, keepTraffic: boolean, detail: Record<string, unknown>) {
     const beforeDelete = await this.remoteClientExists(client, inboundId, xuiEmail);
     if (!beforeDelete.exists) {
-      await this.writeSyncLog(serverId || null, 'customer-node-delete', 'success', `Remote client already absent: ${xuiEmail}`, { ...detail, inboundId, xuiEmail, keepTraffic, beforeDelete });
+      await this.writeSyncLog(serverId || null, 'customer-node-delete', 'success', `远端客户端 ${xuiEmail} 已不存在`, { ...detail, inboundId, xuiEmail, keepTraffic, beforeDelete });
       return { deleted: true, inboundId, xuiEmail, alreadyAbsent: true, verified: { absent: true, checked: true, retried: false } };
     }
-    const lastClientFallback = beforeDelete.clientCount === 1 && !client.usesApiProfile('v3.6')
-      ? 'update-inbound-empty-clients'
-      : undefined;
-    const deleteOperation = lastClientFallback
-      ? () => client.updateInbound(inboundId, this.inboundPayloadWithClients(beforeDelete.inbound!, beforeDelete.settings!, []))
-      : () => client.deleteClient(inboundId, xuiEmail, undefined, keepTraffic);
+    const deleteOperation = () => client.deleteClient(inboundId, xuiEmail, undefined, keepTraffic);
     const payload = await deleteOperation();
     this.assertXuiSuccess(payload);
     const verified = await this.verifyRemoteClientDeleted(client, inboundId, xuiEmail, deleteOperation);
-    await this.writeSyncLog(serverId || null, 'customer-node-delete', 'success', `Deleted ${xuiEmail}`, {
+    await this.writeSyncLog(serverId || null, 'customer-node-delete', 'success', `已删除远端客户端 ${xuiEmail}`, {
       ...detail,
       inboundId,
       xuiEmail,
       keepTraffic,
-      keepTrafficUnsupported: keepTraffic,
-      lastClientFallback,
-      trafficRecordCleanupNotGuaranteed: Boolean(lastClientFallback),
       verified,
       response: this.toJsonValue(payload)
     });
@@ -1539,9 +2864,6 @@ export class XuiService {
       deleted: true,
       inboundId,
       xuiEmail,
-      keepTrafficUnsupported: keepTraffic,
-      lastClientFallback,
-      trafficRecordCleanupNotGuaranteed: Boolean(lastClientFallback),
       verified,
       response: payload
     };
@@ -1585,26 +2907,6 @@ export class XuiService {
       if (this.isRemoteNotFound(error)) return { exists: false };
       throw error;
     }
-  }
-
-  private inboundPayloadWithClients(inbound: Record<string, unknown>, settings: Record<string, unknown>, clients: unknown[]) {
-    return {
-      up: inbound.up ?? 0,
-      down: inbound.down ?? 0,
-      total: inbound.total ?? 0,
-      remark: inbound.remark ?? '',
-      enable: inbound.enable ?? true,
-      expiryTime: inbound.expiryTime ?? 0,
-      trafficReset: inbound.trafficReset ?? 'never',
-      lastTrafficResetTime: inbound.lastTrafficResetTime ?? 0,
-      listen: inbound.listen ?? '',
-      port: inbound.port,
-      protocol: inbound.protocol,
-      settings: { ...settings, clients },
-      streamSettings: this.parseMaybeJson(inbound.streamSettings),
-      tag: inbound.tag ?? '',
-      sniffing: this.parseMaybeJson(inbound.sniffing)
-    };
   }
 
   private shouldDeleteRemoteClient(customerNode?: { lastSyncedAt: Date | null; config: Prisma.JsonValue | null } | null) {
@@ -1955,6 +3257,30 @@ export class XuiService {
     };
   }
 
+  private inboundFingerprint(input: {
+    name: string;
+    protocol: string;
+    enabled: boolean;
+    tag: string;
+    remark: string;
+    port: number | null;
+    streamSettings?: Record<string, unknown>;
+    encryption?: string;
+    transport?: ReturnType<XuiService['normalizeTransportConfig']>;
+  }) {
+    const streamSettings = input.streamSettings || {};
+    return this.configFingerprint({
+      name: input.name,
+      protocol: input.protocol,
+      enabled: input.enabled,
+      tag: input.tag,
+      remark: input.remark,
+      port: input.port,
+      encryption: input.encryption || String(streamSettings.security || 'none'),
+      transport: input.transport || this.transportConfigFromStream(streamSettings)
+    });
+  }
+
   private sameTransportConfig(left: ReturnType<XuiService['normalizeTransportConfig']>, right: ReturnType<XuiService['normalizeTransportConfig']>) {
     if (left.transport !== right.transport) return false;
     if (left.transport === 'tcp') {
@@ -1992,9 +3318,7 @@ export class XuiService {
   }
 
   private async readWebCertFiles(client: XuiClient) {
-    const payload = typeof client.usesApiProfile === 'function' && client.usesApiProfile('v3.6')
-      ? await client.getWebCertFiles()
-      : await client.getPanelSettings();
+    const payload = await client.getWebCertFiles();
     this.assertXuiSuccess(payload);
     const object = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
     const certFile = String(object.webCertFile || object.certFile || object.certificateFile || object.cert || object.certPath || object.publicKeyPath || '').trim();
@@ -2188,6 +3512,7 @@ export class XuiService {
     return {
       target: this.stringValue(settings.dest) || this.stringValue(settings.target),
       serverName: this.stringValue(settings.serverName) || this.xuiArray(settings.serverNames).map((item) => String(item)).find(Boolean) || this.stringValue(nested.serverName) || '',
+      minClientVersion: this.stringValue(settings.minClient) || '',
       alpn: this.xuiArray(settings.alpn).map((item) => String(item)).filter(Boolean)
     };
   }
@@ -2519,7 +3844,7 @@ export class XuiService {
       const privateKey = this.stringValue(reality.privateKey) || this.stringValue(nested.privateKey);
       const publicKey = this.stringValue(reality.publicKey) || this.stringValue(nested.publicKey) || (privateKey ? this.x25519PublicKey(privateKey) : undefined);
       const serverName = this.stringValue(reality.serverName) || this.stringValue(nested.serverName) || this.stringList(reality.serverNames)[0] || this.stringList(nested.serverNames)[0];
-      if (!publicKey || !serverName) throw new Error('Reality public key or SNI is missing');
+      if (!publicKey || !serverName) throw new Error('Reality 配置缺少公钥或 SNI');
       return {
         security,
         serverName,
@@ -2749,99 +4074,26 @@ export class XuiService {
   }
 
   private async findClient(client: XuiClient, lookup: ClientLookup, inbounds: unknown[]): Promise<ClientMatch> {
-    if (client.usesApiProfile('v3.6')) {
-      const payload = await client.listClients();
-      this.assertXuiSuccess(payload);
-      for (const item of this.xuiArray(payload)) {
-        const wrapper = this.xuiObject(item);
-        const record = this.xuiObject(wrapper.client || item);
-        const inboundIds = this.numberList(wrapper.inboundIds ?? record.inboundIds);
-        if (lookup.inboundId && !inboundIds.includes(lookup.inboundId)) continue;
-        const found = this.v36ClientIdentity(record);
-        if (this.clientMatches(found, lookup)) {
-          return {
-            exists: true,
-            raw: record,
-            inboundId: lookup.inboundId || inboundIds[0],
-            clientId: found.email,
-            ...found
-          };
-        }
-      }
-    }
-
-    const sorted = [...inbounds].sort((a, b) => {
-      if (!lookup.inboundId) return 0;
-      const aTarget = this.inboundIdOf(a) === lookup.inboundId ? 1 : 0;
-      const bTarget = this.inboundIdOf(b) === lookup.inboundId ? 1 : 0;
-      return bTarget - aTarget;
-    });
-
-    for (const inbound of sorted) {
-      const settings = this.parseMaybeJson(this.xuiObject(inbound).settings);
-      const settingsObject = this.xuiObject(settings);
-      const clients = Array.isArray(settingsObject.clients) ? settingsObject.clients : [];
-      for (const item of clients) {
-        const found = this.clientIdentity(item);
-        if (this.clientMatches(found, lookup)) {
-          return {
-            exists: true,
-            raw: inbound,
-            inboundId: this.inboundIdOf(inbound),
-            clientId: this.clientIdForProtocol(item, String(this.xuiObject(inbound).protocol || '')),
-            ...found
-          };
-        }
+    void inbounds;
+    const payload = await client.listClients();
+    this.assertXuiSuccess(payload);
+    for (const item of this.xuiArray(payload)) {
+      const wrapper = this.xuiObject(item);
+      const record = this.xuiObject(wrapper.client || item);
+      const inboundIds = this.numberList(wrapper.inboundIds ?? record.inboundIds);
+      if (lookup.inboundId && !inboundIds.includes(lookup.inboundId)) continue;
+      const found = this.v36ClientIdentity(record);
+      if (this.clientMatches(found, lookup)) {
+        return {
+          exists: true,
+          raw: record,
+          inboundId: lookup.inboundId || inboundIds[0],
+          clientId: found.email,
+          ...found
+        };
       }
     }
     return { exists: false, raw: null };
-  }
-
-  private async availableV36ClientEmail(
-    client: XuiClient,
-    requestedEmail: string,
-    existing: ClientMatch,
-    customer: { customerId: string; loginUsername: string }
-  ) {
-    const requested = requestedEmail.trim();
-    if (!requested || this.normalizeIdentity(requested) === this.normalizeIdentity(existing.email)) return requested || existing.email || '';
-
-    const candidates = [
-      requested,
-      this.readableIdentifier(`${requested}-${customer.loginUsername}`, requested, 128),
-      this.readableIdentifier(`${requested}-${customer.customerId.slice(-6)}`, requested, 128)
-    ].filter((value, index, values) => value && values.indexOf(value) === index);
-
-    for (const candidate of candidates) {
-      const occupied = await this.optionalV36ClientRecord(client, candidate);
-      if (!occupied || this.sameV36Client(occupied, existing)) return candidate;
-    }
-    throw new BadRequestException(`3x-ui 客户端名称 ${requested} 已被其他用户占用，请修改用户名称后重试`);
-  }
-
-  private async confirmV36ClientUpdate(
-    client: XuiClient,
-    expected: { requestedEmail: string; previousEmail?: string; inboundId: number; uuid?: string; subId?: string }
-  ) {
-    const emails = [expected.requestedEmail, expected.previousEmail]
-      .map((value) => String(value || '').trim())
-      .filter((value, index, values) => value && values.indexOf(value) === index);
-
-    for (const email of emails) {
-      const record = await this.optionalV36ClientRecord(client, email);
-      if (!record) continue;
-      const identity = this.v36ClientIdentity(record);
-      if (!this.sameV36Client(record, expected)) continue;
-      const inboundIds = this.numberList(record.inboundIds);
-      if (inboundIds.length && !inboundIds.includes(expected.inboundId)) continue;
-      return {
-        email: identity.email || email,
-        uuid: identity.uuid,
-        subId: identity.subId
-      };
-    }
-
-    throw new BadGatewayException(`3x-ui 3.6 客户端更新后回读失败：${expected.requestedEmail}`);
   }
 
   private async optionalV36ClientRecord(client: XuiClient, email: string) {
@@ -2852,15 +4104,6 @@ export class XuiService {
       if (this.isRemoteNotFound(error)) return undefined;
       throw error;
     }
-  }
-
-  private sameV36Client(record: unknown, expected: { email?: string; uuid?: string; subId?: string }) {
-    const identity = this.v36ClientIdentity(record);
-    const expectedUuid = this.normalizeIdentity(expected.uuid);
-    const expectedSubId = this.normalizeIdentity(expected.subId);
-    if (expectedUuid && this.normalizeIdentity(identity.uuid) === expectedUuid) return true;
-    if (expectedSubId && this.normalizeIdentity(identity.subId) === expectedSubId) return true;
-    return Boolean(expected.email && this.normalizeIdentity(identity.email) === this.normalizeIdentity(expected.email));
   }
 
   private async loadRemoteSocksRouteState(client: XuiClient): Promise<RemoteSocksRouteState> {
@@ -3297,8 +4540,6 @@ export class XuiService {
   }
 
   private async firstClientIdentityForInbound(client: XuiClient, inbound: unknown, inboundId: number): Promise<ServiceInboundClientIdentity> {
-    if (!client.usesApiProfile('v3.6')) return this.firstInboundClientIdentity(inbound);
-
     const settings = this.xuiObject(this.parseMaybeJson(this.xuiObject(inbound).settings));
     const clients = Array.isArray(settings.clients) ? settings.clients : [];
     const inline = clients.length ? this.v36ClientIdentity(clients[0]) : {};

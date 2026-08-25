@@ -35,8 +35,10 @@ import {
   UploadCloud,
   Waypoints
 } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { entityAvatarStyle, entityInitial } from '../entity-avatar';
+import { notifyError } from '../notify';
 
 type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
 type SyncTask = { id: string; action: string; status: string; message?: string | null; attemptCount: number; updatedAt: string };
@@ -73,6 +75,7 @@ type ServiceNode = {
   inboundId?: number | null;
   remark?: string | null;
   config?: ServiceNodeConfig | null;
+  ownership: 'managed' | 'referenced' | 'shared';
   server?: XuiServer;
   syncTasks?: SyncTask[];
 };
@@ -147,6 +150,7 @@ const form = reactive({
   name: '',
   serverId: '',
   remoteMode: 'create' as 'create' | 'bind',
+  takeover: false,
   inboundId: undefined as number | undefined,
   inboundPort: undefined as number | undefined,
   protocol: 'vless',
@@ -228,8 +232,8 @@ async function loadNodes() {
     nodes.value = nodeList;
     socksNodes.value = socksList;
     if (!form.serverId && serverList[0]) form.serverId = serverList[0].id;
-  } catch {
-    error.value = '加载失败';
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -258,13 +262,13 @@ async function saveNode() {
       ].includes(key)))
       : form;
     const result = await api<OperationResult>(path, { method: editingId.value ? 'PATCH' : 'POST', body });
-    if (result.state === 'partial') ElMessage.warning(result.message || '保存成功，同步失败');
+    if (result.state === 'partial') ElMessage.warning(readableError(result.message, '保存成功，但部分同步失败'));
     else ElMessage.success(editingId.value ? '路由节点已更新' : '路由节点已创建');
     dialogVisible.value = false;
     resetForm();
     await loadNodes();
-  } catch {
-    error.value = '保存失败';
+  } catch (caught) {
+    notifyError(caught, '保存失败');
   } finally {
     saving.value = false;
   }
@@ -286,9 +290,8 @@ async function syncRemoteConfig(node: ServiceNode) {
   try {
     await api(`/api/admin/service-nodes/${node.id}/sync-config`, { method: 'POST' });
     ElMessage.success('同步成功');
-  } catch {
-    error.value = '同步失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '同步失败');
   } finally {
     await loadNodes();
     syncingConfigIds.value = removePendingId(syncingConfigIds.value, node.id);
@@ -302,10 +305,9 @@ async function syncTrafficLimit(node: ServiceNode) {
   try {
     const result = await api<TrafficSyncResult>(`/api/admin/service-nodes/${node.id}/sync-traffic-limit`, { method: 'POST' });
     if (result.synced && result.failed === 0) ElMessage.success('同步成功');
-    else ElMessage.error('同步失败');
-  } catch {
-    error.value = '同步失败';
-    ElMessage.error(error.value);
+    else notifyError('同步失败');
+  } catch (caught) {
+    notifyError(caught, '同步失败');
   } finally {
     await loadNodes();
     syncingTrafficLimitIds.value = removePendingId(syncingTrafficLimitIds.value, node.id);
@@ -327,9 +329,8 @@ async function resetRemoteTraffic(node: ServiceNode) {
   try {
     await api(`/api/admin/service-nodes/${node.id}/reset-traffic`, { method: 'POST' });
     ElMessage.success('远端入站流量已重置');
-  } catch {
-    error.value = '重置失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '重置失败');
   } finally {
     resettingTrafficIds.value = removePendingId(resettingTrafficIds.value, node.id);
   }
@@ -348,12 +349,11 @@ async function detectReality() {
     form.realityServerName = result.serverName;
     ElMessage.success('Reality 检测成功');
     return true;
-  } catch {
+  } catch (caught) {
     if (requestId !== realityDetectionRequestId.value || form.serverId !== serverId) return false;
     form.realityTarget = '';
     form.realityServerName = '';
-    realityDetectionError.value = 'Reality 自动检测失败';
-    ElMessage.error(realityDetectionError.value);
+    realityDetectionError.value = readableError(caught, 'Reality 自动检测失败');
     return false;
   } finally {
     if (requestId === realityDetectionRequestId.value) detectingReality.value = false;
@@ -379,6 +379,7 @@ function editNode(node: ServiceNode) {
     name: node.name,
     serverId: node.serverId,
     remoteMode: config.remoteMode || (config.remoteManaged ? 'create' : 'bind'),
+    takeover: false,
     inboundId: node.inboundId ?? undefined,
     inboundPort: config.remoteInboundPort ?? undefined,
     protocol: node.protocol || 'vless',
@@ -408,8 +409,11 @@ function editNode(node: ServiceNode) {
 async function removeNode(node: ServiceNode) {
   if (deletingIds.value.has(node.id)) return;
   try {
+    const message = node.ownership === 'managed'
+      ? `确认删除路由节点「${node.name}」？该节点由本系统托管，将清理关联出站路由并删除远端入站及全部客户端。`
+      : `确认删除本地路由节点「${node.name}」？该节点是官方面板引用资源，只删除本地记录，不修改远端入站和客户端。`;
     await ElMessageBox.confirm(
-      `确认删除路由节点「${node.name}」？系统会清理本项目写入的远端出站路由，并在该入站由本系统创建时删除远端入站。`,
+      message,
       '删除路由节点',
       { type: 'warning', customClass: 'node-dark-message-box' }
     );
@@ -422,9 +426,8 @@ async function removeNode(node: ServiceNode) {
     await api(`/api/admin/service-nodes/${node.id}`, { method: 'DELETE' });
     ElMessage.success('路由节点已删除');
     await loadNodes();
-  } catch {
-    error.value = '删除失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '删除失败');
   } finally {
     deletingIds.value = removePendingId(deletingIds.value, node.id);
   }
@@ -441,10 +444,9 @@ async function toggleNodeEnabled(node: ServiceNode, enabled = !node.enabled) {
     if (result.state === 'partial') ElMessage.warning('保存成功，同步失败');
     else ElMessage.success(enabled ? '路由节点已启用' : '路由节点已停用');
     await loadNodes();
-  } catch {
+  } catch (caught) {
     node.enabled = previous;
-    error.value = '更新失败';
-    ElMessage.error(error.value);
+    notifyError(caught, '更新失败');
   } finally {
     await loadNodes();
     togglingIds.value = removePendingId(togglingIds.value, node.id);
@@ -511,6 +513,7 @@ function resetForm() {
     name: '',
     serverId: servers.value[0]?.id || '',
     remoteMode: 'create',
+    takeover: false,
     inboundId: undefined,
     inboundPort: undefined,
     protocol: 'vless',
@@ -542,6 +545,12 @@ function socksLabel(id?: string | null) {
 
 function remoteModeLabel(node: ServiceNode) {
   return node.config?.remoteManaged ? '自动创建' : '绑定已有';
+}
+
+function ownershipLabel(ownership: ServiceNode['ownership']) {
+  if (ownership === 'managed') return '本系统托管';
+  if (ownership === 'shared') return '共享资源';
+  return '官方引用';
 }
 
 function protocolLabel(protocol: string) {
@@ -724,6 +733,7 @@ watch(() => form.transport, () => {
             <span class="route-node-tag transport">{{ transportLabel(node.config?.transport) }}</span>
             <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
             <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
+            <span class="route-node-tag" :class="node.ownership === 'managed' ? 'relay' : 'security'">{{ ownershipLabel(node.ownership) }}</span>
             <span v-if="node.config?.socksRelayEnabled" class="route-node-tag relay" :title="socksLabel(node.config.socksNodeId)">SOCKS 中转</span>
             <span v-for="task in node.syncTasks || []" :key="task.id" class="route-node-tag sync-pending" :title="syncTaskSummary(node)">{{ syncTaskLabel(task.action) }}</span>
           </div>
@@ -743,7 +753,7 @@ watch(() => form.transport, () => {
           <el-button
             class="node-sync-button runtime-icon-button"
             :loading="syncingConfigIds.has(node.id)"
-            :disabled="!node.inboundId"
+            :disabled="!node.inboundId || node.ownership !== 'managed'"
             aria-label="同步出站"
             @click="syncRemoteConfig(node)"
           ><UploadCloud :size="15" /></el-button>
@@ -753,7 +763,7 @@ watch(() => form.transport, () => {
               class="runtime-toggle-switch"
               :model-value="node.enabled"
               :loading="togglingIds.has(node.id)"
-              :disabled="togglingIds.has(node.id)"
+              :disabled="togglingIds.has(node.id) || node.ownership !== 'managed'"
               @change="(enabled: boolean | string | number) => toggleNodeEnabled(node, Boolean(enabled))"
             />
           </el-tooltip>
@@ -761,8 +771,8 @@ watch(() => form.transport, () => {
             <el-button class="node-more-button runtime-icon-button" aria-label="更多节点操作"><MoreHorizontal :size="16" /></el-button>
             <template #dropdown>
               <el-dropdown-menu class="node-action-menu">
-                <el-dropdown-item command="traffic-limit" :disabled="!node.inboundId || syncingTrafficLimitIds.has(node.id)"><Gauge :size="14" />同步流量额度</el-dropdown-item>
-                <el-dropdown-item command="reset-traffic" :disabled="!node.inboundId || resettingTrafficIds.has(node.id)"><RotateCcw :size="14" />重置远端流量</el-dropdown-item>
+                <el-dropdown-item command="traffic-limit" :disabled="!node.inboundId || node.ownership !== 'managed' || syncingTrafficLimitIds.has(node.id)"><Gauge :size="14" />同步流量额度</el-dropdown-item>
+                <el-dropdown-item command="reset-traffic" :disabled="!node.inboundId || node.ownership !== 'managed' || resettingTrafficIds.has(node.id)"><RotateCcw :size="14" />重置远端流量</el-dropdown-item>
                 <el-dropdown-item command="delete" divided :disabled="deletingIds.has(node.id)"><Trash2 :size="14" />删除节点</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -818,6 +828,10 @@ watch(() => form.transport, () => {
           </el-form-item>
           <el-form-item v-if="form.remoteMode === 'bind'" label="入站 ID"><el-input-number v-model="form.inboundId" :min="1" placeholder="输入远端入站 ID" style="width: 100%" /></el-form-item>
           <el-form-item v-else label="指定端口"><el-input-number v-model="form.inboundPort" :min="1" :max="65535" placeholder="留空自动分配" style="width: 100%" /></el-form-item>
+          <el-form-item v-if="form.remoteMode === 'bind'" label="接管远端入站" class="node-switch-item">
+            <el-switch v-model="form.takeover" />
+            <span class="muted-text">关闭时仅建立只读引用；开启后本系统可修改并删除该官方入站。</span>
+          </el-form-item>
         </div>
       </section>
 

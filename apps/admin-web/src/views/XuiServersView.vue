@@ -36,8 +36,10 @@ import {
   Users,
   Wifi
 } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { entityAvatarStyle, entityInitial } from '../entity-avatar';
+import { notifyError } from '../notify';
 
 type XuiServer = {
   id: string;
@@ -58,7 +60,7 @@ type XuiServer = {
     realitySpiderX?: string;
     panelCompatibility?: {
       detectedVersion?: string;
-      apiProfile?: 'legacy' | 'v3.6';
+      apiProfile?: 'v3.6';
       detectedAt?: string;
     };
   } | null;
@@ -142,7 +144,7 @@ async function loadServers() {
   try {
     servers.value = await api<XuiServer[]>('/api/admin/xui-servers');
   } catch (err) {
-    showError(err, '加载面板连接失败');
+    error.value = readableError(err, '加载面板连接失败');
   } finally {
     loading.value = false;
   }
@@ -590,7 +592,7 @@ function compatibilityLabel(server: XuiServer) {
   const compatibility = server.config?.panelCompatibility;
   if (!compatibility) return '版本未检测';
   if (compatibility.detectedVersion) return compatibility.detectedVersion;
-  return compatibility.apiProfile === 'v3.6' ? '3.6 API 兼容' : 'Legacy/旧版 API';
+  return compatibility.apiProfile === 'v3.6' ? '3.6 官方 API' : '未检测';
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
@@ -650,9 +652,7 @@ function removePendingId(source: Set<string>, id: string) {
 }
 
 function showError(err: unknown, fallback: string) {
-  const message = err instanceof Error && err.message ? err.message : fallback;
-  error.value = message;
-  ElMessage.error(message);
+  notifyError(err, fallback);
 }
 
 onMounted(loadServers);

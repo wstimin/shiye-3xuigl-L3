@@ -1,8 +1,8 @@
 * { box-sizing: border-box; }
 :root {
   color-scheme: dark;
-  --app-bg: #08090c;
-  --panel-bg: #12141c;
+  --app-bg: #242a32;
+  --panel-bg: #303946;
   --panel-soft: rgb(255 255 255 / 2.5%);
   --border: rgb(255 255 255 / 7%);
   --border-strong: rgb(255 255 255 / 12%);
@@ -17,10 +17,10 @@
   --danger: #ef4444;
   --shadow: 0 14px 34px rgb(0 0 0 / 16%);
   --el-color-primary: #6366f1;
-  --el-bg-color: #12141c;
-  --el-bg-color-page: #08090c;
-  --el-bg-color-overlay: #12141c;
-  --el-fill-color-blank: #12141c;
+  --el-bg-color: #303946;
+  --el-bg-color-page: #242a32;
+  --el-bg-color-overlay: #35404e;
+  --el-fill-color-blank: #303946;
   --el-fill-color-light: rgb(255 255 255 / 4%);
   --el-fill-color-lighter: rgb(255 255 255 / 2.5%);
   --el-border-color: rgb(255 255 255 / 9%);
@@ -33,7 +33,7 @@
 /* Health diagnostics */
 .diagnostics-health-page {
   --diagnostics-surface: rgb(18 20 28 / 92%);
-  --diagnostics-surface-strong: #12141c;
+  --diagnostics-surface-strong: #303946;
   --diagnostics-border: rgb(255 255 255 / 7%);
   --diagnostics-border-hover: rgb(255 255 255 / 14%);
   --diagnostics-text: #f1f5f9;
@@ -133,7 +133,7 @@
   position: absolute;
   inset: 8px;
   border-radius: 50%;
-  background: #10131a;
+  background: #29323d;
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 5%);
 }
 
@@ -712,8 +712,8 @@
   .diagnostics-detail-meta { grid-template-columns: 1fr; }
   .diagnostics-loading-state { min-height: 260px; padding: 20px; text-align: center; }
 }
-html, body, #app { min-height: 100%; background: #08090c; }
-body { margin: 0; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; background: #08090c; color: var(--text); }
+html, body, #app { min-height: 100%; background: #242a32; }
+body { margin: 0; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; background: #242a32; color: var(--text); }
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
@@ -725,7 +725,7 @@ input:-webkit-autofill:active {
   transition: background-color 9999s ease-out 0s;
 }
 .boot-screen, .login-screen {
-  --login-bg: #08090c;
+  --login-bg: #242a32;
   --login-card: rgb(16 18 24 / 88%);
   --login-border: rgb(255 255 255 / 8%);
   --login-primary: #6366f1;
@@ -937,8 +937,8 @@ input:-webkit-autofill:active {
 .compact-metrics .metric strong { font-size: 22px; }
 
 .overview-shell {
-  --dashboard-bg: #08090c;
-  --dashboard-sidebar: #0b0d13;
+  --dashboard-bg: #242a32;
+  --dashboard-sidebar: #2a313b;
   --dashboard-card: rgb(18 20 28 / 92%);
   --dashboard-hover: rgb(255 255 255 / 4.5%);
   --dashboard-border: rgb(255 255 255 / 7%);
@@ -970,7 +970,7 @@ input:-webkit-autofill:active {
 .overview-shell .sidebar-user span { color: var(--dashboard-muted); font-size: 11px; }
 .overview-shell .logout-button { height: 36px; justify-content: center; border: 1px solid var(--dashboard-border); border-radius: 8px; color: var(--dashboard-muted); }
 .overview-shell .logout-button:hover { border-color: rgb(248 113 113 / 35%); background: rgb(248 113 113 / 7%); color: #fca5a5; }
-.overview-shell .topbar { height: 62px; padding: 0 28px; position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--dashboard-border); background: rgb(8 9 12 / 75%); color: var(--dashboard-text); box-shadow: none; backdrop-filter: blur(16px); }
+.overview-shell .topbar { height: 62px; padding: 0 28px; position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--dashboard-border); background: rgb(44 52 64 / 94%); color: var(--dashboard-text); box-shadow: none; backdrop-filter: blur(16px); }
 .overview-shell .topbar-heading > strong { font-size: 17px; }
 .overview-shell .topbar-heading > span { color: var(--dashboard-muted); }
 .topbar-user-badge { display: flex; align-items: center; gap: 7px; padding: 6px 12px 6px 9px; border: 1px solid rgb(99 102 241 / 22%); border-radius: 999px; background: var(--dashboard-primary-soft); color: #a5b4fc; font-size: 12px; font-weight: 600; }
@@ -1250,11 +1250,11 @@ input:-webkit-autofill:active {
 .customer-management-page .el-pagination { flex: 0 0 auto; --el-pagination-bg-color: rgb(255 255 255 / 3%); --el-pagination-text-color: #94a3b8; --el-pagination-button-disabled-bg-color: rgb(255 255 255 / 2%); --el-pagination-hover-color: #a5b4fc; }
 .customer-management-page .el-pagination.is-background .el-pager li { border: 1px solid rgb(255 255 255 / 7%); border-radius: 7px; background: rgb(255 255 255 / 3%); color: #94a3b8; }
 .customer-management-page .el-pagination.is-background .el-pager li.is-active { border-color: rgb(99 102 241 / 28%); background: rgb(99 102 241 / 16%); color: #a5b4fc; }
-.customer-action-menu { --el-dropdown-menuItem-hover-fill: rgb(99 102 241 / 12%); --el-dropdown-menuItem-hover-color: #c7d2fe; min-width: 154px; padding: 6px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #12141c; }
+.customer-action-menu { --el-dropdown-menuItem-hover-fill: rgb(99 102 241 / 12%); --el-dropdown-menuItem-hover-color: #c7d2fe; min-width: 154px; padding: 6px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #303946; }
 .customer-action-menu .el-dropdown-menu__item { display: flex; align-items: center; gap: 8px; border-radius: 6px; color: #b1bccb; }
 .customer-action-menu .el-dropdown-menu__item--divided { border-top-color: rgb(255 255 255 / 7%); color: #fca5a5; }
 
-.customer-dark-dialog, .customer-dark-message-box { --customer-modal-bg: #12141c; border: 1px solid rgb(255 255 255 / 9%); background: var(--customer-modal-bg); color: #f1f5f9; box-shadow: 0 30px 90px rgb(0 0 0 / 48%); }
+.customer-dark-dialog, .customer-dark-message-box { --customer-modal-bg: #35404e; border: 1px solid rgb(255 255 255 / 9%); background: var(--customer-modal-bg); color: #f1f5f9; box-shadow: 0 30px 90px rgb(0 0 0 / 48%); }
 .customer-dark-dialog .el-dialog__header { margin: 0; padding: 18px 22px 15px; border-bottom: 1px solid rgb(255 255 255 / 7%); }
 .customer-dark-dialog .el-dialog__title, .customer-dark-message-box .el-message-box__title { color: #f1f5f9; font-size: 17px; font-weight: 700; }
 .customer-dark-dialog .el-dialog__headerbtn .el-dialog__close, .customer-dark-message-box .el-message-box__headerbtn { color: #64748b; }
@@ -1273,7 +1273,7 @@ input:-webkit-autofill:active {
 .customer-node-dialog .customer-node-dialog-head { border-color: rgb(255 255 255 / 8%); background: rgb(255 255 255 / 3%); }
 .customer-node-dialog .customer-node-dialog-head strong { color: #f1f5f9; }
 .customer-node-dialog .customer-node-dialog-head span { color: #94a3b8; }
-.customer-node-dialog .customer-node-dialog-card { border-color: rgb(255 255 255 / 8%); background: #12141c; box-shadow: 0 12px 28px rgb(0 0 0 / 18%); }
+.customer-node-dialog .customer-node-dialog-card { border-color: rgb(255 255 255 / 8%); background: #303946; box-shadow: 0 12px 28px rgb(0 0 0 / 18%); }
 .customer-node-dialog .customer-node-dialog-card::before, .customer-node-dialog .customer-node-dialog-card::after { display: none; }
 .customer-node-dialog .entity-card-head strong, .customer-node-dialog .entity-card-stats strong { color: #f1f5f9; }
 .customer-node-dialog .entity-card-head span, .customer-node-dialog .entity-card-stats span { color: #94a3b8; }
@@ -1420,7 +1420,7 @@ input:-webkit-autofill:active {
 .route-node-actions .el-button { width: 100%; height: 34px; padding-inline: 10px; }
 .route-node-actions .el-button--primary.is-plain { --el-button-bg-color: rgb(99 102 241 / 12%); --el-button-border-color: rgb(99 102 241 / 25%); --el-button-text-color: #a5b4fc; --el-button-hover-bg-color: rgb(99 102 241 / 20%); --el-button-hover-border-color: rgb(99 102 241 / 40%); --el-button-hover-text-color: #c7d2fe; box-shadow: none; }
 .node-more-button { width: 36px !important; padding: 0 !important; }
-.node-action-menu { --el-dropdown-menuItem-hover-fill: rgb(99 102 241 / 12%); --el-dropdown-menuItem-hover-color: #c7d2fe; min-width: 190px; padding: 6px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #12141c; }
+.node-action-menu { --el-dropdown-menuItem-hover-fill: rgb(99 102 241 / 12%); --el-dropdown-menuItem-hover-color: #c7d2fe; min-width: 190px; padding: 6px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #303946; }
 .node-action-menu .el-dropdown-menu__item { display: flex; align-items: center; gap: 8px; border-radius: 6px; color: #b1bccb; }
 .node-action-menu .el-dropdown-menu__item--divided { border-top-color: rgb(255 255 255 / 7%); color: #fca5a5; }
 .node-empty-state { grid-column: 1 / -1; min-height: 260px; display: grid; place-items: center; align-content: center; gap: 8px; border: 1px dashed rgb(255 255 255 / 10%); border-radius: 8px; background: rgb(255 255 255 / 2%); color: var(--dashboard-muted); }
@@ -1428,7 +1428,7 @@ input:-webkit-autofill:active {
 .node-empty-state span { font-size: 12px; }
 .node-list-footer { color: var(--dashboard-muted); font-size: 12px; text-align: right; }
 
-.node-dark-dialog, .node-dark-message-box { border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #12141c; color: #f1f5f9; box-shadow: 0 30px 90px rgb(0 0 0 / 48%); }
+.node-dark-dialog, .node-dark-message-box { border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #35404e; color: #f1f5f9; box-shadow: 0 30px 90px rgb(0 0 0 / 48%); }
 .node-dark-dialog .el-dialog__header { margin: 0; padding: 18px 22px 15px; border-bottom: 1px solid rgb(255 255 255 / 7%); }
 .node-dark-dialog .el-dialog__title, .node-dark-message-box .el-message-box__title { color: #f1f5f9; font-size: 17px; font-weight: 700; }
 .node-dark-dialog .el-dialog__headerbtn .el-dialog__close, .node-dark-message-box .el-message-box__headerbtn { color: #64748b; }
@@ -1567,7 +1567,7 @@ input:-webkit-autofill:active {
 .xui-panel-actions .el-button { width: 100%; height: 34px; padding-inline: 10px; }
 .xui-panel-actions .el-button--primary.is-plain { --el-button-bg-color: rgb(99 102 241 / 12%); --el-button-border-color: rgb(99 102 241 / 25%); --el-button-text-color: #a5b4fc; --el-button-hover-bg-color: rgb(99 102 241 / 20%); --el-button-hover-border-color: rgb(99 102 241 / 40%); --el-button-hover-text-color: #c7d2fe; box-shadow: none; }
 .xui-more-button { width: 36px !important; padding: 0 !important; }
-.xui-action-menu { --el-dropdown-menuItem-hover-fill: rgb(99 102 241 / 12%); --el-dropdown-menuItem-hover-color: #c7d2fe; min-width: 194px; padding: 6px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #12141c; }
+.xui-action-menu { --el-dropdown-menuItem-hover-fill: rgb(99 102 241 / 12%); --el-dropdown-menuItem-hover-color: #c7d2fe; min-width: 194px; padding: 6px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #303946; }
 .xui-action-menu .el-dropdown-menu__item { display: flex; align-items: center; gap: 8px; border-radius: 6px; color: #b1bccb; }
 .xui-action-menu .el-dropdown-menu__item--divided { border-top-color: rgb(255 255 255 / 7%); color: #fca5a5; }
 .xui-empty-state { grid-column: 1 / -1; min-height: 260px; display: grid; place-items: center; align-content: center; gap: 8px; padding: 24px; border: 1px dashed rgb(255 255 255 / 10%); border-radius: 8px; background: rgb(255 255 255 / 2%); color: var(--dashboard-muted); text-align: center; }
@@ -1575,7 +1575,7 @@ input:-webkit-autofill:active {
 .xui-empty-state span { font-size: 12px; }
 .xui-list-footer { color: var(--dashboard-muted); font-size: 12px; text-align: right; }
 
-.xui-dark-dialog, .xui-dark-message-box { border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #12141c; color: #f1f5f9; box-shadow: 0 30px 90px rgb(0 0 0 / 48%); }
+.xui-dark-dialog, .xui-dark-message-box { border: 1px solid rgb(255 255 255 / 9%); border-radius: 8px; background: #35404e; color: #f1f5f9; box-shadow: 0 30px 90px rgb(0 0 0 / 48%); }
 .xui-dark-dialog .el-dialog__header { margin: 0; padding: 18px 22px 15px; border-bottom: 1px solid rgb(255 255 255 / 7%); }
 .xui-dark-dialog .el-dialog__title, .xui-dark-message-box .el-message-box__title { color: #f1f5f9; font-size: 17px; font-weight: 700; }
 .xui-dark-dialog .el-dialog__headerbtn .el-dialog__close, .xui-dark-message-box .el-message-box__headerbtn { color: #64748b; }
@@ -2179,19 +2179,19 @@ input:-webkit-autofill:active {
 .el-dropdown__popper,
 .el-picker__popper,
 .el-cascader__dropdown {
-  --el-bg-color-overlay: #12141c;
+  --el-bg-color-overlay: #35404e;
   --el-border-color-light: rgb(255 255 255 / 9%);
   --el-text-color-primary: #f4f7fb;
   --el-text-color-regular: #b1bccb;
   --el-fill-color-light: rgb(99 102 241 / 12%);
   border-color: rgb(255 255 255 / 9%) !important;
-  background: #12141c !important;
+  background: #35404e !important;
   color: #cbd5e1;
   box-shadow: 0 18px 48px rgb(0 0 0 / 42%) !important;
 }
 .el-popper.is-light .el-popper__arrow::before {
   border-color: rgb(255 255 255 / 9%) !important;
-  background: #12141c !important;
+  background: #35404e !important;
 }
 .el-select-dropdown,
 .el-dropdown-menu,
@@ -2200,7 +2200,7 @@ input:-webkit-autofill:active {
 .el-time-panel,
 .el-cascader-panel {
   border-color: rgb(255 255 255 / 9%);
-  background: #12141c;
+  background: #303946;
   color: #cbd5e1;
 }
 .el-select-dropdown__item,
@@ -2230,7 +2230,7 @@ input:-webkit-autofill:active {
 .el-time-spinner,
 .el-date-table th {
   border-color: rgb(255 255 255 / 7%);
-  background: #12141c;
+  background: #303946;
   color: #94a3b8;
 }
 .el-picker-panel .el-input__wrapper {
@@ -2497,7 +2497,7 @@ input:-webkit-autofill:active {
 }
 
 .overview-shell .el-loading-mask {
-  background: rgb(8 9 12 / 48%);
+  background: rgb(36 42 50 / 48%);
 }
 
 .customer-dark-dialog,
@@ -2522,7 +2522,7 @@ input:-webkit-autofill:active {
 }
 
 .node-dialog-section, .xui-dialog-section, .socks-dialog-section, .operations-dark-dialog .dialog-form-section {
-  background: #12141c;
+  background: #303946;
 }
 
 .customer-management-page,
@@ -4666,7 +4666,7 @@ input:-webkit-autofill:active {
 
 /* System settings console. */
 .settings-console-page {
-  --settings-surface: #12141c;
+  --settings-surface: #303946;
   --settings-surface-soft: rgb(255 255 255 / 2.5%);
   --settings-border: rgb(255 255 255 / 7%);
   --settings-border-hover: rgb(255 255 255 / 14%);
@@ -6780,8 +6780,8 @@ input:-webkit-autofill:active {
 
 /* Unified visual system polish for the full management console. */
 .overview-shell {
-  --ui-surface: #12151d;
-  --ui-surface-raised: #151923;
+  --ui-surface: #303946;
+  --ui-surface-raised: #35404e;
   --ui-surface-soft: rgb(255 255 255 / 2.8%);
   --ui-border: rgb(255 255 255 / 7.5%);
   --ui-border-hover: rgb(255 255 255 / 14%);
@@ -6792,12 +6792,12 @@ input:-webkit-autofill:active {
   --ui-shadow: 0 14px 34px rgb(0 0 0 / 18%);
   --ui-shadow-hover: 0 20px 46px rgb(0 0 0 / 27%);
   color: var(--ui-text);
-  background: #08090c;
+  background: #242a32;
 }
 
 .overview-shell .admin-workspace,
 .overview-shell .el-main {
-  background: #08090c;
+  background: #242a32;
 }
 
 .overview-shell .el-main {
@@ -6811,13 +6811,13 @@ input:-webkit-autofill:active {
   z-index: -1;
   inset: 54px 0 0 248px;
   pointer-events: none;
-  background: #08090c;
+  background: #242a32;
 }
 
 .overview-shell .topbar {
   height: 54px;
   border-bottom-color: var(--ui-border);
-  background: rgb(8 9 12 / 88%);
+  background: rgb(44 52 64 / 94%);
   box-shadow: 0 1px 0 rgb(255 255 255 / 2%);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -6839,7 +6839,7 @@ input:-webkit-autofill:active {
 
 .overview-shell .sidebar {
   border-right-color: var(--ui-border);
-  background: #0b0d13;
+  background: #2a313b;
   box-shadow: 12px 0 34px rgb(0 0 0 / 17%);
 }
 
@@ -6942,7 +6942,7 @@ input:-webkit-autofill:active {
   overflow: hidden;
   border: 1px solid var(--ui-border);
   border-radius: 8px;
-  background: linear-gradient(180deg, rgb(20 23 32 / 98%), rgb(16 19 27 / 98%));
+  background: linear-gradient(180deg, rgb(48 57 70 / 98%), rgb(45 54 66 / 98%));
   box-shadow: var(--ui-shadow), inset 0 1px 0 rgb(255 255 255 / 2.5%);
 }
 
@@ -6973,7 +6973,7 @@ input:-webkit-autofill:active {
 ):hover {
   transform: translateY(-3px);
   border-color: var(--ui-border-hover);
-  background: linear-gradient(180deg, rgb(24 28 38 / 98%), rgb(18 21 30 / 98%));
+  background: linear-gradient(180deg, rgb(53 64 78 / 98%), rgb(48 57 70 / 98%));
   box-shadow: var(--ui-shadow-hover), 0 0 22px var(--stat-glow);
 }
 
@@ -7051,18 +7051,18 @@ input:-webkit-autofill:active {
 .overview-shell :is(.el-input__wrapper, .el-select__wrapper, .el-input-number .el-input__wrapper, .el-date-editor, .el-textarea__inner) {
   min-height: 38px;
   border-radius: 7px;
-  background: #10131a;
+  background: #29323d;
   box-shadow: 0 0 0 1px var(--ui-border) inset;
   transition: box-shadow 160ms ease, background-color 160ms ease;
 }
 
 .overview-shell :is(.el-input__wrapper, .el-select__wrapper, .el-input-number .el-input__wrapper, .el-date-editor, .el-textarea__inner):hover {
-  background: #121620;
+  background: #303946;
   box-shadow: 0 0 0 1px rgb(255 255 255 / 12%) inset;
 }
 
 .overview-shell :is(.el-input__wrapper.is-focus, .el-select__wrapper.is-focused, .el-date-editor.is-active, .el-textarea__inner:focus) {
-  background: #121620;
+  background: #303946;
   box-shadow: 0 0 0 1px rgb(99 102 241 / 72%) inset, 0 0 0 3px rgb(99 102 241 / 10%);
 }
 
@@ -7078,7 +7078,7 @@ input:-webkit-autofill:active {
 .el-picker__popper.el-popper,
 .el-dropdown__popper.el-popper {
   border: 1px solid rgb(255 255 255 / 9%) !important;
-  background: #12151d !important;
+  background: #35404e !important;
   box-shadow: 0 18px 48px rgb(0 0 0 / 42%) !important;
 }
 
@@ -7203,7 +7203,7 @@ input:-webkit-autofill:active {
 :is(.customer-dark-dialog, .node-dark-dialog, .xui-dark-dialog, .socks-dark-dialog, .operations-dark-dialog) {
   border: 1px solid rgb(255 255 255 / 9%);
   border-radius: 8px;
-  background: #0f1219;
+  background: #35404e;
   box-shadow: 0 30px 90px rgb(0 0 0 / 52%);
 }
 
@@ -7232,7 +7232,7 @@ input:-webkit-autofill:active {
 }
 
 .overview-shell .el-loading-mask {
-  background: rgb(8 9 12 / 72%);
+  background: rgb(36 42 50 / 72%);
   backdrop-filter: blur(2px);
 }
 
@@ -7414,7 +7414,7 @@ input:-webkit-autofill:active {
   position: absolute;
   inset: 8px;
   border-radius: inherit;
-  background: #0f1219;
+  background: #35404e;
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 6%);
 }
 

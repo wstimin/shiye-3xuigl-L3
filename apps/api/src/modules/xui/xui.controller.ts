@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { xuiServerUpsertSchema } from '@shiye/shared';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { networkRouteUpsertSchema, outboundImportPreviewSchema, outboundImportSchema, remoteClientCreateSchema, remoteClientPatchSchema, xuiServerUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { AuthGuard } from '../../shared/auth.guard.js';
 import { Roles } from '../../shared/roles.decorator.js';
@@ -81,6 +81,66 @@ export class XuiController {
   @Roles('admin')
   syncServerSocksOutbounds(@Param('id') id: string) { return this.xui.syncServerSocksOutbounds(id); }
 
+  @Get('admin/network-outbounds')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  networkOutbounds(@Query('serverId') serverId?: string) { return this.xui.listNetworkOutbounds(serverId); }
+
+  @Post('admin/network-outbounds/preview')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  previewOutbound(@Body(new ZodValidationPipe(outboundImportPreviewSchema)) body: z.infer<typeof outboundImportPreviewSchema>) {
+    return this.xui.previewOutboundImport(body);
+  }
+
+  @Post('admin/network-outbounds/import')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  importOutbound(@Body(new ZodValidationPipe(outboundImportSchema)) body: z.infer<typeof outboundImportSchema>) {
+    return this.xui.importNetworkOutbounds(body);
+  }
+
+  @Delete('admin/network-outbounds/:id')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  deleteOutbound(@Param('id') id: string, @Query('remote') remote?: string, @Query('takeover') takeover?: string) {
+    return this.xui.deleteNetworkOutbound(
+      id,
+      remote === 'true' || remote === '1',
+      takeover === 'true' || takeover === '1'
+    );
+  }
+
+  @Get('admin/network-routes')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  networkRoutes(@Query('serverId') serverId?: string) { return this.xui.listNetworkRoutes(serverId); }
+
+  @Post('admin/network-routes')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  createNetworkRoute(@Body(new ZodValidationPipe(networkRouteUpsertSchema)) body: z.infer<typeof networkRouteUpsertSchema>) {
+    return this.xui.upsertNetworkRoute(body);
+  }
+
+  @Patch('admin/network-routes/:id')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  updateNetworkRoute(@Param('id') id: string, @Body(new ZodValidationPipe(networkRouteUpsertSchema)) body: z.infer<typeof networkRouteUpsertSchema>) {
+    return this.xui.upsertNetworkRoute(body, id);
+  }
+
+  @Delete('admin/network-routes/:id')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  deleteNetworkRoute(@Param('id') id: string, @Query('remote') remote?: string, @Query('takeover') takeover?: string) {
+    return this.xui.deleteNetworkRoute(
+      id,
+      remote === 'true' || remote === '1',
+      takeover === 'true' || takeover === '1'
+    );
+  }
+
   @Post('admin/service-nodes/:id/sync')
   @UseGuards(AuthGuard)
   @Roles('admin')
@@ -102,7 +162,36 @@ export class XuiController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   syncCustomerNode(@Param('id') id: string, @Param('nodeId') nodeId: string) {
-    return this.xui.syncCustomerNode(id, nodeId, { syncServiceConfig: true });
+    return this.xui.refreshCustomerNodeBinding(id, nodeId);
+  }
+
+  @Post('admin/customers/:id/nodes/:nodeId/remote-client')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  createCustomerNodeRemoteClient(
+    @Param('id') id: string,
+    @Param('nodeId') nodeId: string,
+    @Body(new ZodValidationPipe(remoteClientCreateSchema)) body: z.infer<typeof remoteClientCreateSchema>
+  ) {
+    return this.xui.createCustomerNodeRemoteClient(id, nodeId, body);
+  }
+
+  @Patch('admin/customers/:id/nodes/:nodeId/remote-client')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  patchCustomerNodeRemoteClient(
+    @Param('id') id: string,
+    @Param('nodeId') nodeId: string,
+    @Body(new ZodValidationPipe(remoteClientPatchSchema)) body: z.infer<typeof remoteClientPatchSchema>
+  ) {
+    return this.xui.patchCustomerNodeRemoteClient(id, nodeId, body);
+  }
+
+  @Delete('admin/customers/:id/nodes/:nodeId/remote-client')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  deleteCustomerNodeRemoteClient(@Param('id') id: string, @Param('nodeId') nodeId: string, @Query('keepTraffic') keepTraffic?: string) {
+    return this.xui.deleteCustomerNodeRemoteClient(id, nodeId, keepTraffic === 'true' || keepTraffic === '1');
   }
 
   @Get('admin/customers/:id/nodes/:nodeId/traffic')

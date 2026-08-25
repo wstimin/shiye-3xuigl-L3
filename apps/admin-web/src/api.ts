@@ -1,3 +1,5 @@
+import { userFacingErrorMessage } from '@shiye/shared';
+
 type ApiOptions = Omit<RequestInit, 'body'> & { body?: unknown; timeoutMs?: number };
 
 const sessionExpiredEvent = 'shiye:session-expired';
@@ -98,7 +100,7 @@ function retryDelay(attempt: number, callerSignal: AbortSignal | null | undefine
 }
 
 function requestTimeout(path: string) {
-  return /\/(sync|test|certs|status|client-presence|diagnostics|renew)(?:[/?-]|$)/i.test(path) ? 60_000 : 15_000;
+  return /\/(sync|test|certs|status|client-presence|diagnostics|renew(?:als)?)(?:[/?-]|$)/i.test(path) ? 60_000 : 15_000;
 }
 
 function shouldNotifySessionExpired(path: string) {
@@ -106,23 +108,5 @@ function shouldNotifySessionExpired(path: string) {
 }
 
 function responseErrorMessage(status: number, message: unknown) {
-  const text = normalizeResponseMessage(message);
-  if (text) return text;
-  if (status === 401) return '登录已失效';
-  if (status === 403) return '没有操作权限';
-  if (status === 404) return '数据不存在';
-  if (status === 409) return '操作冲突';
-  if (status === 429) return '操作太频繁';
-  if (status === 502 || status === 503 || status === 504) return '服务暂时不可用';
-  if (status >= 500) return '服务异常';
-  return '操作失败';
-}
-
-function normalizeResponseMessage(message: unknown) {
-  const text = Array.isArray(message)
-    ? message.filter((item): item is string => typeof item === 'string').join('；')
-    : typeof message === 'string'
-      ? message
-      : '';
-  return text.replace(/\s+/g, ' ').trim().slice(0, 1000);
+  return userFacingErrorMessage(status, message);
 }

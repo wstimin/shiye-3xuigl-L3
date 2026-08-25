@@ -20,7 +20,9 @@ import { ElAlert, ElButton, ElDialog, ElEmpty, ElForm, ElFormItem, ElInput, ElIn
 const ElTable = ElTableComponent as any;
 const ElTableColumn = ElTableColumnComponent as any;
 import { Copy, CreditCard, Download, Edit3, Layers, LayoutTemplate, Plus, RefreshCw, RotateCcw, Search, TicketCheck, TicketX, Trash2 } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { notifyError } from '../notify';
 
 type CardTemplate = { id: string; name: string; amount: string; quantity: number; prefix?: string | null; enabled: boolean; remark?: string | null };
 type BatchCard = { id: string; code: string | null; codePreview: string; amount: string; status: string; usedAt?: string | null; createdAt: string; usedBy?: { name: string; loginUsername: string } | null };
@@ -102,8 +104,8 @@ async function loadCards(resetPage = false) {
     cardPage.pageSize = result.pageSize;
     cardTotal.value = result.total;
     Object.assign(statusCounts, result.statusCounts);
-  } catch {
-    error.value = '加载失败';
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -134,9 +136,8 @@ async function saveTemplate() {
     templateDialogVisible.value = false;
     resetTemplateForm();
     await loadCards();
-  } catch {
-    error.value = '保存失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '保存失败');
   } finally {
     savingTemplate.value = false;
   }
@@ -156,9 +157,8 @@ async function generateCards() {
     ElMessage.success('生成成功');
     resetGenerateForm(template?.id || '');
     await loadCards();
-  } catch {
-    error.value = '生成失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '生成失败');
   } finally {
     generating.value = false;
   }
@@ -213,9 +213,8 @@ async function removeUnusedTemplateCards(template: CardTemplate) {
     await api(`/api/admin/card-templates/${template.id}/unused-cards`, { method: 'DELETE' });
     ElMessage.success('删除成功');
     await loadCards();
-  } catch {
-    error.value = '删除失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '删除失败');
   } finally {
     const next = new Set(deletingUnusedTemplateIds.value);
     next.delete(template.id);
@@ -245,9 +244,8 @@ async function removeUsedCards() {
     await api('/api/admin/cards/used/history', { method: 'DELETE' });
     ElMessage.success('清除成功');
     await loadCards();
-  } catch {
-    error.value = '清除失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '清除失败');
   } finally {
     clearingUsed.value = false;
   }
@@ -261,9 +259,8 @@ async function removeUsedBatchCards(batch: CardBatch) {
     await api(`/api/admin/card-batches/${batch.id}/used-cards`, { method: 'DELETE' });
     ElMessage.success('清除成功');
     await loadCards();
-  } catch {
-    error.value = '清除失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '清除失败');
   } finally {
     const next = new Set(clearingUsedBatchIds.value);
     next.delete(batch.id);
@@ -275,8 +272,8 @@ async function copyCodes(codes: string[], message = '复制成功') {
   try {
     await copyText(codes.join('\n'));
     ElMessage.success(message);
-  } catch {
-    ElMessage.error('复制失败');
+  } catch (caught) {
+    notifyError(caught, '复制失败');
   }
 }
 

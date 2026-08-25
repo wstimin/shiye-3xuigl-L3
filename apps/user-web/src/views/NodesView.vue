@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import QRCode from 'qrcode';
 import { Activity, CalendarClock, Copy, ListFilter, Network, QrCode, RefreshCw, Search, X } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { notifyError, notifySuccess } from '../notify';
 import { createNodeQrImage } from '../node-qr';
@@ -9,6 +10,8 @@ import { createNodeQrImage } from '../node-qr';
 type UserNode = {
   id: string;
   status: string;
+  remoteControl: 'reference' | 'subscription_managed' | 'fully_managed';
+  disabledReason?: 'expired' | 'traffic_exceeded' | 'admin' | null;
   expireAt?: string | null;
   trafficLimitGb: string;
   usedTrafficGb: string;
@@ -49,31 +52,55 @@ async function loadNodes() {
   error.value = '';
   try {
     nodes.value = await api<UserNode[]>('/api/user/nodes');
-  } catch {
-    error.value = '加载失败';
-    notifyError(error.value);
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
 }
 
 async function renewNode(nodeId: string) {
+  const node = nodes.value.find((item) => item.id === nodeId);
+  if (!node || node.remoteControl === 'reference') {
+    renewErrorDialog.value = { title: '无法续费', message: '该节点绑定为只读引用，续费由原官方面板账号负责，不会影响原账号的有效期和余额。' };
+    return;
+  }
   renewingId.value = nodeId;
   message.value = '';
   renewErrorDialog.value = null;
+  const months = monthsByNode.value[nodeId] || 1;
+  const requestKey = `${nodeId}:${months}`;
   try {
-    const months = monthsByNode.value[nodeId] || 1;
-    await api('/api/user/renewals', { method: 'POST', body: { nodeId, months } });
+    const requestId = renewalRequestId(requestKey);
+    await api('/api/user/renewals', { method: 'POST', body: { nodeId, months, requestId } });
+    clearRenewalRequestId(requestKey);
     message.value = '续费成功';
     notifySuccess(message.value);
     await loadNodes();
-  } catch {
-    const text = '续费失败';
+  } catch (caught) {
+    const text = readableError(caught, '续费失败');
+    if (!shouldReuseRenewalRequest(text)) clearRenewalRequestId(requestKey);
     renewErrorDialog.value = { title: '续费失败', message: text };
-    notifyError(text);
   } finally {
     renewingId.value = '';
   }
+}
+
+function shouldReuseRenewalRequest(message: string) {
+  return /请求超时|网络异常|不会重复扣款|系统将自动恢复|正在续费/.test(message);
+}
+
+function renewalRequestId(requestKey: string) {
+  const storageKey = `shiye:renewal:${requestKey}`;
+  const existing = window.sessionStorage.getItem(storageKey);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  window.sessionStorage.setItem(storageKey, created);
+  return created;
+}
+
+function clearRenewalRequestId(requestKey: string) {
+  window.sessionStorage.removeItem(`shiye:renewal:${requestKey}`);
 }
 
 async function copyText(text: string) {
@@ -92,9 +119,8 @@ async function copyText(text: string) {
       fallbackCopyText(text);
       message.value = '节点链接已复制';
       notifySuccess(message.value, '复制成功');
-    } catch {
-      error.value = '复制失败';
-      notifyError(error.value);
+    } catch (caught) {
+      notifyError(caught, '复制失败');
     }
   }
 }
@@ -120,9 +146,8 @@ async function showQrCode(node: UserNode, link: string, index: number) {
       title: `${node.serviceNode.name} / 线路 ${index + 1}`,
       image: await createNodeQrImage(link, QRCode.toDataURL)
     };
-  } catch {
-    error.value = '生成失败';
-    notifyError(error.value);
+  } catch (caught) {
+    notifyError(caught, '生成失败');
   }
 }
 
@@ -149,9 +174,13 @@ function nodeStatusHint(node: UserNode) {
   const expireTime = node.expireAt ? new Date(node.expireAt).getTime() : null;
   const diff = expireTime ? expireTime - Date.now() : null;
 
-  if (node.status !== 'active') return { type: 'danger', label: '已停用', text: '该节点当前不可用，请续费或联系管理员处理。' };
+  if (node.status !== 'active' && node.disabledReason === 'expired') return { type: 'danger', label: '已到期', text: '节点因到期停用，续费成功后会重新同步远端状态。' };
+  if (node.status !== 'active' && node.disabledReason === 'traffic_exceeded') return { type: 'danger', label: '流量用尽', text: '续费只延长有效期，不会重置流量，请联系管理员处理流量额度。' };
+  if (node.status !== 'active' && node.disabledReason === 'admin') return { type: 'danger', label: '管理员停用', text: '该节点不能通过用户续费恢复，请联系管理员。' };
+  if (node.status !== 'active') return { type: 'danger', label: '已停用', text: '该节点当前不可用，请联系管理员核对停用原因。' };
   if (diff !== null && diff <= 0) return { type: 'danger', label: '已到期', text: '节点已到期，续费成功后会重新同步远端状态。' };
-  if (limit > 0 && used >= limit) return { type: 'danger', label: '流量用尽', text: '可用流量已用完，续费或增加流量后再使用。' };
+  if (limit > 0 && used >= limit) return { type: 'danger', label: '流量用尽', text: '可用流量已用完，续费不会重置流量，请联系管理员增加额度或重置流量。' };
+  if (node.remoteControl === 'reference') return { type: 'warning', label: '官方账号引用', text: '该绑定只读取官方面板账号状态，本系统不会续费、修改或删除原账号。' };
   if (diff !== null && diff <= 3 * 24 * 60 * 60 * 1000) return { type: 'warning', label: '临近到期', text: `还剩 ${daysLeft(diff)} 天到期，建议提前续费。` };
   if (diff !== null && diff <= 7 * 24 * 60 * 60 * 1000) return { type: 'warning', label: '即将到期', text: `还剩 ${daysLeft(diff)} 天到期。` };
   if (remaining !== null && limit > 0 && remaining / limit <= 0.1) return { type: 'warning', label: '流量不足', text: `剩余约 ${remaining.toFixed(2)} GB。` };
@@ -225,7 +254,7 @@ onMounted(loadNodes);
         </div>
       </div>
       <div v-else class="empty-hint">{{ node.linkError ? `节点链接获取失败：${node.linkError}` : '暂未获取到 3-x-ui 节点链接，请联系管理员同步节点。' }}</div>
-      <form class="renew-form" @submit.prevent="renewNode(node.id)">
+      <form v-if="node.remoteControl !== 'reference'" class="renew-form" @submit.prevent="renewNode(node.id)">
         <select v-model.number="monthsByNode[node.id]">
           <option :value="1">1 个月</option>
           <option :value="3">3 个月</option>
@@ -234,6 +263,7 @@ onMounted(loadNodes);
         </select>
         <button :disabled="renewingId === node.id">{{ renewingId === node.id ? '续费中' : '余额续费' }}</button>
       </form>
+      <div v-else class="empty-hint">只读引用账号不在本系统续费，请在原官方面板处理续费。</div>
     </article>
     <div v-if="!loading && !filteredNodes.length" class="user-empty-state user-section-card">暂无符合条件的节点</div>
   </div>

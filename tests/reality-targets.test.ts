@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { XuiService } from '../apps/api/src/modules/xui/xui.service.js';
+import { testLocks } from './test-locks.js';
 
-const service = new XuiService({} as never, {} as never) as any;
+const service = new XuiService({} as never, {} as never, testLocks()) as any;
 const presetTargets = new Set([
   'www.amazon.com:443',
   'aws.amazon.com:443',
@@ -65,7 +66,7 @@ test('node form detects and displays Reality parameters without using TLS fields
 });
 
 test('Reality stream settings write minClient only when a minimum version is supplied', async () => {
-  const realityService = new XuiService({} as never, {} as never) as any;
+  const realityService = new XuiService({} as never, {} as never, testLocks()) as any;
   realityService.resolveRealityKeys = async () => ({ privateKey: 'private-key', publicKey: 'public-key' });
   realityService.resolveRealityTarget = async () => ({ target: 'cdn.example.com:443', serverName: 'cdn.example.com', source: 'scan' });
 
@@ -94,7 +95,7 @@ test('Reality inbound creation sends a manually supplied minClient to 3x-ui', as
   const createService = new XuiService({
     xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://panel.example.com', config: {} }) },
     syncLog: { create: async () => ({}) }
-  } as never, {} as never) as any;
+  } as never, {} as never, testLocks()) as any;
   createService.createAuthenticatedClient = async () => client;
   createService.resolveRealityKeys = async () => ({ privateKey: 'private-key', publicKey: 'public-key' });
   createService.resolveRealityTarget = async () => ({ target: 'cdn.example.com:443', serverName: 'cdn.example.com', source: 'scan' });
@@ -190,7 +191,7 @@ test('full Reality inbound update preserves credentials and verifies the remote 
     },
     syncLog: { create: async () => ({}) }
   };
-  const updateService = new XuiService(prisma as never, {} as never) as any;
+  const updateService = new XuiService(prisma as never, {} as never, testLocks()) as any;
   updateService.createAuthenticatedClient = async () => client;
 
   const result = await updateService.updateServiceNodeInbound({
@@ -280,7 +281,7 @@ test('remote inbound protocol update sends converted client credentials and veri
   const protocolService = new XuiService({
     xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://panel.example.com', config: {} }) },
     syncLog: { create: async () => ({}) }
-  } as never, {} as never) as any;
+  } as never, {} as never, testLocks()) as any;
   protocolService.createAuthenticatedClient = async () => client;
 
   await protocolService.updateServiceNodeInbound({

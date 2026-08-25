@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { AtSign, KeyRound, LockKeyhole, Mail, Phone, ShieldCheck, UserRound } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { userAvatarStyle, userInitial } from '../avatar';
 import { notifyError, notifySuccess } from '../notify';
@@ -37,9 +38,8 @@ async function loadProfile() {
     ]);
     user.value = session;
     dashboard.value = profile;
-  } catch {
-    error.value = '加载失败';
-    notifyError(error.value);
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -54,9 +54,8 @@ async function changePassword() {
     message.value = '修改成功';
     notifySuccess(message.value);
     Object.assign(form, { currentPassword: '', newPassword: '' });
-  } catch {
-    error.value = '修改失败';
-    notifyError(error.value);
+  } catch (caught) {
+    notifyError(caught, '修改失败');
   } finally {
     changing.value = false;
   }

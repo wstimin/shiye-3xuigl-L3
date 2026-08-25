@@ -64,6 +64,7 @@ export class CustomersService {
 
   async update(id: string, input: Partial<z.infer<typeof customerUpsertSchema>>) {
     await this.ensureExists(id);
+    if (input.balance !== undefined) throw new BadRequestException('余额不能通过用户资料接口修改，请使用余额调整功能');
     const loginPasswordHash = input.loginPassword ? await bcrypt.hash(input.loginPassword, 12) : undefined;
     const loginPasswordEnc = input.loginPassword ? this.encryption.encrypt(input.loginPassword) : undefined;
     return this.prisma.customer.update({
@@ -75,7 +76,6 @@ export class CustomersService {
         loginPasswordEnc,
         email: input.email === undefined ? undefined : input.email || null,
         phone: input.phone === undefined ? undefined : input.phone || null,
-        balance: input.balance === undefined ? undefined : new Prisma.Decimal(input.balance),
         status: input.status,
         remark: input.remark === undefined ? undefined : input.remark || null
       },
@@ -95,19 +95,36 @@ export class CustomersService {
       select: { id: true, nodes: { select: { id: true } } }
     });
     if (!customer) throw new NotFoundException('用户不存在');
+    const pendingRenewal = await this.prisma.renewalLog.findFirst({
+      where: { customerId: id, status: 'pending' },
+      select: { id: true }
+    });
+    if (pendingRenewal) throw new BadRequestException('该用户存在待处理续费，完成自动恢复或人工对账后才能删除');
+    const [rechargeOrders, balanceLogs, renewalLogs, usedCards] = await this.prisma.$transaction([
+      this.prisma.rechargeOrder.count({ where: { customerId: id } }),
+      this.prisma.balanceLog.count({ where: { customerId: id } }),
+      this.prisma.renewalLog.count({ where: { customerId: id } }),
+      this.prisma.card.count({ where: { usedById: id } })
+    ]);
+    if (rechargeOrders || balanceLogs || renewalLogs || usedCards) {
+      throw new BadRequestException('该用户已有充值、余额、续费或卡密财务历史，不能硬删除；请改为停用账号');
+    }
 
     await this.prisma.customer.delete({ where: { id } });
     return {
       deleted: true,
       id,
       unboundNodes: customer.nodes.length,
-      remoteCleanup: { skipped: true, reason: 'panel customer deletion is local only; remote 3x-ui clients belong to service nodes' }
+      remoteCleanup: { skipped: true, reason: '面板用户删除仅影响本地账号，远端 3x-ui 客户端仍归服务节点管理' }
     };
   }
 
   async adjustBalance(id: string, input: z.infer<typeof balanceAdjustSchema>, operator = 'admin') {
     return this.prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.findUnique({ where: { id } });
+      const rows = await tx.$queryRaw<Array<{ id: string; balance: Prisma.Decimal }>>`
+        SELECT id, balance FROM customers WHERE id = ${id} FOR UPDATE
+      `;
+      const customer = rows[0];
       if (!customer) throw new NotFoundException('用户不存在');
 
       const beforeBalance = new Prisma.Decimal(customer.balance);
@@ -177,8 +194,9 @@ const customerSelect = {
       expireAt: true,
       trafficLimitGb: true,
       status: true,
+      remoteControl: true,
       lastSyncedAt: true,
-      serviceNode: { select: { id: true, name: true, server: { select: { id: true, name: true } } } }
+      serviceNode: { select: { id: true, name: true, ownership: true, server: { select: { id: true, name: true } } } }
     },
     orderBy: { createdAt: 'desc' }
   },

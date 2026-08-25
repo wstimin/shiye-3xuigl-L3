@@ -16,11 +16,13 @@ import { SecurityModule } from './security/security.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { SetupModule } from './setup/setup.module.js';
 import { XuiModule } from './xui/xui.module.js';
+import { DatabaseLockModule } from '../shared/database-lock.module.js';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    DatabaseLockModule,
     SecurityModule,
     PrismaModule,
     HealthModule,

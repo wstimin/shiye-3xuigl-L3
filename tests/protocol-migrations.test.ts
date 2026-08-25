@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { XuiService } from '../apps/api/src/modules/xui/xui.service.js';
+import { testLocks } from './test-locks.js';
 
 const protocols = ['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria'] as const;
 const uuid = '11111111-2222-4333-8444-555555555555';
@@ -109,12 +110,12 @@ for (const source of protocols) {
         deleteInbound: async () => { deleteCalls += 1; return { success: true }; },
         restartXrayService: async () => { restartCalls += 1; return { success: true }; },
         serverStatus: async () => ({ success: true, obj: { xray: { state: 'running', errorMsg: '' } } }),
-        getPanelSettings: async () => ({ success: true, obj: { webCertFile: '/cert/fullchain.pem', webKeyFile: '/cert/private.key' } })
+        getWebCertFiles: async () => ({ success: true, obj: { webCertFile: '/cert/fullchain.pem', webKeyFile: '/cert/private.key' } })
       };
       const service = new XuiService({
         xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://node.example.com', config: { tlsServerName: 'node.example.com' } }) },
         syncLog: { create: async () => ({}) }
-      } as never, {} as never) as any;
+      } as never, {} as never, testLocks()) as any;
       service.createAuthenticatedClient = async () => client;
 
       const result = await service.updateServiceNodeInbound({
@@ -171,7 +172,7 @@ test('a failed 3x-ui update response is accepted only when remote readback prove
   const service = new XuiService({
     xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://node.example.com', config: {} }) },
     syncLog: { create: async () => ({}) }
-  } as never, {} as never) as any;
+  } as never, {} as never, testLocks()) as any;
   service.createAuthenticatedClient = async () => client;
 
   const result = await service.updateServiceNodeInbound({
@@ -203,7 +204,7 @@ test('a structural migration fails when Xray does not return to running state', 
   const service = new XuiService({
     xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://node.example.com', config: {} }) },
     syncLog: { create: async () => ({}) }
-  } as never, {} as never) as any;
+  } as never, {} as never, testLocks()) as any;
   service.createAuthenticatedClient = async () => client;
 
   await assert.rejects(() => service.updateServiceNodeInbound({

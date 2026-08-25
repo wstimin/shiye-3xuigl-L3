@@ -1,7 +1,7 @@
 * { box-sizing: border-box; }
 :root {
-  --app-bg: #08090c;
-  --panel-bg: #12141c;
+  --app-bg: #242a32;
+  --panel-bg: #303946;
   --panel-soft: rgb(255 255 255 / 2.5%);
   --border: rgb(255 255 255 / 7%);
   --border-strong: rgb(255 255 255 / 12%);
@@ -20,15 +20,15 @@ input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 1000px #141720 inset !important;
-  box-shadow: 0 0 0 1000px #141720 inset !important;
+  -webkit-box-shadow: 0 0 0 1000px #29323d inset !important;
+  box-shadow: 0 0 0 1000px #29323d inset !important;
   -webkit-text-fill-color: #f1f5f9 !important;
   caret-color: #f1f5f9;
   transition: background-color 9999s ease-out 0s;
 }
 @keyframes shimmer-border { to { background-position: 200% center; } }
 .boot-screen, .login-screen {
-  --login-bg: #08090c;
+  --login-bg: #242a32;
   --login-card: rgb(16 18 24 / 88%);
   --login-border: rgb(255 255 255 / 8%);
   --login-primary: #6366f1;
@@ -232,9 +232,9 @@ input:-webkit-autofill:active {
 
 /* User center */
 .user-app-shell {
-  --user-bg: #08090c;
-  --user-sidebar: #0b0d13;
-  --user-card: #12141c;
+  --user-bg: #242a32;
+  --user-sidebar: #2a313b;
+  --user-card: #303946;
   --user-card-soft: rgb(255 255 255 / 2.5%);
   --user-border: rgb(255 255 255 / 7%);
   --user-border-strong: rgb(255 255 255 / 12%);
@@ -293,7 +293,7 @@ input:-webkit-autofill:active {
   overflow: hidden;
   box-shadow: 0 7px 22px rgb(99 102 241 / 24%);
 }
-.user-brand-logo img { width: 100%; height: 100%; object-fit: contain; background: #12141c; }
+.user-brand-logo img { width: 100%; height: 100%; object-fit: contain; background: #303946; }
 .user-brand-copy { min-width: 0; display: grid; gap: 3px; }
 .user-brand-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e0e7ff; font-size: 13px; }
 .user-brand-copy small { color: #78869a; font-size: 11px; }
@@ -352,7 +352,7 @@ input:-webkit-autofill:active {
 .logout-button:hover { border-color: rgb(248 113 113 / 34%); background: rgb(248 113 113 / 7%); color: #fca5a5; }
 .user-version { text-align: center; color: #687588; font-size: 10px; }
 .user-workspace { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; background: var(--user-bg); }
-.user-topbar { min-height: 65px; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--user-border); background: rgb(8 9 12 / 88%); padding: 12px 28px; backdrop-filter: blur(16px); }
+.user-topbar { min-height: 65px; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--user-border); background: rgb(44 52 64 / 94%); padding: 12px 28px; backdrop-filter: blur(16px); }
 .user-topbar-title { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .user-topbar-title h1 { margin: 0; color: var(--user-text); font-size: 16px; font-weight: 600; letter-spacing: 0; }
 .mobile-menu-button { display: none; }
@@ -501,13 +501,13 @@ input:-webkit-autofill:active {
 .renew-form select,
 .finance-form input,
 .finance-form select,
-.password-form input { border-color: var(--user-border); background: #141720; color: var(--user-text); }
+.password-form input { border-color: var(--user-border); background: #29323d; color: var(--user-text); }
 .renew-form select:focus,
 .finance-form input:focus,
 .finance-form select:focus,
 .password-form input:focus { border-color: var(--user-primary); box-shadow: 0 0 0 3px rgb(99 102 241 / 13%); }
 .renew-form select option,
-.finance-form select option { background: #141720; color: var(--user-text); }
+.finance-form select option { background: #29323d; color: var(--user-text); }
 .renew-form button,
 .finance-form form button,
 .password-form button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: linear-gradient(135deg, #6366f1, #7c3aed); color: #fff; }
@@ -553,7 +553,7 @@ input:-webkit-autofill:active {
 .amount-shortcuts button:hover { border-color: rgb(99 102 241 / 30%); background: var(--user-primary-soft); color: #a5b4fc; box-shadow: none; animation: none; }
 .amount-shortcuts button.active { border-color: var(--user-primary); background: var(--user-primary); color: #fff; box-shadow: 0 6px 16px rgb(99 102 241 / 22%); }
 .finance-form form { grid-template-columns: minmax(0, 1fr) 118px; }
-.finance-amount-input { height: 42px; display: grid; grid-template-columns: 27px minmax(0, 1fr); align-items: center; border: 1px solid var(--user-border); border-radius: 8px; background: #141720; color: #818cf8; padding-left: 11px; }
+.finance-amount-input { height: 42px; display: grid; grid-template-columns: 27px minmax(0, 1fr); align-items: center; border: 1px solid var(--user-border); border-radius: 8px; background: #29323d; color: #818cf8; padding-left: 11px; }
 .finance-amount-input:focus-within { border-color: var(--user-primary); box-shadow: 0 0 0 3px rgb(99 102 241 / 13%); }
 .finance-amount-input input { width: 100%; height: 40px; border: 0; background: transparent; padding-left: 0; outline: 0; box-shadow: none; }
 .card-redeem-panel { display: grid; align-content: start; gap: 14px; }
@@ -614,7 +614,7 @@ input:-webkit-autofill:active {
 .qr-modal-panel > img { border: 9px solid #fff; border-radius: 6px; }
 .message-modal-text { border-color: rgb(248 113 113 / 22%); background: rgb(248 113 113 / 9%); color: #fca5a5; }
 .modal-primary-button { background: linear-gradient(135deg, #6366f1, #7c3aed); }
-.toast-card { border-color: var(--user-border-strong); background: #12141c; box-shadow: 0 18px 46px rgb(0 0 0 / 36%); }
+.toast-card { border-color: var(--user-border-strong); background: #35404e; box-shadow: 0 18px 46px rgb(0 0 0 / 36%); }
 .toast-card strong { color: var(--user-text); }
 .toast-card p { color: var(--user-secondary); }
 .toast-card button { color: var(--user-muted); }
@@ -922,8 +922,8 @@ input:-webkit-autofill:active {
 
 /* Unified visual system polish for the user service center. */
 .user-app-shell {
-  --user-surface: #12151d;
-  --user-surface-raised: #151923;
+  --user-surface: #303946;
+  --user-surface-raised: #35404e;
   --user-surface-soft: rgb(255 255 255 / 2.8%);
   --user-border: rgb(255 255 255 / 7.5%);
   --user-border-strong: rgb(255 255 255 / 13%);
@@ -933,17 +933,17 @@ input:-webkit-autofill:active {
   --user-shadow: 0 14px 34px rgb(0 0 0 / 18%);
   --user-shadow-hover: 0 20px 46px rgb(0 0 0 / 27%);
   color: var(--user-text);
-  background: #08090c;
+  background: #242a32;
 }
 
 .user-workspace,
 .user-main {
-  background: #08090c;
+  background: #242a32;
 }
 
 .user-sidebar {
   border-right-color: var(--user-border);
-  background: #0b0d13;
+  background: #2a313b;
   box-shadow: 12px 0 34px rgb(0 0 0 / 17%);
 }
 
@@ -993,7 +993,7 @@ input:-webkit-autofill:active {
   height: 54px;
   min-height: 54px;
   border-bottom-color: var(--user-border);
-  background: rgb(8 9 12 / 88%);
+  background: rgb(44 52 64 / 94%);
   box-shadow: 0 1px 0 rgb(255 255 255 / 2%);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -1063,7 +1063,7 @@ input:-webkit-autofill:active {
 .node-stat-grid article {
   border: 1px solid var(--user-border);
   border-radius: 8px;
-  background: linear-gradient(180deg, rgb(20 23 32 / 98%), rgb(16 19 27 / 98%));
+  background: linear-gradient(180deg, rgb(48 57 70 / 98%), rgb(45 54 66 / 98%));
   box-shadow: var(--user-shadow), inset 0 1px 0 rgb(255 255 255 / 2.5%);
 }
 
@@ -1084,7 +1084,7 @@ input:-webkit-autofill:active {
 .node-stat-grid article:hover {
   transform: translateY(-3px);
   border-color: var(--user-border-strong);
-  background: linear-gradient(180deg, rgb(24 28 38 / 98%), rgb(18 21 30 / 98%));
+  background: linear-gradient(180deg, rgb(53 64 78 / 98%), rgb(48 57 70 / 98%));
   box-shadow: var(--user-shadow-hover), 0 0 22px rgb(99 102 241 / 7%);
 }
 
@@ -1180,19 +1180,19 @@ input:-webkit-autofill:active {
   min-height: 38px;
   border: 1px solid var(--user-border);
   border-radius: 7px;
-  background: #10131a;
+  background: #29323d;
   color: #e5eaf2;
   transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
 }
 
 .user-app-shell :is(input, select, textarea):hover {
   border-color: rgb(255 255 255 / 12%);
-  background: #121620;
+  background: #303946;
 }
 
 .user-app-shell :is(input, select, textarea):focus {
   border-color: rgb(99 102 241 / 72%);
-  background: #121620;
+  background: #303946;
   box-shadow: 0 0 0 3px rgb(99 102 241 / 10%);
 }
 
@@ -1201,7 +1201,7 @@ input:-webkit-autofill:active {
 }
 
 .user-app-shell select option {
-  background: #12151d;
+  background: #35404e;
   color: #dce4ef;
 }
 
@@ -1257,7 +1257,7 @@ input:-webkit-autofill:active {
 
 .qr-modal-panel {
   border-radius: 8px;
-  background: #0f1219;
+  background: #35404e;
   box-shadow: 0 30px 90px rgb(0 0 0 / 52%);
 }
 

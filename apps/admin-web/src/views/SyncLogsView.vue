@@ -14,7 +14,9 @@ import { ElAlert, ElButton, ElDialog, ElEmpty, ElInputNumber, ElMessage, ElOptio
 const ElTable = ElTableComponent as any;
 const ElTableColumn = ElTableColumnComponent as any;
 import { AlertTriangle, CheckCircle2, Copy, ListChecks, RefreshCw, RotateCcw, Search, Split } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { notifyError } from '../notify';
 
 type XuiServer = { id: string; name: string; baseUrl: string };
 type SyncLog = {
@@ -60,9 +62,8 @@ async function loadLogs() {
     actions.value = result.filters.actions;
     statuses.value = result.filters.statuses;
     servers.value = result.filters.servers;
-  } catch {
-    error.value = '加载失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -89,8 +90,8 @@ async function copyDetail(log = selectedLog.value) {
   try {
     await navigator.clipboard.writeText(text);
     ElMessage.success('日志详情已复制');
-  } catch {
-    ElMessage.error('复制失败，请手动选择复制');
+  } catch (caught) {
+    notifyError(caught, '复制失败，请手动选择复制');
   }
 }
 

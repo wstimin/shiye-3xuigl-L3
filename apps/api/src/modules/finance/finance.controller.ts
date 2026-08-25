@@ -30,7 +30,7 @@ export class FinanceController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   clearRechargeOrderHistory(@Body(new ZodValidationPipe(clearHistorySchema)) body: z.infer<typeof clearHistorySchema>) {
-    if (body.confirmText !== 'CLEAR_RECHARGE_HISTORY') throw new BadRequestException('Confirmation text mismatch');
+    if (body.confirmText !== 'CLEAR_RECHARGE_HISTORY') throw new BadRequestException('确认文本不正确');
     return this.finance.clearRechargeOrderHistoryRange(body.from, body.to);
   }
 
@@ -38,7 +38,7 @@ export class FinanceController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   clearBalanceLogHistory(@Body(new ZodValidationPipe(clearHistorySchema)) body: z.infer<typeof clearHistorySchema>) {
-    if (body.confirmText !== 'CLEAR_BALANCE_HISTORY') throw new BadRequestException('Confirmation text mismatch');
+    if (body.confirmText !== 'CLEAR_BALANCE_HISTORY') throw new BadRequestException('确认文本不正确');
     return this.finance.clearBalanceLogHistoryRange(body.from, body.to);
   }
 
@@ -46,13 +46,13 @@ export class FinanceController {
   @UseGuards(AuthGuard)
   @Roles('user')
   renew(@Body(new ZodValidationPipe(userRenewalSchema)) body: z.infer<typeof userRenewalSchema>, @CurrentUser() user: SessionUser) {
-    return this.finance.renewCustomerNode(user.customerId || '', body.nodeId, body.months, user.username);
+    return this.finance.renewCustomerNode(user.customerId || '', body.nodeId, body.months, user.username, body.requestId);
   }
 
   @Post('admin/customers/:id/nodes/:nodeId/renew')
   @UseGuards(AuthGuard)
   @Roles('admin')
   adminRenew(@Param('id') id: string, @Param('nodeId') nodeId: string, @Body(new ZodValidationPipe(renewalSchema)) body: z.infer<typeof renewalSchema>, @CurrentUser() user: SessionUser) {
-    return this.finance.renewCustomerNode(id, nodeId, body.months, user.username);
+    return this.finance.renewCustomerNode(id, nodeId, body.months, user.username, body.requestId);
   }
 }

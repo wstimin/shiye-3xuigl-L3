@@ -63,6 +63,7 @@ export const serviceNodeUpsertSchema = z.object({
   name: z.string().trim().min(1).max(100),
   serverId: z.string().min(1),
   remoteMode: z.enum(['create', 'bind']).default('create'),
+  takeover: z.boolean().default(false),
   inboundId: z.coerce.number().int().optional(),
   inboundPort: z.coerce.number().int().min(1).max(65535).optional(),
   protocol: serviceNodeProtocolSchema.default('vless'),
@@ -86,6 +87,12 @@ export const serviceNodeUpsertSchema = z.object({
   remark: z.string().trim().max(500).optional()
 });
 
+export const resourceOwnershipValues = ['managed', 'referenced', 'shared'] as const;
+export const resourceOwnershipSchema = z.enum(resourceOwnershipValues);
+
+export const clientControlModeValues = ['reference', 'subscription_managed', 'fully_managed'] as const;
+export const clientControlModeSchema = z.enum(clientControlModeValues);
+
 export const socksNodeUpsertSchema = z.object({
   name: z.string().trim().min(1).max(120),
   host: z.string().trim().min(1).max(255),
@@ -100,12 +107,72 @@ export const customerNodeCreateSchema = z.object({
   serviceNodeId: z.string().min(1),
   xuiEmail: z.string().trim().min(1).max(160).optional().or(z.literal('')),
   uuid: z.string().trim().max(80).optional(),
-  expireAt: z.coerce.date().optional(),
-  trafficLimitGb: z.coerce.number().finite().min(0).optional()
+  expireAt: z.coerce.date().optional().nullable(),
+  trafficLimitGb: z.coerce.number().finite().min(0).optional(),
+  remoteControl: clientControlModeSchema.default('reference'),
+  remoteAction: z.enum(['bind', 'create']).default('bind'),
+  takeover: z.boolean().default(false)
 });
 
+export const outboundImportFormatValues = [
+  'auto',
+  'xray_json',
+  'socks',
+  'http',
+  'shadowsocks',
+  'vmess',
+  'vless',
+  'trojan',
+  'wireguard',
+  'subscription'
+] as const;
+
+export const outboundImportFormatSchema = z.enum(outboundImportFormatValues);
+
+export const outboundImportPreviewSchema = z.object({
+  input: z.string().trim().min(1).max(1024 * 1024),
+  format: outboundImportFormatSchema.default('auto')
+});
+
+export const outboundImportSchema = outboundImportPreviewSchema.extend({
+  serverId: z.string().min(1),
+  name: z.string().trim().min(1).max(120).optional(),
+  ownership: resourceOwnershipSchema.default('managed'),
+  strategy: z.enum(['local_only', 'target_panel']).default('target_panel'),
+  conflict: z.enum(['reject', 'rename', 'replace_managed', 'takeover']).default('reject'),
+  createRoute: z.boolean().default(false),
+  inboundTags: z.array(z.string().trim().min(1).max(160)).max(100).default([])
+});
+
+export const networkRouteUpsertSchema = z.object({
+  serverId: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  serviceNodeId: z.string().min(1).optional().nullable(),
+  outboundId: z.string().min(1).optional().nullable(),
+  ownership: resourceOwnershipSchema.default('managed'),
+  rule: z.record(z.unknown()).refine((rule) => rule.type === undefined || rule.type === 'field', '目前仅支持 field 路由规则'),
+  pushRemote: z.boolean().default(true),
+  conflict: z.enum(['reject', 'replace_managed', 'takeover']).default('reject')
+});
+
+export const remoteClientCreateSchema = z.object({
+  email: z.string().trim().min(1).max(160),
+  uuid: z.string().trim().max(80).optional(),
+  subId: z.string().trim().max(80).optional(),
+  expireAt: z.coerce.date().optional().nullable(),
+  trafficLimitGb: z.coerce.number().finite().min(0).default(0),
+  enabled: z.boolean().default(true)
+});
+
+export const remoteClientPatchSchema = z.object({
+  expireAt: z.coerce.date().optional().nullable(),
+  trafficLimitGb: z.coerce.number().finite().min(0).optional(),
+  enabled: z.boolean().optional()
+}).refine((value) => Object.values(value).some((item) => item !== undefined), '至少填写一个要更新的字段');
+
 export const renewalSchema = z.object({
-  months: z.coerce.number().int().min(1).max(36)
+  months: z.coerce.number().int().min(1).max(36),
+  requestId: z.string().trim().uuid()
 });
 
 export const userRenewalSchema = renewalSchema.extend({

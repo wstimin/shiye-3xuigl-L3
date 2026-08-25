@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ArrowRight, CircleAlert, ClipboardList, CreditCard, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
+import { ArrowRight, CircleAlert, ClipboardList, CreditCard, GitBranch, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
 import { api, onSessionExpired } from './api';
 import { preloadRoute, routeLoadError, routeLoading } from './router';
 
@@ -25,6 +25,7 @@ const navSections = [
     items: [
       { to: '/xui-servers', label: '面板连接', icon: Network },
       { to: '/socks-nodes', label: '出站节点', icon: ShieldCheck },
+      { to: '/network-config', label: '出站与路由', icon: GitBranch },
       { to: '/sync-logs', label: '同步日志', icon: ClipboardList },
       { to: '/diagnostics', label: '健康诊断', icon: HeartPulse }
     ]
@@ -50,7 +51,7 @@ const loginForm = reactive({ username: '', password: '' });
 const route = useRoute();
 let stopSessionExpired: (() => void) | undefined;
 const isDashboardRoute = computed(() => route.path === '/');
-const darkAdminRoutes = new Set(['/', '/customers', '/nodes', '/xui-servers', '/socks-nodes', '/sync-logs', '/diagnostics', '/finance', '/cards', '/payments', '/settings']);
+const darkAdminRoutes = new Set(['/', '/customers', '/nodes', '/xui-servers', '/socks-nodes', '/network-config', '/sync-logs', '/diagnostics', '/finance', '/cards', '/payments', '/settings']);
 const isDarkAdminRoute = computed(() => darkAdminRoutes.has(route.path));
 const currentRouteLabel = computed(() => {
   if (route.path === '/') return '数据概览';
@@ -58,6 +59,7 @@ const currentRouteLabel = computed(() => {
   if (route.path === '/nodes') return '路由节点';
   if (route.path === '/xui-servers') return '\u9762\u677f\u8fde\u63a5';
   if (route.path === '/socks-nodes') return '\u51fa\u7ad9\u8282\u70b9';
+  if (route.path === '/network-config') return '\u51fa\u7ad9\u4e0e\u8def\u7531';
   if (route.path === '/sync-logs') return '\u540c\u6b65\u65e5\u5fd7';
   if (route.path === '/diagnostics') return '\u5065\u5eb7\u8bca\u65ad';
   if (route.path === '/finance') return '\u8d22\u52a1\u8bb0\u5f55';

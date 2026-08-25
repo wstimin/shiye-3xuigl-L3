@@ -3,8 +3,8 @@ import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import QRCode from 'qrcode';
 import { ArrowLeft, CheckCircle2, CircleAlert, Clock3, CreditCard, RefreshCw } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
-import { notifyError } from '../notify';
 
 type PaymentResult = { tradeNo: string; status: string; amount: string; expiresAt?: string | null; paidAt?: string | null; payUrl?: string | null; qrCode?: string | null };
 
@@ -24,7 +24,6 @@ const statusIcon = computed(() => result.value?.status === 'paid' ? CheckCircle2
 async function loadResult() {
   if (!tradeNo.value) {
     error.value = '缺少充值订单号';
-    notifyError(error.value);
     return;
   }
   loading.value = true;
@@ -32,9 +31,8 @@ async function loadResult() {
   try {
     result.value = await api<PaymentResult>(`/api/payments/result?trade_no=${encodeURIComponent(tradeNo.value)}`);
     qrImage.value = result.value.qrCode ? await QRCode.toDataURL(result.value.qrCode, { width: 220, margin: 1 }) : '';
-  } catch {
-    error.value = '查询失败';
-    notifyError(error.value);
+  } catch (caught) {
+    error.value = readableError(caught, '查询失败');
   } finally {
     loading.value = false;
   }

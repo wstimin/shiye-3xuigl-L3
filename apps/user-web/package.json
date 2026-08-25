@@ -10,6 +10,7 @@
     "typecheck": "vue-tsc -b"
   },
   "dependencies": {
+    "@shiye/shared": "file:../../packages/shared",
     "@vitejs/plugin-vue": "^5.2.1",
     "lucide-vue-next": "^0.468.0",
     "pinia": "^2.3.0",

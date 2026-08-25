@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { customerNodeCreateSchema, serviceNodeUpsertSchema, socksNodeUpsertSchema, xuiServerUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { AuthGuard } from '../../shared/auth.guard.js';
@@ -95,7 +95,9 @@ export class NodesController {
   @Delete('admin/socks-nodes/:id')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  deleteSocksNode(@Param('id') id: string) { return this.nodes.deleteSocksNode(id); }
+  deleteSocksNode(@Param('id') id: string, @Query('takeover') takeover?: string) {
+    return this.nodes.deleteSocksNode(id, takeover === 'true' || takeover === '1');
+  }
 
   @Get('user/nodes')
   @UseGuards(AuthGuard)

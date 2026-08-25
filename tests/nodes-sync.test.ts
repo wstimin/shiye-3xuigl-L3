@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NodesService } from '../apps/api/src/modules/nodes/nodes.service.js';
+import { testLocks } from './test-locks.js';
 
 const baseInput = {
   name: '东京路由',
@@ -50,7 +51,7 @@ test('binding an existing inbound never creates a remote inbound or client', asy
       remoteClient: { email: 'existing@example.com', uuid: '11111111-2222-4333-8444-555555555555', subId: 'existing-sub' }
     })
   } as any;
-  const service = new NodesService(prisma, encryption(), xui);
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
   const result = await service.createServiceNode({ ...baseInput, remoteMode: 'bind', inboundId: 12 });
   assert.equal(createdRemote, 0);
   assert.equal(result.state, 'success');
@@ -86,7 +87,7 @@ test('SOCKS sync failure after local create returns partial and keeps the remote
     syncServiceNodeRemoteConfig: async () => { throw new Error('remote offline'); },
     deleteRemoteInbound: async () => { deletedRemote += 1; }
   } as any;
-  const service = new NodesService(prisma, encryption(), xui);
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
   const result = await service.createServiceNode({ ...baseInput, socksRelayEnabled: true, socksNodeId: 'socks-1' });
   assert.equal(result.state, 'partial');
   assert.equal(result.message, '创建成功，同步失败');
@@ -122,7 +123,7 @@ test('new Reality service nodes persist a manually supplied minimum client versi
       realityServerName: 'cdn.example.com'
     })
   } as any;
-  const service = new NodesService(prisma, encryption(), xui);
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
 
   await service.createServiceNode({
     ...baseInput,
@@ -136,8 +137,9 @@ test('new Reality service nodes persist a manually supplied minimum client versi
   assert.equal(createdConfig.realityMinClientVersion, '1.0.0');
 });
 
-test('binding passes a readable customer name to the existing remote client update', async () => {
-  let syncOptions: any;
+test('binding refreshes remote identity without creating or modifying the remote client', async () => {
+  let refreshCalls = 0;
+  let remoteWriteCalls = 0;
   let storedNode: any;
   const serviceNode = {
     id: 'service-node-1',
@@ -163,19 +165,26 @@ test('binding passes a readable customer name to the existing remote client upda
     }
   } as any;
   const xui = {
-    customerClientEmail: (name: string, _login: string, inboundId: number) => `${name.replace(/\s+/g, '-')}-${inboundId}`,
-    syncCustomerNode: async (_customerId: string, _nodeId: string, options: any) => {
-      syncOptions = options;
-      return { synced: true };
-    }
+    refreshCustomerNodeBinding: async () => {
+      refreshCalls += 1;
+      return { synced: true, remoteWrite: false, node: storedNode };
+    },
+    createCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; },
+    patchCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; },
+    deleteCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; }
   } as any;
-  const service = new NodesService(prisma, encryption(), xui);
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
 
-  await service.bindCustomerNode('customer-1', { serviceNodeId: 'service-node-1', xuiEmail: '', trafficLimitGb: 100 });
+  await service.bindCustomerNode('customer-1', {
+    serviceNodeId: 'service-node-1',
+    xuiEmail: 'existing-client@example.com',
+    trafficLimitGb: 100,
+    remoteControl: 'reference',
+    takeover: false
+  });
 
-  assert.equal(syncOptions.preferredClientEmail, '张-三-12');
-  assert.equal(syncOptions.createIfMissing, false);
-  assert.equal(syncOptions.requireExisting, true);
+  assert.equal(refreshCalls, 1);
+  assert.equal(remoteWriteCalls, 0);
 });
 
 test('retrying a service config task only synchronizes current config and never creates an inbound', async () => {
@@ -193,7 +202,7 @@ test('retrying a service config task only synchronizes current config and never 
     syncServiceNodeRemoteConfig: async () => { syncCalls += 1; return { synced: true }; },
     createServiceNodeInbound: async () => { createCalls += 1; }
   } as any;
-  const service = new NodesService(prisma, encryption(), xui);
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
   const result = await service.retrySyncTask('task-1');
   assert.equal(result.state, 'success');
   assert.equal(syncCalls, 1);
@@ -205,10 +214,12 @@ test('panel deletion is rejected while route nodes still reference it', async ()
   let deleted = 0;
   const prisma = {
     xuiServer: { findUnique: async () => ({ id: 'server-1' }), delete: async () => { deleted += 1; } },
-    serviceNode: { count: async () => 2 }
+    serviceNode: { count: async () => 2 },
+    networkOutbound: { count: async () => 1 },
+    networkRoute: { count: async () => 3 }
   } as any;
-  const service = new NodesService(prisma, encryption(), {} as any);
-  await assert.rejects(() => service.deleteServer('server-1'), /请先删除关联路由节点/);
+  const service = new NodesService(prisma, encryption(), {} as any, testLocks());
+  await assert.rejects(() => service.deleteServer('server-1'), /请先删除该面板关联的资源（入站 2、出站 1、路由 3）/);
   assert.equal(deleted, 0);
 });
 
@@ -222,6 +233,7 @@ test('editing only the node name syncs the inbound without resyncing remote clie
     name: '旧名称',
     protocol: 'vless',
     inboundId: 12,
+    ownership: 'managed',
     enabled: true,
     trafficLimitGb: 100,
     remark: null,
@@ -262,7 +274,7 @@ test('editing only the node name syncs the inbound without resyncing remote clie
     updateServiceNodeInbound: async () => { inboundSyncs += 1; return { updated: true }; },
     syncServiceNodeTrafficLimit: async () => { clientSyncs += 1; return { synced: true, failed: 0 }; }
   } as any;
-  const service = new NodesService(prisma, encryption(), xui);
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
   const result = await service.updateServiceNode('node-1', { name: '新名称' });
   assert.equal(result.state, 'success');
   assert.equal(inboundSyncs, 1);

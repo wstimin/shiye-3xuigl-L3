@@ -128,8 +128,8 @@ export class CardsService {
 
   async generate(input: z.infer<typeof cardGenerateSchema>) {
     const template = input.templateId ? await this.prisma.cardTemplate.findUnique({ where: { id: input.templateId } }) : null;
-    if (input.templateId && !template) throw new NotFoundException('Card template not found');
-    if (template && !template.enabled) throw new BadRequestException('Card template is disabled');
+    if (input.templateId && !template) throw new NotFoundException('卡密模板不存在');
+    if (template && !template.enabled) throw new BadRequestException('卡密模板已停用');
 
     const amount = new Prisma.Decimal(template?.amount ?? input.amount);
     const quantity = template?.quantity ?? input.quantity;
@@ -171,7 +171,10 @@ export class CardsService {
       if (!card) throw new NotFoundException('卡密不存在');
       if (card.status !== 'unused') throw new BadRequestException('卡密已使用或已禁用');
 
-      const customer = await tx.customer.findUnique({ where: { id: customerId } });
+      const customers = await tx.$queryRaw<Array<{ id: string; loginUsername: string; status: string; balance: Prisma.Decimal }>>`
+        SELECT id, loginUsername, status, balance FROM customers WHERE id = ${customerId} FOR UPDATE
+      `;
+      const customer = customers[0];
       if (!customer || customer.status !== 'active') throw new NotFoundException('用户不存在或已禁用');
 
       const claimed = await tx.card.updateMany({
@@ -182,11 +185,9 @@ export class CardsService {
 
       const beforeBalance = new Prisma.Decimal(customer.balance);
       const amount = new Prisma.Decimal(card.amount);
-      const afterBalance = beforeBalance.plus(amount);
-
       const updatedCustomer = await tx.customer.update({
         where: { id: customerId },
-        data: { balance: afterBalance },
+        data: { balance: { increment: amount } },
         select: {
           id: true,
           name: true,
@@ -195,6 +196,7 @@ export class CardsService {
           status: true
         }
       });
+      const afterBalance = new Prisma.Decimal(updatedCustomer.balance);
 
       await tx.balanceLog.create({
         data: {
@@ -215,16 +217,16 @@ export class CardsService {
 
   async deleteCard(id: string) {
     const card = await this.prisma.card.findUnique({ where: { id } });
-    if (!card) throw new NotFoundException('Card not found');
-    if (card.status === 'used') throw new BadRequestException('Used cards cannot be deleted');
+    if (!card) throw new NotFoundException('卡密不存在');
+    if (card.status === 'used') throw new BadRequestException('已使用的卡密不能删除');
     await this.prisma.card.delete({ where: { id } });
     return { deleted: true, id };
   }
 
   async deleteBatch(id: string) {
     const batch = await this.prisma.cardBatch.findUnique({ where: { id }, include: { cards: { select: { status: true } } } });
-    if (!batch) throw new NotFoundException('Card batch not found');
-    if (batch.cards.some((card) => card.status === 'used')) throw new BadRequestException('Batches with used cards cannot be deleted');
+    if (!batch) throw new NotFoundException('卡密批次不存在');
+    if (batch.cards.some((card) => card.status === 'used')) throw new BadRequestException('包含已使用卡密的批次不能删除');
     await this.prisma.$transaction([
       this.prisma.card.deleteMany({ where: { batchId: id } }),
       this.prisma.cardBatch.delete({ where: { id } })
@@ -255,7 +257,7 @@ export class CardsService {
 
   async deleteUsedBatchCards(batchId: string) {
     const batch = await this.prisma.cardBatch.findUnique({ where: { id: batchId }, select: { id: true } });
-    if (!batch) throw new NotFoundException('Card batch not found');
+    if (!batch) throw new NotFoundException('卡密批次不存在');
     const [deletedCards, deletedBatches] = await this.prisma.$transaction([
       this.prisma.card.deleteMany({ where: { batchId, status: 'used' } }),
       this.prisma.cardBatch.deleteMany({ where: { id: batchId, cards: { none: {} } } })
@@ -265,7 +267,7 @@ export class CardsService {
 
   private async ensureTemplate(id: string) {
     const exists = await this.prisma.cardTemplate.findUnique({ where: { id }, select: { id: true } });
-    if (!exists) throw new NotFoundException('Card template not found');
+    if (!exists) throw new NotFoundException('卡密模板不存在');
   }
 
   private decryptCardCode(value: string | null) {

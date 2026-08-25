@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { XuiService } from '../apps/api/src/modules/xui/xui.service.js';
 import { createNodeQrImage } from '../apps/user-web/src/node-qr.js';
+import { testLocks } from './test-locks.js';
 
-const service = new XuiService({} as never, {} as never) as any;
+const service = new XuiService({} as never, {} as never, testLocks()) as any;
 const uuid = '11111111-2222-4333-8444-555555555555';
 const host = 'node.example.com';
 const name = '东京 A 线';

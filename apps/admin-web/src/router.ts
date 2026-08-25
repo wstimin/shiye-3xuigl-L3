@@ -8,6 +8,7 @@ const viewLoaders: Record<string, () => Promise<{ default: Component }>> = {
   '/xui-servers': () => import('./views/XuiServersView.vue'),
   '/nodes': () => import('./views/NodesView.vue'),
   '/socks-nodes': () => import('./views/SocksNodesView.vue'),
+  '/network-config': () => import('./views/NetworkConfigView.vue'),
   '/sync-logs': () => import('./views/SyncLogsView.vue'),
   '/diagnostics': () => import('./views/DiagnosticsView.vue'),
   '/finance': () => import('./views/FinanceView.vue'),

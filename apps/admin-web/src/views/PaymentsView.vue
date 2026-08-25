@@ -40,7 +40,9 @@ import {
   SlidersHorizontal,
   Trash2
 } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { notifyError } from '../notify';
 
 type PaymentProvider = 'alipay' | 'wechat' | 'epay' | 'bepusdt';
 type PaymentChannel = {
@@ -187,8 +189,8 @@ async function loadChannels() {
   error.value = '';
   try {
     channels.value = await api<PaymentChannel[]>('/api/admin/payment-channels');
-  } catch {
-    error.value = '加载失败';
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -208,9 +210,8 @@ async function saveChannel() {
     channelDialogVisible.value = false;
     resetChannelForm();
     await loadChannels();
-  } catch {
-    error.value = '保存失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '保存失败');
   } finally {
     savingChannel.value = false;
   }
@@ -246,10 +247,9 @@ async function toggleChannel(channel: PaymentChannel, enabled: boolean | string 
     await api(`/api/admin/payment-channels/${channel.id}`, { method: 'PATCH', body: { enabled: nextEnabled } });
     ElMessage.success(nextEnabled ? '支付通道已启用' : '支付通道已停用');
     await loadChannels();
-  } catch {
+  } catch (caught) {
     channel.enabled = previous;
-    error.value = '更新失败';
-    ElMessage.error(error.value);
+    notifyError(caught, '更新失败');
   } finally {
     const next = new Set(togglingIds.value);
     next.delete(channel.id);
@@ -328,9 +328,8 @@ async function revealChannelSecrets() {
     }
     if (channelForm.provider === 'wechat') channelForm.apiKey = secrets.apiKey || '';
     ElMessage.success(hasAnySecret(secrets) ? '已读取保存的支付凭据' : '该通道没有保存凭据');
-  } catch {
-    error.value = '读取失败';
-    ElMessage.error(error.value);
+  } catch (caught) {
+    notifyError(caught, '读取失败');
   } finally {
     revealingChannelSecrets.value = false;
   }
@@ -350,8 +349,7 @@ async function removeChannel(channel: PaymentChannel) {
     await loadChannels();
   } catch (err) {
     if (err === 'cancel' || err === 'close') return;
-    error.value = '删除失败';
-    ElMessage.error(error.value);
+    notifyError(err, '删除失败');
   }
 }
 

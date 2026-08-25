@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import QRCode from 'qrcode';
 import { Banknote, CreditCard, QrCode, ShoppingBag, TicketCheck, WalletCards } from 'lucide-vue-next';
+import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { notifyError, notifySuccess } from '../notify';
 import alipayIcon from '../assets/payments/alipay.webp';
@@ -62,9 +63,8 @@ async function loadFinanceData() {
     publicSettings.cardPurchaseUrl = settingsResult.settings.cardPurchaseUrl || '';
     accountBalance.value = dashboardResult.customer.balance;
     if (!selectedMethod.value) selectPaymentMethod(paymentMethods.value.find((item) => item.channel));
-  } catch {
-    error.value = '加载失败';
-    notifyError(error.value);
+  } catch (caught) {
+    error.value = readableError(caught, '加载失败');
   } finally {
     loading.value = false;
   }
@@ -122,9 +122,8 @@ async function createRechargeOrder() {
     message.value = '订单创建成功';
     notifySuccess(message.value);
     if (result.payUrl) window.location.href = result.payUrl;
-  } catch {
-    error.value = '创建失败';
-    notifyError(error.value);
+  } catch (caught) {
+    notifyError(caught, '创建失败');
   } finally {
     recharging.value = false;
   }
@@ -139,9 +138,8 @@ async function redeemCard() {
     message.value = '兑换成功';
     notifySuccess(message.value);
     code.value = '';
-  } catch {
-    error.value = '兑换失败';
-    notifyError(error.value);
+  } catch (caught) {
+    notifyError(caught, '兑换失败');
   } finally {
     redeeming.value = false;
   }
