@@ -89,6 +89,7 @@ test('Reality inbound creation sends a manually supplied minClient to 3x-ui', as
       submittedInbound = structuredClone(payload);
       return { success: true, obj: { id: 12 } };
     },
+    getInbound: async () => ({ success: true, obj: { id: 12, ...submittedInbound } }),
     addClient: async () => ({ success: true }),
     clientLinks: async () => ({ success: true, obj: ['vless://example'] })
   };

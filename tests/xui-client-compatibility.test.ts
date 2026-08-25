@@ -174,7 +174,7 @@ test('binding refresh reads identity and links without any remote write', async 
   let localPatch: any;
   const service = new XuiService({
     customerNode: {
-      findFirst: async () => customerNode,
+      findFirst: async ({ where }: any) => typeof where.id === 'object' ? null : customerNode,
       update: async ({ data }: any) => {
         localPatch = data;
         return { ...customerNode, ...data };
