@@ -1118,6 +1118,14 @@ export class XuiService {
   }
 
   async customerNodeTraffic(customerId: string, customerNodeId: string) {
+    return this.syncCustomerNodeTraffic(customerId, customerNodeId);
+  }
+
+  async syncCustomerNodeTraffic(customerId: string, customerNodeId: string) {
+    return this.withCustomerNodeLock(customerId, customerNodeId, () => this.syncCustomerNodeTrafficUnlocked(customerId, customerNodeId));
+  }
+
+  private async syncCustomerNodeTrafficUnlocked(customerId: string, customerNodeId: string) {
     const customerNode = await this.prisma.customerNode.findFirst({
       where: { id: customerNodeId, customerId },
       include: { serviceNode: { include: { server: true } } }
@@ -1127,11 +1135,27 @@ export class XuiService {
     const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
     const payload = await client.clientTraffic(customerNode.xuiEmail);
     this.assertXuiSuccess(payload);
+    const traffic = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
+    if (!Object.hasOwn(traffic, 'up') || !Object.hasOwn(traffic, 'down')) {
+      throw new BadGatewayException('官方客户端流量数据缺少 up/down 字段');
+    }
+    const upBytes = this.trafficBytes(traffic.up);
+    const downBytes = this.trafficBytes(traffic.down);
+    const usedBytes = upBytes + downBytes;
+    const usedTrafficGb = usedBytes / 1024 / 1024 / 1024;
+    const syncedAt = new Date();
+    await this.prisma.customerNode.update({
+      where: { id: customerNode.id },
+      data: { usedTrafficGb: new Prisma.Decimal(usedTrafficGb), lastSyncedAt: syncedAt }
+    });
     return {
       customerId,
       customerNodeId,
       xuiEmail: customerNode.xuiEmail,
-      traffic: this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload),
+      usedBytes,
+      usedTrafficGb,
+      syncedAt,
+      traffic,
       raw: payload
     };
   }
@@ -4752,6 +4776,11 @@ export class XuiService {
   private positiveInteger(value: unknown) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : undefined;
+  }
+
+  private trafficBytes(value: unknown) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : 0;
   }
 
   private booleanValue(value: unknown, fallback: boolean) {

@@ -604,6 +604,58 @@ test('service-node traffic reset uses the official client endpoint and clears al
   assert.equal(localReset.data.lastSyncedAt, null);
 });
 
+test('customer-node traffic sync stores the official up and down byte total', async () => {
+  let storedUpdate: any;
+  const customerNode = {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    xuiEmail: 'short-us',
+    serviceNodeId: 'service-node-1',
+    serviceNode: { server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} } }
+  };
+  const prisma = {
+    customerNode: {
+      findFirst: async ({ select }: any) => select ? { serviceNodeId: customerNode.serviceNodeId } : customerNode,
+      update: async (args: any) => { storedUpdate = args; return customerNode; }
+    }
+  };
+  const client = {
+    clientTraffic: async (email: string) => ({ success: true, obj: { email, up: 1024 * 1024 * 1024, down: 512 * 1024 * 1024 } })
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.createAuthenticatedClient = async () => client;
+
+  const result = await service.syncCustomerNodeTraffic('customer-1', 'customer-node-1');
+
+  assert.equal(result.usedBytes, 1610612736);
+  assert.equal(result.usedTrafficGb, 1.5);
+  assert.equal(storedUpdate.where.id, 'customer-node-1');
+  assert.equal(storedUpdate.data.usedTrafficGb.toString(), '1.5');
+  assert.equal(storedUpdate.data.lastSyncedAt instanceof Date, true);
+});
+
+test('customer-node traffic sync rejects an official response without counters', async () => {
+  let localUpdates = 0;
+  const customerNode = {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    xuiEmail: 'short-us',
+    serviceNodeId: 'service-node-1',
+    serviceNode: { server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} } }
+  };
+  const prisma = {
+    customerNode: {
+      findFirst: async ({ select }: any) => select ? { serviceNodeId: customerNode.serviceNodeId } : customerNode,
+      update: async () => { localUpdates += 1; }
+    }
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.createAuthenticatedClient = async () => ({ clientTraffic: async () => ({ success: true, obj: { email: 'short-us', up: 1024 } }) });
+
+  await assert.rejects(() => service.syncCustomerNodeTraffic('customer-1', 'customer-node-1'), /缺少 up\/down 字段/);
+  assert.equal(localUpdates, 0);
+});
+
 test('managed service-node deletion verifies client absence before deleting and verifying the inbound', async () => {
   const operations: string[] = [];
   let clientExists = true;

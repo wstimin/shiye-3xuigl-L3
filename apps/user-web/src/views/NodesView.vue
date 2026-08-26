@@ -6,6 +6,7 @@ import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { notifyError, notifySuccess } from '../notify';
 import { createNodeQrImage } from '../node-qr';
+import { formatTraffic } from '../traffic';
 
 type UserNode = {
   id: string;
@@ -15,6 +16,7 @@ type UserNode = {
   expireAt?: string | null;
   trafficLimitGb: string;
   usedTrafficGb: string;
+  usedTrafficBytes?: number;
   links?: string[];
   linkError?: string | null;
   subId?: string;
@@ -234,7 +236,7 @@ onMounted(loadNodes);
       </div>
       <div class="node-status-hint" :class="nodeStatusHint(node).type">{{ nodeStatusHint(node).text }}</div>
       <div class="node-traffic-block">
-        <div><span>流量使用</span><strong>{{ node.usedTrafficGb }} / {{ node.trafficLimitGb }} GB</strong></div>
+        <div><span>流量使用</span><strong>{{ formatTraffic(node.usedTrafficBytes, node.usedTrafficGb) }} / {{ node.trafficLimitGb }} GB</strong></div>
         <span class="node-traffic-track"><i :class="nodeStatusHint(node).type" :style="{ width: `${trafficPercent(node)}%` }"></i></span>
       </div>
       <div class="node-meta">

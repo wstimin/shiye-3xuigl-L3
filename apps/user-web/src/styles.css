@@ -1,7 +1,7 @@
 * { box-sizing: border-box; }
 :root {
-  --app-bg: #242a32;
-  --panel-bg: #303946;
+  --app-bg: #171a20;
+  --panel-bg: #20252d;
   --panel-soft: rgb(255 255 255 / 2.5%);
   --border: rgb(255 255 255 / 7%);
   --border-strong: rgb(255 255 255 / 12%);
@@ -20,16 +20,16 @@ input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 1000px #29323d inset !important;
-  box-shadow: 0 0 0 1000px #29323d inset !important;
+  -webkit-box-shadow: 0 0 0 1000px #252b34 inset !important;
+  box-shadow: 0 0 0 1000px #252b34 inset !important;
   -webkit-text-fill-color: #f1f5f9 !important;
   caret-color: #f1f5f9;
   transition: background-color 9999s ease-out 0s;
 }
 @keyframes shimmer-border { to { background-position: 200% center; } }
 .boot-screen, .login-screen {
-  --login-bg: #242a32;
-  --login-card: #303946;
+  --login-bg: #171a20;
+  --login-card: #20252d;
   --login-border: rgb(255 255 255 / 8%);
   --login-primary: #6366f1;
   --login-primary-strong: #7c3aed;
@@ -86,7 +86,7 @@ input:-webkit-autofill:active {
 .login-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 30px var(--login-primary-glow); }
 .login-submit:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
 .login-security-note { min-height: 20px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--login-muted); font-size: 12px; }
-.user-sidebar { min-height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px; background: #2a313b; color: var(--text); padding: 18px 12px; border-right: 1px solid var(--border); box-shadow: 10px 0 30px rgb(0 0 0 / 17%); }
+.user-sidebar { min-height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px; background: #1c2027; color: var(--text); padding: 18px 12px; border-right: 1px solid var(--border); box-shadow: 10px 0 30px rgb(0 0 0 / 17%); }
 .user-nav { min-height: 0; flex: 1; display: grid; align-content: start; gap: 5px; }
 .nav-link { height: 40px; display: inline-flex; align-items: center; gap: 9px; color: #667085; text-decoration: none; border-radius: 8px; padding: 0 12px; transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease; }
 .nav-link:hover { background: rgb(255 255 255 / 4.5%); color: var(--primary-strong); }
@@ -101,13 +101,13 @@ input:-webkit-autofill:active {
 .loading { opacity: 0.68; }
 .finance-grid { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(330px, 0.82fr); gap: 16px; align-items: start; }
 .finance-form h2 { margin: 0 0 14px; font-size: 18px; }
-.secondary-button { height: 36px; border: 1px solid var(--border-strong); border-radius: 8px; background: #303946; color: #b1bccb; padding: 0 12px; cursor: pointer; white-space: nowrap; font-weight: 700; }
+.secondary-button { height: 36px; border: 1px solid var(--border-strong); border-radius: 8px; background: #20252d; color: #b1bccb; padding: 0 12px; cursor: pointer; white-space: nowrap; font-weight: 700; }
 .card-redeem-panel { display: grid; gap: 14px; }
 .card-redeem-title { min-width: 0; display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 12px; }
 .card-redeem-title h2 { margin: 0 0 4px; }
 .card-redeem-title p { margin: 0; color: #64748b; font-size: 13px; line-height: 1.5; }
 .card-redeem-icon { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--primary-soft); color: var(--primary-strong); }
-.card-buy-button { width: 100%; height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: var(--border-strong); background: #303946; color: var(--primary-strong); }
+.card-buy-button { width: 100%; height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: var(--border-strong); background: #20252d; color: var(--primary-strong); }
 .card-buy-button:hover { border-color: transparent; background: linear-gradient(#fbf8ff, #fbf8ff) padding-box, var(--primary-line) border-box; background-size: auto, 200% 100%; color: #7e22ce; box-shadow: 0 0 0 3px rgb(168 85 247 / 10%); animation: shimmer-border 1.8s linear infinite; }
 .card-redeem-form { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 10px; }
 .card-redeem-tip { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); padding: 10px 12px; color: #8f9bad; font-size: 13px; line-height: 1.45; }
@@ -128,7 +128,7 @@ input:-webkit-autofill:active {
 .payment-method-button:disabled img { filter: grayscale(1); opacity: 0.72; }
 .finance-form form { display: grid; grid-template-columns: minmax(0, 1fr) 104px; gap: 10px; }
 .finance-form .card-redeem-form { grid-template-columns: minmax(0, 1fr) 112px; }
-.finance-form input, .finance-form select { min-width: 0; height: 42px; border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; background: #29323d; color: var(--text); outline: 0; }
+.finance-form input, .finance-form select { min-width: 0; height: 42px; border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; background: #252b34; color: var(--text); outline: 0; }
 .finance-form input:focus, .finance-form select:focus, .renew-form select:focus, .password-form input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(168 85 247 / 10%); }
 .finance-form form button, .renew-form button, .password-form button { height: 42px; border: 0; border-radius: 8px; background: var(--primary); color: #fff; cursor: pointer; font-weight: 700; }
 .finance-form form button:hover:not(:disabled), .renew-form button:hover:not(:disabled), .password-form button:hover:not(:disabled) { background: var(--primary-strong); color: #fff; }
@@ -139,7 +139,7 @@ input:-webkit-autofill:active {
 .qr-box span { width: 100%; color: #64748b; font-size: 12px; text-align: center; }
 .result-panel h2 { margin: 0 0 14px; font-size: 20px; }
 .toast-stack { position: fixed; top: 18px; right: 18px; z-index: 80; width: min(380px, calc(100vw - 28px)); display: grid; gap: 10px; pointer-events: none; }
-.toast-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; border: 1px solid var(--border-strong); border-left-width: 4px; border-radius: 8px; background: #35404e; box-shadow: 0 18px 46px rgb(0 0 0 / 36%); padding: 13px 13px 13px 14px; pointer-events: auto; }
+.toast-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; border: 1px solid var(--border-strong); border-left-width: 4px; border-radius: 8px; background: #272e38; box-shadow: 0 18px 46px rgb(0 0 0 / 36%); padding: 13px 13px 13px 14px; pointer-events: auto; }
 .toast-card strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 14px; }
 .toast-card p { margin: 0; color: #b1bccb; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .toast-card button { height: 28px; border: 0; background: transparent; color: #64748b; cursor: pointer; padding: 0 4px; }
@@ -173,7 +173,7 @@ input:-webkit-autofill:active {
 .link-label { min-width: 0; height: 38px; display: flex; align-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); padding: 0 11px; color: #b1bccb; font-size: 13px; }
 .copy-button { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); color: #b1bccb; cursor: pointer; }
 .qr-modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: rgb(15 23 42 / 48%); backdrop-filter: blur(2px); }
-.qr-modal-panel { width: min(350px, 100%); display: grid; gap: 14px; border-radius: 8px; background: #35404e; padding: 16px; box-shadow: 0 22px 60px rgb(0 0 0 / 45%); }
+.qr-modal-panel { width: min(350px, 100%); display: grid; gap: 14px; border-radius: 8px; background: #272e38; padding: 16px; box-shadow: 0 22px 60px rgb(0 0 0 / 45%); }
 .qr-modal-head { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .qr-modal-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qr-modal-panel img { width: 260px; height: 260px; max-width: 100%; justify-self: center; background: #fff; }
@@ -182,7 +182,7 @@ input:-webkit-autofill:active {
 .modal-primary-button { height: 40px; border: 0; border-radius: 8px; background: var(--primary); color: #fff; cursor: pointer; font-weight: 700; }
 .modal-primary-button:hover { background: var(--primary-strong); }
 .renew-form { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 8px; }
-.renew-form select { min-width: 0; height: 42px; border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; background: #29323d; color: var(--text); outline: 0; }
+.renew-form select { min-width: 0; height: 42px; border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; background: #252b34; color: var(--text); outline: 0; }
 @media (max-width: 1080px) { .intro-content h1 { font-size: 40px; } }
 @media (max-width: 980px) {
   .login-layout { grid-template-columns: 1fr; place-items: center; padding: 32px 20px; }
@@ -211,9 +211,9 @@ input:-webkit-autofill:active {
 
 /* User center */
 .user-app-shell {
-  --user-bg: #242a32;
-  --user-sidebar: #2a313b;
-  --user-card: #303946;
+  --user-bg: #171a20;
+  --user-sidebar: #1c2027;
+  --user-card: #20252d;
   --user-card-soft: rgb(255 255 255 / 2.5%);
   --user-border: rgb(255 255 255 / 7%);
   --user-border-strong: rgb(255 255 255 / 12%);
@@ -272,7 +272,7 @@ input:-webkit-autofill:active {
   overflow: hidden;
   box-shadow: 0 7px 22px rgb(99 102 241 / 24%);
 }
-.user-brand-logo img { width: 100%; height: 100%; object-fit: contain; background: #303946; }
+.user-brand-logo img { width: 100%; height: 100%; object-fit: contain; background: #20252d; }
 .user-brand-copy { min-width: 0; display: grid; gap: 3px; }
 .user-brand-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e0e7ff; font-size: 13px; }
 .user-brand-copy small { color: #78869a; font-size: 11px; }
@@ -331,7 +331,7 @@ input:-webkit-autofill:active {
 .logout-button:hover { border-color: rgb(248 113 113 / 34%); background: rgb(248 113 113 / 7%); color: #fca5a5; }
 .user-version { text-align: center; color: #687588; font-size: 10px; }
 .user-workspace { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; background: var(--user-bg); }
-.user-topbar { min-height: 65px; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--user-border); background: #2c3440; padding: 12px 28px; }
+.user-topbar { min-height: 65px; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--user-border); background: #1c2027; padding: 12px 28px; }
 .user-topbar-title { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .user-topbar-title h1 { margin: 0; color: var(--user-text); font-size: 16px; font-weight: 600; letter-spacing: 0; }
 .mobile-menu-button { display: none; }
@@ -480,13 +480,13 @@ input:-webkit-autofill:active {
 .renew-form select,
 .finance-form input,
 .finance-form select,
-.password-form input { border-color: var(--user-border); background: #29323d; color: var(--user-text); }
+.password-form input { border-color: var(--user-border); background: #252b34; color: var(--user-text); }
 .renew-form select:focus,
 .finance-form input:focus,
 .finance-form select:focus,
 .password-form input:focus { border-color: var(--user-primary); box-shadow: 0 0 0 3px rgb(99 102 241 / 13%); }
 .renew-form select option,
-.finance-form select option { background: #29323d; color: var(--user-text); }
+.finance-form select option { background: #272e38; color: var(--user-text); }
 .renew-form button,
 .finance-form form button,
 .password-form button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: linear-gradient(135deg, #6366f1, #7c3aed); color: #fff; }
@@ -532,7 +532,7 @@ input:-webkit-autofill:active {
 .amount-shortcuts button:hover { border-color: rgb(99 102 241 / 30%); background: var(--user-primary-soft); color: #a5b4fc; box-shadow: none; animation: none; }
 .amount-shortcuts button.active { border-color: var(--user-primary); background: var(--user-primary); color: #fff; box-shadow: 0 6px 16px rgb(99 102 241 / 22%); }
 .finance-form form { grid-template-columns: minmax(0, 1fr) 118px; }
-.finance-amount-input { height: 42px; display: grid; grid-template-columns: 27px minmax(0, 1fr); align-items: center; border: 1px solid var(--user-border); border-radius: 8px; background: #29323d; color: #818cf8; padding-left: 11px; }
+.finance-amount-input { height: 42px; display: grid; grid-template-columns: 27px minmax(0, 1fr); align-items: center; border: 1px solid var(--user-border); border-radius: 8px; background: #252b34; color: #818cf8; padding-left: 11px; }
 .finance-amount-input:focus-within { border-color: var(--user-primary); box-shadow: 0 0 0 3px rgb(99 102 241 / 13%); }
 .finance-amount-input input { width: 100%; height: 40px; border: 0; background: transparent; padding-left: 0; outline: 0; box-shadow: none; }
 .card-redeem-panel { display: grid; align-content: start; gap: 14px; }
@@ -593,7 +593,7 @@ input:-webkit-autofill:active {
 .qr-modal-panel > img { border: 9px solid #fff; border-radius: 6px; }
 .message-modal-text { border-color: rgb(248 113 113 / 22%); background: rgb(248 113 113 / 9%); color: #fca5a5; }
 .modal-primary-button { background: linear-gradient(135deg, #6366f1, #7c3aed); }
-.toast-card { border-color: var(--user-border-strong); background: #35404e; box-shadow: 0 18px 46px rgb(0 0 0 / 36%); }
+.toast-card { border-color: var(--user-border-strong); background: #272e38; box-shadow: 0 18px 46px rgb(0 0 0 / 36%); }
 .toast-card strong { color: var(--user-text); }
 .toast-card p { color: var(--user-secondary); }
 .toast-card button { color: var(--user-muted); }
@@ -901,8 +901,8 @@ input:-webkit-autofill:active {
 
 /* Unified visual system polish for the user service center. */
 .user-app-shell {
-  --user-surface: #303946;
-  --user-surface-raised: #35404e;
+  --user-surface: #20252d;
+  --user-surface-raised: #2a313b;
   --user-surface-soft: rgb(255 255 255 / 2.8%);
   --user-border: rgb(255 255 255 / 7.5%);
   --user-border-strong: rgb(255 255 255 / 13%);
@@ -912,17 +912,17 @@ input:-webkit-autofill:active {
   --user-shadow: 0 14px 34px rgb(0 0 0 / 18%);
   --user-shadow-hover: 0 20px 46px rgb(0 0 0 / 27%);
   color: var(--user-text);
-  background: #242a32;
+  background: #171a20;
 }
 
 .user-workspace,
 .user-main {
-  background: #242a32;
+  background: #171a20;
 }
 
 .user-sidebar {
   border-right-color: var(--user-border);
-  background: #2a313b;
+  background: #1c2027;
   box-shadow: 12px 0 34px rgb(0 0 0 / 17%);
 }
 
@@ -972,7 +972,7 @@ input:-webkit-autofill:active {
   height: 54px;
   min-height: 54px;
   border-bottom-color: var(--user-border);
-  background: #2c3440;
+  background: #1c2027;
   box-shadow: 0 1px 0 rgb(255 255 255 / 2%);
 }
 
@@ -1040,7 +1040,7 @@ input:-webkit-autofill:active {
 .node-stat-grid article {
   border: 1px solid var(--user-border);
   border-radius: 8px;
-  background: linear-gradient(180deg, rgb(48 57 70 / 98%), rgb(45 54 66 / 98%));
+  background: linear-gradient(180deg, #252b34, #20252d);
   box-shadow: var(--user-shadow), inset 0 1px 0 rgb(255 255 255 / 2.5%);
 }
 
@@ -1061,7 +1061,7 @@ input:-webkit-autofill:active {
 .node-stat-grid article:hover {
   transform: translateY(-3px);
   border-color: var(--user-border-strong);
-  background: linear-gradient(180deg, rgb(53 64 78 / 98%), rgb(48 57 70 / 98%));
+  background: linear-gradient(180deg, #2a313b, #252b34);
   box-shadow: var(--user-shadow-hover), 0 0 22px rgb(99 102 241 / 7%);
 }
 
@@ -1143,19 +1143,19 @@ input:-webkit-autofill:active {
   min-height: 38px;
   border: 1px solid var(--user-border);
   border-radius: 7px;
-  background: #29323d;
+  background: #252b34;
   color: #e5eaf2;
   transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
 }
 
 .user-app-shell :is(input, select, textarea):hover {
   border-color: rgb(255 255 255 / 12%);
-  background: #303946;
+  background: #2a313b;
 }
 
 .user-app-shell :is(input, select, textarea):focus {
   border-color: rgb(99 102 241 / 72%);
-  background: #303946;
+  background: #2a313b;
   box-shadow: 0 0 0 3px rgb(99 102 241 / 10%);
 }
 
@@ -1164,7 +1164,7 @@ input:-webkit-autofill:active {
 }
 
 .user-app-shell select option {
-  background: #35404e;
+  background: #272e38;
   color: #dce4ef;
 }
 
@@ -1220,7 +1220,7 @@ input:-webkit-autofill:active {
 
 .qr-modal-panel {
   border-radius: 8px;
-  background: #35404e;
+  background: #272e38;
   box-shadow: 0 30px 90px rgb(0 0 0 / 52%);
 }
 

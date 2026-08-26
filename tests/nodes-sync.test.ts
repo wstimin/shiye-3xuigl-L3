@@ -454,6 +454,58 @@ test('panel deletion is rejected while route nodes still reference it', async ()
   assert.equal(deleted, 0);
 });
 
+test('user node listing returns freshly synchronized official traffic', async () => {
+  const node = {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    xuiEmail: 'short-us',
+    usedTrafficGb: 0,
+    lastSyncedAt: null,
+    config: { subId: 'sub-1' },
+    serviceNode: { server: { id: 'server-1', name: '面板', baseUrl: 'https://panel.example.com' } }
+  };
+  const syncedAt = new Date('2026-08-27T00:00:00Z');
+  const prisma = { customerNode: { findMany: async () => [node] } } as any;
+  const xui = {
+    customerNodeLinks: async () => ['vless://example'],
+    syncCustomerNodeTraffic: async () => ({ usedTrafficGb: 1.5, usedBytes: 1.5 * 1024 ** 3, syncedAt })
+  } as any;
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
+
+  const result = await service.listUserNodes('customer-1');
+
+  assert.equal(result[0].usedTrafficGb.toString(), '1.5');
+  assert.equal(result[0].usedTrafficBytes, 1.5 * 1024 ** 3);
+  assert.equal(result[0].lastSyncedAt, syncedAt);
+  assert.deepEqual(result[0].links, ['vless://example']);
+});
+
+test('user node listing falls back to stored traffic when the official read fails', async () => {
+  const storedAt = new Date('2026-08-26T00:00:00Z');
+  const node = {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    xuiEmail: 'short-us',
+    usedTrafficGb: 2.25,
+    lastSyncedAt: storedAt,
+    config: {},
+    serviceNode: { server: { id: 'server-1', name: '面板', baseUrl: 'https://panel.example.com' } }
+  };
+  const prisma = { customerNode: { findMany: async () => [node] } } as any;
+  const xui = {
+    customerNodeLinks: async () => ['vless://example'],
+    syncCustomerNodeTraffic: async () => { throw new Error('panel unavailable'); }
+  } as any;
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
+
+  const result = await service.listUserNodes('customer-1');
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].usedTrafficGb, 2.25);
+  assert.equal(result[0].usedTrafficBytes, 2.25 * 1024 ** 3);
+  assert.equal(result[0].lastSyncedAt, storedAt);
+});
+
 
 test('editing only the node name syncs the inbound without resyncing remote clients', async () => {
   let inboundSyncs = 0;

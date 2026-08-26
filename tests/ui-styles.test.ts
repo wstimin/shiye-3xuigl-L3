@@ -59,7 +59,7 @@ test('user pages remove decorative overlays while retaining functional modal bac
 
   assert.equal(userStyles.includes('.qr-modal'), true);
   assert.equal(userStyles.includes('.user-nav-backdrop'), true);
-  assert.equal(userStyles.includes('background: #2c3440;'), true);
+  assert.equal(userStyles.includes('background: #1c2027;'), true);
 });
 
 test('user shell base styles do not depend on later overrides to hide light surfaces', () => {
@@ -73,8 +73,18 @@ test('user shell base styles do not depend on later overrides to hide light surf
     assert.equal(userStyles.includes(lightRule), false, 'Light base surface returned: ' + lightRule);
   }
 
-  assert.equal(userStyles.includes('.user-sidebar { min-height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px; background: #2a313b;'), true);
+  assert.equal(userStyles.includes('.user-sidebar { min-height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px; background: #1c2027;'), true);
   assert.equal(userStyles.includes('.qr-box img { width: 220px; height: 220px; max-width: 100%; background: #fff; }'), true);
+});
+
+test('user console uses the same surface palette as the admin console', () => {
+  for (const color of ['#171a20', '#1c2027', '#20252d', '#252b34', '#2a313b', '#272e38']) {
+    assert.equal(userStyles.includes(color), true, 'Missing shared console color: ' + color);
+  }
+
+  for (const retiredColor of ['#242a32', '#303946', '#35404e', '#2c3440', '#29323d']) {
+    assert.equal(userStyles.includes(retiredColor), false, 'Retired user surface color returned: ' + retiredColor);
+  }
 });
 
 test('lazy Element Plus styles cannot expand desktop management filters', () => {

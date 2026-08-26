@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router';
 import { Activity, CalendarDays, Network, RefreshCw, Settings, TicketCheck, WalletCards } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { formatTraffic, trafficBytes } from '../traffic';
 
 type DashboardNode = { expireAt?: string | null };
 type UserDashboard = {
@@ -17,6 +18,7 @@ type UserNode = {
   expireAt?: string | null;
   trafficLimitGb: string;
   usedTrafficGb: string;
+  usedTrafficBytes?: number;
   links?: string[];
   serviceNode: { name: string; protocol: string; priceMonthly: string; server: { name: string } };
 };
@@ -36,6 +38,7 @@ const nearestExpireValue = computed(() => {
 });
 const totalTraffic = computed(() => nodes.value.reduce((total, node) => total + numericValue(node.trafficLimitGb), 0));
 const usedTraffic = computed(() => nodes.value.reduce((total, node) => total + numericValue(node.usedTrafficGb), 0));
+const usedTrafficBytes = computed(() => nodes.value.reduce((total, node) => total + trafficBytes(node.usedTrafficBytes, node.usedTrafficGb), 0));
 const remainingTraffic = computed(() => Math.max(totalTraffic.value - usedTraffic.value, 0));
 const trafficPercent = computed(() => totalTraffic.value > 0 ? Math.min((usedTraffic.value / totalTraffic.value) * 100, 100) : 0);
 const previewNodes = computed(() => nodes.value.slice(0, 3));
@@ -113,7 +116,7 @@ onMounted(loadDashboard);
       <article class="user-stat-card blue">
         <div class="user-stat-head"><span>剩余流量</span><i><Activity :size="17" /></i></div>
         <strong>{{ formatNumber(remainingTraffic) }}<small> GB</small></strong>
-        <p>总计 {{ formatNumber(totalTraffic) }} GB，已用 {{ formatNumber(usedTraffic) }} GB</p>
+        <p>总计 {{ formatNumber(totalTraffic) }} GB，已用 {{ formatTraffic(usedTrafficBytes) }}</p>
         <span class="user-stat-progress"><i :style="{ width: `${trafficPercent}%` }"></i></span>
       </article>
       <article class="user-stat-card orange">
@@ -137,7 +140,7 @@ onMounted(loadDashboard);
             </div>
             <div class="user-feedback warning">续费仅延长本系统访问授权，不修改路由节点共享的官方客户端。</div>
             <div class="service-preview-stats">
-              <div><span>流量</span><strong>{{ node.usedTrafficGb }} / {{ node.trafficLimitGb }} GB</strong></div>
+              <div><span>流量</span><strong>{{ formatTraffic(node.usedTrafficBytes, node.usedTrafficGb) }} / {{ node.trafficLimitGb }} GB</strong></div>
               <div><span>到期</span><strong>{{ formatDate(node.expireAt, true) }}</strong></div>
               <div><span>线路</span><strong>{{ node.links?.length || 0 }} 条</strong></div>
             </div>

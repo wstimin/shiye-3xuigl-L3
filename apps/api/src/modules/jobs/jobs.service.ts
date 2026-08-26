@@ -253,19 +253,31 @@ export class JobsService {
           this.locks.withLock<DisableTrafficExceededOutcome>(this.locks.customerNodeKey(node.id), async () => {
             const current = await this.prisma.customerNode.findUnique({
               where: { id: node.id },
-              select: { status: true, trafficLimitGb: true, usedTrafficGb: true, serviceNodeId: true }
+              select: { customerId: true, status: true, trafficLimitGb: true, serviceNodeId: true }
             });
             if (!current || current.serviceNodeId !== node.serviceNodeId || current.status !== 'active') return { skipped: true, reason: '节点状态已变化', usedBytes: 0, usedTrafficGb: 0, limitBytes } as const;
             const currentLimitBytes = this.gbToBytes(Number(current.trafficLimitGb));
             if (currentLimitBytes <= 0) return { skipped: true, reason: '节点流量额度已取消', usedBytes: 0, usedTrafficGb: 0, limitBytes: currentLimitBytes } as const;
             if (await this.hasPendingRenewal(node.id)) return { skipped: true, reason: '节点续费正在处理，已等待续费完成后再检查', usedBytes: 0, usedTrafficGb: 0, limitBytes: currentLimitBytes } as const;
-            const usedTrafficGb = Number(current.usedTrafficGb);
-            const usedBytes = this.gbToBytes(usedTrafficGb);
+            const traffic = await this.xui.syncCustomerNodeTraffic(current.customerId, node.id);
+            if (traffic.usedBytes < currentLimitBytes) {
+              return {
+                skipped: true,
+                belowLimit: true,
+                usedBytes: traffic.usedBytes,
+                usedTrafficGb: traffic.usedTrafficGb,
+                limitBytes: currentLimitBytes
+              } as const;
+            }
+            await this.xui.setCustomerNodeRemoteEnabled(current.customerId, node.id, false);
+            await this.prisma.customerNode.update({
+              where: { id: node.id },
+              data: { status: 'disabled', disabledReason: 'traffic_exceeded', lastSyncedAt: new Date() }
+            });
             return {
-              skipped: true,
-              reason: '服务节点使用共享官方客户端，无法将官方总流量准确归属到单个用户，已跳过自动停用',
-              usedBytes,
-              usedTrafficGb,
+              skipped: false,
+              usedBytes: traffic.usedBytes,
+              usedTrafficGb: traffic.usedTrafficGb,
               limitBytes: currentLimitBytes
             } as const;
           })

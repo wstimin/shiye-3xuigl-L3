@@ -882,11 +882,21 @@ export class NodesService {
     });
     return Promise.all(nodes.map(async (node) => {
       let linkError: string | null = null;
-      const links = await this.xui.customerNodeLinks(customerId, node.id).catch((error) => {
-        linkError = error instanceof Error ? error.message : String(error);
-        return [] as string[];
-      });
-      return { ...node, links, linkError, subId: jsonObject(node.config).subId || node.xuiEmail };
+      const [links, traffic] = await Promise.all([
+        this.xui.customerNodeLinks(customerId, node.id).catch((error) => {
+          linkError = error instanceof Error ? error.message : String(error);
+          return [] as string[];
+        }),
+        this.xui.syncCustomerNodeTraffic(customerId, node.id).catch(() => null)
+      ]);
+      return {
+        ...node,
+        ...(traffic ? { usedTrafficGb: new Prisma.Decimal(traffic.usedTrafficGb), lastSyncedAt: traffic.syncedAt } : {}),
+        usedTrafficBytes: traffic?.usedBytes ?? Math.max(Number(node.usedTrafficGb), 0) * 1024 ** 3,
+        links,
+        linkError,
+        subId: jsonObject(node.config).subId || node.xuiEmail
+      };
     }));
   }
 
