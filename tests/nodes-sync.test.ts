@@ -187,7 +187,7 @@ test('binding refreshes remote identity without creating or modifying the remote
   assert.equal(remoteWriteCalls, 0);
 });
 
-test('managed binding creates a remote client with an automatically generated identifier', async () => {
+test('managed binding uses the readable login name when no custom client name is supplied', async () => {
   let storedNode: any;
   let createInput: any;
   const serviceNode = { id: 'service-node-1', inboundId: 12, trafficLimitGb: 100 };
@@ -205,7 +205,7 @@ test('managed binding creates a remote client with an automatically generated id
     }
   } as any;
   const xui = {
-    customerClientEmail: (_name: string, loginUsername: string, inboundId: number) => `${loginUsername}-${inboundId}`,
+    customerClientEmail: (_name: string, loginUsername: string) => loginUsername,
     createCustomerNodeRemoteClient: async (_customerId: string, _customerNodeId: string, input: any) => {
       createInput = input;
       return { created: true, remoteWrite: true, binding: storedNode };
@@ -221,8 +221,8 @@ test('managed binding creates a remote client with an automatically generated id
     trafficLimitGb: 100
   });
 
-  assert.equal(storedNode.xuiEmail, 'malai-12');
-  assert.equal(createInput.email, 'malai-12');
+  assert.equal(storedNode.xuiEmail, 'malai');
+  assert.equal(createInput.email, 'malai');
 });
 
 test('retrying a service config task only synchronizes current config and never creates an inbound', async () => {

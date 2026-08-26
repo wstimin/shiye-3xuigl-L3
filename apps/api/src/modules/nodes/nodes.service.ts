@@ -907,7 +907,7 @@ export class NodesService {
       ? this.xui.customerClientEmail(customer.name, customer.loginUsername, serviceNode.inboundId)
       : '');
     const uuid = input.uuid || null;
-    if (!xuiEmail) throw new BadRequestException('绑定官方已有客户端时必须填写准确的 3x-ui 客户端邮箱');
+    if (!xuiEmail) throw new BadRequestException('必须填写准确的 3x-ui 客户端名称');
     if (input.remoteAction === 'create' && input.remoteControl !== 'fully_managed') {
       throw new BadRequestException('创建远端客户端必须使用完全托管模式');
     }
@@ -991,7 +991,7 @@ export class NodesService {
     const nextXuiEmail = nodeChanged
       ? input.xuiEmail?.trim()
       : input.xuiEmail === undefined || input.xuiEmail === '' ? current.xuiEmail : input.xuiEmail.trim();
-    if (!nextXuiEmail) throw new BadRequestException('切换入站时必须填写准确的官方 3x-ui 客户端邮箱');
+    if (!nextXuiEmail) throw new BadRequestException('切换入站时必须填写准确的官方 3x-ui 客户端名称');
     const nextUuid = nodeChanged ? input.uuid || null : input.uuid === undefined ? current.uuid : input.uuid || current.uuid;
     const nextRemoteControl = input.remoteControl || current.remoteControl;
     if (input.remoteAction === 'create') throw new BadRequestException('编辑绑定不能创建远端客户端，请使用远端客户端操作');

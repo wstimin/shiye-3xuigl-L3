@@ -62,6 +62,18 @@ test('write requests are never replayed after a network failure', async () => {
   assert.equal(calls, 1);
 });
 
+test('API errors preserve the backend message until the notification layer', async () => {
+  globalThis.fetch = async () => jsonResponse(502, {
+    ok: false,
+    message: '创建官方客户端失败：提交字段不符合官方接口要求（官方面板返回：body.client.email: value is not a valid email address）'
+  });
+
+  await assert.rejects(
+    () => api('/api/admin/customers/customer-1/nodes', { method: 'POST', body: {} }),
+    /body\.client\.email: value is not a valid email address/
+  );
+});
+
 test('route changes cancel pending page reads', async () => {
   globalThis.fetch = (_input, init) => new Promise<Response>((_resolve, reject) => {
     init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });

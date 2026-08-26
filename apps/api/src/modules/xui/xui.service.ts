@@ -3,7 +3,7 @@ import { BadGatewayException, BadRequestException, Injectable, NotFoundException
 import { Prisma } from '@prisma/client';
 import { networkRouteUpsertSchema, outboundImportPreviewSchema, outboundImportSchema, remoteClientCreateSchema, remoteClientPatchSchema, xuiServerUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
-import { XuiClient, type XuiApiProfile } from '@shiye/xui-client';
+import { XuiClient, XuiClientError, type XuiApiProfile, xuiErrorDetail } from '@shiye/xui-client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EncryptionService } from '../security/encryption.service.js';
 import { DatabaseLockService } from '../../shared/database-lock.service.js';
@@ -1458,7 +1458,7 @@ export class XuiService {
   }
 
   previewOutboundImport(input: z.infer<typeof outboundImportPreviewSchema>) {
-    const items = this.parseOutboundInput(input.input, input.format);
+    const items = this.applySingleOutboundName(this.parseOutboundInput(input.input, input.format), input.name);
     return {
       format: input.format,
       count: items.length,
@@ -1482,7 +1482,7 @@ export class XuiService {
     if (input.strategy === 'local_only' && input.conflict === 'takeover') {
       throw new BadRequestException('接管远端出站必须选择写入目标官方面板');
     }
-    const parsed = this.parseOutboundInput(input.input, input.format);
+    const parsed = this.applySingleOutboundName(this.parseOutboundInput(input.input, input.format), input.name);
     if (!parsed.length) throw new BadRequestException('没有识别到可导入的出站');
 
     let remoteState: { client: XuiClient; xrayObj: Record<string, unknown>; setting: Record<string, unknown> } | null = null;
@@ -1509,7 +1509,6 @@ export class XuiService {
     for (let index = 0; index < parsed.length; index += 1) {
       const parsedItem = parsed[index]!;
       const outbound = { ...parsedItem.outbound };
-      if (input.name && parsed.length === 1) parsedItem.name = input.name;
       let tag = this.stringValue(outbound.tag) || this.importedOutboundTag(parsedItem.name, index);
       let existingLocal = existingByTag.get(tag);
       const remoteOutbounds = remoteState && Array.isArray(remoteState.setting.outbounds) ? remoteState.setting.outbounds : [];
@@ -2116,43 +2115,43 @@ export class XuiService {
     await this.assertRemoteClientBindingAvailable(node.serviceNodeId, input.email, node.id);
     const inboundId = node.serviceNode.inboundId;
     if (!inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
-    this.assertOfficialClientIdentifier(input.email);
-    const client = await this.createAuthenticatedClient(node.serviceNode.server, true, false, true);
-    const inboundPayload = await client.getInbound(inboundId).catch((error) => {
-      if (this.isRemoteNotFound(error)) throw new BadRequestException(`官方面板中的入站 ${inboundId} 已不存在，请重新同步或重新创建服务节点`);
-      throw error;
-    });
-    this.assertXuiSuccess(inboundPayload);
-    const remoteInbound = this.remoteInboundFromPayload(inboundPayload);
-    const remoteInboundId = this.inboundIdOf(remoteInbound);
-    if (remoteInboundId && remoteInboundId !== inboundId) {
-      throw new BadRequestException(`官方面板返回的入站 ID 与服务节点不一致：期望 ${inboundId}，实际 ${remoteInboundId}`);
-    }
-    const localProtocol = String(node.serviceNode.protocol || '').trim().toLowerCase();
-    const remoteProtocol = String(remoteInbound.protocol || '').trim().toLowerCase();
-    if (!remoteProtocol) throw new BadRequestException(`官方入站 ${inboundId} 缺少协议配置，无法创建客户端`);
-    if (localProtocol !== remoteProtocol) {
-      throw new BadRequestException(`服务节点协议与官方入站不一致：本地为 ${localProtocol || '未知'}，官方为 ${remoteProtocol}`);
-    }
-    const occupied = await this.optionalV36ClientRecord(client, input.email);
-    if (occupied) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
-
-    const listed = await this.findClient(client, { email: input.email }, []);
-    if (listed.exists) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
-
     const requestedUuid = input.uuid?.trim();
     const requestedSubId = input.subId?.trim();
-    const payload = this.buildOfficialClientCreatePayload({
-      protocol: remoteProtocol,
-      uuid: requestedUuid,
-      subId: requestedSubId,
-      email: input.email,
-      enabled: input.enabled,
-      expireAt: input.expireAt,
-      trafficLimitGb: input.trafficLimitGb
-    });
+    let client: XuiClient;
+    let payload: Record<string, unknown> | undefined;
     let response: unknown;
     try {
+      client = await this.createAuthenticatedClient(node.serviceNode.server, true, false, true);
+      const inboundPayload = await client.getInbound(inboundId).catch((error) => {
+        if (this.isRemoteNotFound(error)) throw new BadRequestException(`官方面板中的入站 ${inboundId} 已不存在，请重新同步或重新创建服务节点`);
+        throw error;
+      });
+      this.assertXuiSuccess(inboundPayload);
+      const remoteInbound = this.remoteInboundFromPayload(inboundPayload);
+      const remoteInboundId = this.inboundIdOf(remoteInbound);
+      if (remoteInboundId && remoteInboundId !== inboundId) {
+        throw new BadRequestException(`官方面板返回的入站 ID 与服务节点不一致：期望 ${inboundId}，实际 ${remoteInboundId}`);
+      }
+      const localProtocol = String(node.serviceNode.protocol || '').trim().toLowerCase();
+      const remoteProtocol = String(remoteInbound.protocol || '').trim().toLowerCase();
+      if (!remoteProtocol) throw new BadRequestException(`官方入站 ${inboundId} 缺少协议配置，无法创建客户端`);
+      if (localProtocol !== remoteProtocol) {
+        throw new BadRequestException(`服务节点协议与官方入站不一致：本地为 ${localProtocol || '未知'}，官方为 ${remoteProtocol}`);
+      }
+      const occupied = await this.optionalV36ClientRecord(client, input.email);
+      if (occupied) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
+      const listed = await this.findClient(client, { email: input.email }, []);
+      if (listed.exists) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
+
+      payload = this.buildOfficialClientCreatePayload({
+        protocol: remoteProtocol,
+        uuid: requestedUuid,
+        subId: requestedSubId,
+        email: input.email,
+        enabled: input.enabled,
+        expireAt: input.expireAt,
+        trafficLimitGb: input.trafficLimitGb
+      });
       response = await client.addClient(inboundId, payload);
       this.assertXuiSuccess(response);
     } catch (error) {
@@ -2162,8 +2161,11 @@ export class XuiService {
         serviceNodeId: node.serviceNodeId,
         inboundId,
         xuiEmail: input.email,
-        phase: 'remote-create'
+        phase: payload ? 'remote-create' : 'remote-preflight',
+        request: payload ? { client: this.sanitizePanelDiagnostic(payload), inboundIds: [inboundId] } : undefined,
+        response: response === undefined ? this.panelErrorPayload(error) : this.sanitizePanelDiagnostic(response)
       });
+      if (error instanceof BadRequestException) throw error;
       throw new BadGatewayException(`创建官方客户端失败：${this.officialPanelError(error)}`);
     }
     try {
@@ -2227,7 +2229,10 @@ export class XuiService {
     const node = await this.customerNodeForRemoteOperation(customerId, customerNodeId);
     if (node.remoteControl === 'reference') throw new BadRequestException('只读引用绑定不能修改远端账号');
     await this.assertNoPendingRenewal(customerNodeId, '修改远端账号');
+    const nextEmail = input.email?.trim() || node.xuiEmail;
+    if (nextEmail !== node.xuiEmail) await this.assertRemoteClientBindingAvailable(node.serviceNodeId, nextEmail, customerNodeId);
     const patch = {
+      ...(nextEmail === node.xuiEmail ? {} : { email: nextEmail }),
       ...(input.expireAt === undefined ? {} : { expiryTime: input.expireAt ? input.expireAt.getTime() : 0 }),
       ...(input.trafficLimitGb === undefined ? {} : { totalGB: this.gbToBytes(input.trafficLimitGb) }),
       ...(input.enabled === undefined ? {} : { enable: input.enabled })
@@ -2241,6 +2246,7 @@ export class XuiService {
         data: {
           expireAt: input.expireAt === undefined ? undefined : input.expireAt,
           trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb),
+          xuiEmail: nextEmail,
           status: input.enabled === undefined ? undefined : input.enabled ? 'active' : 'disabled',
           disabledReason: input.enabled === undefined ? undefined : input.enabled ? null : 'admin'
         }
@@ -2248,7 +2254,7 @@ export class XuiService {
       return result;
     } catch (error) {
       try {
-        await this.patchCustomerNodeRemote(customerId, customerNodeId, before, 'account', true);
+        await this.patchCustomerNodeRemote(customerId, customerNodeId, before, 'account', true, nextEmail);
         await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-account-save', 'failed', this.errorMessage(error), {
           customerId,
           customerNodeId,
@@ -2320,7 +2326,8 @@ export class XuiService {
     customerNodeId: string,
     patch: Record<string, unknown>,
     operation: 'expiry' | 'enable' | 'quota' | 'account',
-    allowPendingRenewal = false
+    allowPendingRenewal = false,
+    lookupEmail?: string
   ) {
     const node = await this.prisma.customerNode.findFirst({
       where: { id: customerNodeId, customerId },
@@ -2337,7 +2344,7 @@ export class XuiService {
     const rawInbounds = await client.listInbounds();
     this.assertXuiSuccess(rawInbounds);
     const existing = await this.findClient(client, {
-      email: node.xuiEmail,
+      email: lookupEmail || node.xuiEmail,
       uuid: node.uuid || this.stringValue(this.xuiObject(node.config).uuid),
       subId: this.stringValue(this.xuiObject(node.config).subId),
       inboundId
@@ -2354,7 +2361,7 @@ export class XuiService {
     const verifyPayload = await client.listInbounds();
     this.assertXuiSuccess(verifyPayload);
     const refreshed = await this.findClient(client, {
-      email: existing.email || node.xuiEmail,
+      email: typeof patch.email === 'string' ? patch.email : existing.email || node.xuiEmail,
       uuid: existing.uuid || node.uuid || undefined,
       subId: existing.subId,
       inboundId
@@ -2649,6 +2656,16 @@ export class XuiService {
       format,
       outbound: { ...outbound, tag: this.stringValue(outbound.tag) || this.importedOutboundTag(name, index), protocol }
     };
+  }
+
+  private applySingleOutboundName<T extends { name: string; outbound: Record<string, unknown> }>(items: T[], name?: string) {
+    if (!name || items.length !== 1) return items;
+    items[0] = {
+      ...items[0]!,
+      name,
+      outbound: { ...items[0]!.outbound, tag: this.importedOutboundTag(name, 0) }
+    };
+    return items;
   }
 
   private importedOutboundTag(name: string, index: number) {
@@ -4415,18 +4432,7 @@ export class XuiService {
 
   customerClientEmail(name: string, loginUsername: string, inboundId: number) {
     const source = String(loginUsername || name || 'user').normalize('NFKC').trim();
-    const readableName = source.toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 72) || 'user';
-    const identityHash = createHash('sha256').update(source || 'user').digest('hex').slice(0, 10);
-    return `${readableName}-${identityHash}-${inboundId}`;
-  }
-
-  private assertOfficialClientIdentifier(value: string) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(value)) {
-      throw new BadRequestException('官方客户端标识只能包含英文字母、数字、点、下划线和短横线，且必须以字母或数字开头');
-    }
+    return this.readableIdentifier(source, `user-${inboundId}`, 160);
   }
 
   private readableIdentifier(value: string, fallback: string, maxLength: number) {
@@ -4482,7 +4488,7 @@ export class XuiService {
   private xuiFailureMessage(payload: unknown) {
     if (!payload || typeof payload !== 'object') return undefined;
     const record = payload as Record<string, unknown>;
-    return record.success === false ? String(record.msg || record.message || '3x-ui returned success=false') : undefined;
+    return record.success === false ? xuiErrorDetail(payload) || '3x-ui returned success=false' : undefined;
   }
 
   private xuiArray(data: unknown): unknown[] {
@@ -4679,8 +4685,8 @@ export class XuiService {
   }
 
   private serviceClientEmail(name: string, inboundId: number) {
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 36) || 'node';
-    return `shiye-${slug}-${inboundId}@shiye.local`;
+    const readable = this.readableIdentifier(name, 'node', 140);
+    return this.truncateText(`${readable}-${inboundId}`, 160);
   }
 
   private pickInboundPort(usedPorts: Set<number>) {
@@ -4754,6 +4760,23 @@ export class XuiService {
     if (/not found|does not exist/i.test(message)) return `目标入站或资源不存在（官方面板返回：${message}）`;
     if (/invalid|required|validation|must be|bad request/i.test(message)) return `提交字段不符合官方接口要求（官方面板返回：${message}）`;
     return `官方面板返回：${message}`;
+  }
+
+  private panelErrorPayload(error: unknown) {
+    if (!(error instanceof XuiClientError) || error.payload === undefined) return undefined;
+    return this.sanitizePanelDiagnostic(error.payload);
+  }
+
+  private sanitizePanelDiagnostic(value: unknown, depth = 0): unknown {
+    if (depth > 6 || value === null || value === undefined) return value;
+    if (Array.isArray(value)) return value.slice(0, 50).map((item) => this.sanitizePanelDiagnostic(item, depth + 1));
+    if (typeof value !== 'object') return typeof value === 'string' ? this.truncateText(value, 1500) : value;
+    const result: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (/uuid|password|auth|token|secret|private.?key|subId/i.test(key)) result[key] = '[REDACTED]';
+      else result[key] = this.sanitizePanelDiagnostic(nested, depth + 1);
+    }
+    return result;
   }
 
   private isUniqueConstraintError(error: unknown) {

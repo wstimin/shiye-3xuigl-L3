@@ -1,5 +1,3 @@
-import { userFacingErrorMessage } from '@shiye/shared';
-
 type ApiOptions = Omit<RequestInit, 'body'> & { body?: unknown; timeoutMs?: number };
 
 const sessionExpiredEvent = 'shiye:session-expired';
@@ -108,5 +106,12 @@ function shouldNotifySessionExpired(path: string) {
 }
 
 function responseErrorMessage(status: number, message: unknown) {
-  return userFacingErrorMessage(status, message);
+  const text = Array.isArray(message)
+    ? message.filter((item): item is string => typeof item === 'string').join('；')
+    : typeof message === 'string'
+      ? message
+      : '';
+  const normalized = text.replace(/\s+/g, ' ').trim().slice(0, 1500);
+  if (normalized) return normalized;
+  return `请求失败（HTTP ${status}）`;
 }

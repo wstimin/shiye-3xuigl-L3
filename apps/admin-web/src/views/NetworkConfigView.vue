@@ -207,7 +207,7 @@ async function previewImport() {
   try {
     preview.value = await api<OutboundPreview>('/api/admin/network-outbounds/preview', {
       method: 'POST',
-      body: { input: importForm.input, format: importForm.format }
+      body: { input: importForm.input, format: importForm.format, name: importForm.name.trim() || undefined }
     });
     ElMessage.success(`已识别 ${preview.value.count} 个出站`);
   } catch (caught) {
@@ -549,7 +549,7 @@ onMounted(loadResources);
       <div class="network-dialog-grid">
         <el-form-item label="目标面板" required><el-select v-model="importForm.serverId" style="width: 100%"><el-option v-for="server in enabledServers" :key="server.id" :label="server.name" :value="server.id" /></el-select></el-form-item>
         <el-form-item label="导入格式"><el-select v-model="importForm.format" style="width: 100%"><el-option v-for="item in formatOptions" :key="item[0]" :label="item[1]" :value="item[0]" /></el-select></el-form-item>
-        <el-form-item label="单项名称"><el-input v-model="importForm.name" maxlength="120" placeholder="仅导入一个出站时可指定" /></el-form-item>
+        <el-form-item label="官方出站名称"><el-input v-model="importForm.name" maxlength="120" placeholder="单项导入时同时作为官方 tag" /></el-form-item>
         <el-form-item label="所有权"><el-select v-model="importForm.ownership" :disabled="importForm.strategy === 'target_panel'" style="width: 100%"><el-option label="本系统托管" value="managed" /><el-option label="官方引用" value="referenced" /><el-option label="共享管理" value="shared" /></el-select></el-form-item>
         <el-form-item label="保存方式"><el-select v-model="importForm.strategy" style="width: 100%" @change="handleImportStrategyChange"><el-option label="写入目标官方面板" value="target_panel" /><el-option label="仅保存本地记录" value="local_only" /></el-select></el-form-item>
         <el-form-item label="冲突策略"><el-select v-model="importForm.conflict" style="width: 100%"><el-option label="发现冲突时拒绝" value="reject" /><el-option label="自动重命名标签" value="rename" /><el-option label="替换本系统托管资源" value="replace_managed" /><el-option label="明确接管现有资源" value="takeover" /></el-select></el-form-item>

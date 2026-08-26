@@ -183,6 +183,61 @@ test('3.6 request errors include the panel response message', async () => {
   );
 });
 
+test('3.6 request errors preserve structured validation details', async () => {
+  const client = new XuiClient({
+    baseUrl: 'https://panel.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async () => jsonResponse({
+      detail: [
+        { loc: ['body', 'client', 'email'], msg: 'value is not a valid email address', type: 'value_error.email' },
+        { loc: ['body', 'inboundIds'], msg: 'field required', type: 'value_error.missing' }
+      ]
+    }, 422)
+  });
+
+  await assert.rejects(
+    () => client.addClient(9, { email: 'invalid-client' }),
+    /body\.client\.email: value is not a valid email address; body\.inboundIds: field required/
+  );
+});
+
+test('3.6 success-false validation details remain available to callers', async () => {
+  const client = new XuiClient({
+    baseUrl: 'https://panel.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async () => jsonResponse({
+      success: false,
+      errors: [{ field: 'client.email', message: 'invalid email' }]
+    })
+  });
+  const service = new XuiService({} as never, {} as never, testLocks()) as any;
+
+  const response = await client.addClient(9, { email: 'invalid-client' });
+  assert.throws(() => service.assertXuiSuccess(response), /client\.email: invalid email/);
+});
+
+test('generated managed client identifiers stay short and readable', () => {
+  const service = new XuiService({} as never, {} as never, testLocks());
+  const first = service.customerClientEmail('测试', 'ceshi1', 9);
+  const second = service.customerClientEmail('不同显示名', 'ceshi1', 9);
+
+  assert.equal(first, 'ceshi1');
+  assert.equal(first, second);
+});
+
+test('single outbound custom name becomes the official outbound tag in preview', () => {
+  const service = new XuiService({} as never, {} as never, testLocks());
+  const preview = service.previewOutboundImport({
+    format: 'xray_json',
+    name: '美国出口',
+    input: JSON.stringify({ protocol: 'freedom', tag: 'generated-long-tag', settings: {} })
+  });
+
+  assert.equal(preview.count, 1);
+  assert.equal(preview.items[0].name, '美国出口');
+  assert.equal(preview.items[0].tag, '美国出口');
+});
+
 test('binding refresh reads identity and links without any remote write', async () => {
   const requests: Array<{ path: string; method: string }> = [];
   const client = new XuiClient({
@@ -284,6 +339,35 @@ test('subscription-managed bindings can renew but cannot create or delete remote
     () => service.resetCustomerNodeTraffic('customer-1', 'customer-node-1'),
     /只有完全托管账号允许重置远端流量/
   );
+});
+
+test('managed client settings rename the official client and local binding together', async () => {
+  const customerNode = { ...customerNodeFixture(), xuiEmail: 'old-name' };
+  let remotePatch: Record<string, unknown> | undefined;
+  let localPatch: Record<string, unknown> | undefined;
+  const service = new XuiService({
+    customerNode: {
+      findFirst: async ({ where }: any) => where.xuiEmail ? null : customerNode,
+      update: async ({ data }: any) => {
+        localPatch = data;
+        return { ...customerNode, ...data };
+      }
+    },
+    renewalLog: { findFirst: async () => null },
+    syncLog: { create: async () => ({}) }
+  } as never, {} as never, testLocks()) as any;
+  service.patchCustomerNodeRemote = async (_customerId: string, _customerNodeId: string, patch: Record<string, unknown>) => {
+    remotePatch = patch;
+    return { synced: true, remoteWrite: true, before: { email: 'old-name', expiryTime: 0 } };
+  };
+
+  await service.patchCustomerNodeRemoteClientUnlocked('customer-1', 'customer-node-1', {
+    email: 'ceshi1-us',
+    expireAt: new Date('2030-01-01T00:00:00Z')
+  });
+
+  assert.equal(remotePatch?.email, 'ceshi1-us');
+  assert.equal(localPatch?.xuiEmail, 'ceshi1-us');
 });
 
 test('fully-managed client deletion uses the global delete endpoint and not detach', async () => {

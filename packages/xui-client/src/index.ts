@@ -34,6 +34,42 @@ export class XuiClientError extends Error {
   }
 }
 
+export function xuiErrorDetail(payload: unknown) {
+  const fragments = errorFragments(payload);
+  return [...new Set(fragments)].join('; ').replace(/\s+/g, ' ').trim().slice(0, 1500);
+}
+
+function errorFragments(value: unknown, depth = 0): string[] {
+  if (depth > 5 || value === undefined || value === null) return [];
+  if (typeof value === 'string') return value.trim() ? [value.trim()] : [];
+  if (typeof value === 'number' || typeof value === 'boolean') return [String(value)];
+  if (Array.isArray(value)) return value.flatMap((item) => errorFragments(item, depth + 1));
+  if (typeof value !== 'object') return [];
+
+  const record = value as Record<string, unknown>;
+  const message = typeof record.msg === 'string'
+    ? record.msg.trim()
+    : typeof record.message === 'string'
+      ? record.message.trim()
+      : '';
+  const location = Array.isArray(record.loc)
+    ? record.loc.map((item) => String(item).trim()).filter(Boolean).join('.')
+    : typeof record.field === 'string'
+      ? record.field.trim()
+      : '';
+  if (message) return [location ? `${location}: ${message}` : message];
+
+  const preferredKeys = ['error', 'detail', 'errors', 'reason', 'obj', 'data'];
+  const preferred = preferredKeys.flatMap((key) => key in record ? errorFragments(record[key], depth + 1) : []);
+  if (preferred.length) return preferred;
+
+  return Object.entries(record).flatMap(([key, nested]) => {
+    if (['success', 'status', 'statusCode', 'code'].includes(key)) return [];
+    const nestedFragments = errorFragments(nested, depth + 1);
+    return nestedFragments.map((fragment) => `${key}: ${fragment}`);
+  });
+}
+
 export class XuiClient {
   private readonly fetchImpl: typeof fetch;
   private sessionCookie = '';
@@ -435,7 +471,7 @@ export class XuiClient {
   private responseClientObject(payload: unknown) {
     const root = this.objectValue(payload);
     if (root.success === false) {
-      throw new XuiClientError(String(root.msg || root.message || '3x-ui client lookup failed'), undefined, payload);
+      throw new XuiClientError(xuiErrorDetail(payload) || '3x-ui client lookup failed', undefined, payload);
     }
     const candidate = root.obj ?? root.data ?? root.result ?? payload;
     const parsed = typeof candidate === 'string' ? this.objectValue(this.parse(candidate)) : this.objectValue(candidate);
@@ -446,8 +482,7 @@ export class XuiClient {
   }
 
   private requestError(status: number, payload: unknown) {
-    const object = this.objectValue(payload);
-    const detail = String(object.msg || object.message || '').trim();
+    const detail = xuiErrorDetail(payload);
     const suffix = detail ? ` - ${detail}` : '';
     return new XuiClientError(`3x-ui request failed: ${status}${suffix}`, status, payload);
   }

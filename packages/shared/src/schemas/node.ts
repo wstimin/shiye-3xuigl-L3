@@ -131,12 +131,12 @@ export const outboundImportFormatSchema = z.enum(outboundImportFormatValues);
 
 export const outboundImportPreviewSchema = z.object({
   input: z.string().trim().min(1).max(1024 * 1024),
-  format: outboundImportFormatSchema.default('auto')
+  format: outboundImportFormatSchema.default('auto'),
+  name: z.string().trim().min(1).max(120).optional()
 });
 
 export const outboundImportSchema = outboundImportPreviewSchema.extend({
   serverId: z.string().min(1),
-  name: z.string().trim().min(1).max(120).optional(),
   ownership: resourceOwnershipSchema.default('managed'),
   strategy: z.enum(['local_only', 'target_panel']).default('target_panel'),
   conflict: z.enum(['reject', 'rename', 'replace_managed', 'takeover']).default('reject'),
@@ -165,6 +165,7 @@ export const remoteClientCreateSchema = z.object({
 });
 
 export const remoteClientPatchSchema = z.object({
+  email: z.string().trim().min(1).max(160).optional(),
   expireAt: z.coerce.date().optional().nullable(),
   trafficLimitGb: z.coerce.number().finite().min(0).optional(),
   enabled: z.boolean().optional()
