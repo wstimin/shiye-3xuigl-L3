@@ -3,6 +3,7 @@ import type { ZodIssue, ZodSchema } from 'zod';
 
 const fieldLabels: Record<string, string> = {
   serviceNodeId: '服务节点',
+  clientName: '客户端名称',
   xuiEmail: '官方客户端名称',
   email: '官方客户端名称',
   uuid: '客户端密钥',

@@ -2043,6 +2043,8 @@ export class XuiService {
       const uuid = existing.uuid || customerNode.uuid || savedUuid;
       const subId = existing.subId || savedSubId;
       const xuiEmail = existing.email || customerNode.xuiEmail;
+      const remoteClient = this.xuiObject(existing.raw);
+      const clientName = this.stringValue(remoteClient.comment) || customerNode.clientName || xuiEmail;
       await this.assertRemoteClientBindingAvailable(customerNode.serviceNodeId, xuiEmail, customerNode.id);
       const serviceConfig = this.xuiObject(customerNode.serviceNode.config) as ServiceNodeConfig;
       const links = await this.linksForClient(client, xuiEmail, subId, {
@@ -2058,10 +2060,11 @@ export class XuiService {
       const updatedNode = await this.prisma.customerNode.update({
         where: { id: customerNode.id },
         data: {
-        xuiEmail,
+          clientName,
+          xuiEmail,
           uuid: uuid || null,
-        lastSyncedAt: syncedAt,
-        config: this.toJsonValue({ ...savedConfig, uuid, subId, links })
+          lastSyncedAt: syncedAt,
+          config: this.toJsonValue({ ...savedConfig, uuid, subId, links })
         },
         include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
       });
@@ -2148,6 +2151,7 @@ export class XuiService {
         uuid: requestedUuid,
         subId: requestedSubId,
         email: input.email,
+        clientName: input.clientName || node.clientName || input.email,
         enabled: input.enabled,
         expireAt: input.expireAt,
         trafficLimitGb: input.trafficLimitGb
@@ -2175,6 +2179,7 @@ export class XuiService {
       const binding = await this.prisma.customerNode.update({
         where: { id: node.id },
         data: {
+          clientName: input.clientName || node.clientName || input.email,
           xuiEmail: input.email,
           uuid: verified.uuid || requestedUuid || null,
           expireAt: input.expireAt || null,
@@ -2230,9 +2235,11 @@ export class XuiService {
     if (node.remoteControl === 'reference') throw new BadRequestException('只读引用绑定不能修改远端账号');
     await this.assertNoPendingRenewal(customerNodeId, '修改远端账号');
     const nextEmail = input.email?.trim() || node.xuiEmail;
+    const nextClientName = input.clientName?.trim() || node.clientName || nextEmail;
     if (nextEmail !== node.xuiEmail) await this.assertRemoteClientBindingAvailable(node.serviceNodeId, nextEmail, customerNodeId);
     const patch = {
       ...(nextEmail === node.xuiEmail ? {} : { email: nextEmail }),
+      ...(input.clientName === undefined ? {} : { comment: nextClientName }),
       ...(input.expireAt === undefined ? {} : { expiryTime: input.expireAt ? input.expireAt.getTime() : 0 }),
       ...(input.trafficLimitGb === undefined ? {} : { totalGB: this.gbToBytes(input.trafficLimitGb) }),
       ...(input.enabled === undefined ? {} : { enable: input.enabled })
@@ -2246,6 +2253,7 @@ export class XuiService {
         data: {
           expireAt: input.expireAt === undefined ? undefined : input.expireAt,
           trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb),
+          clientName: input.clientName === undefined ? undefined : nextClientName,
           xuiEmail: nextEmail,
           status: input.enabled === undefined ? undefined : input.enabled ? 'active' : 'disabled',
           disabledReason: input.enabled === undefined ? undefined : input.enabled ? null : 'admin'
@@ -2989,9 +2997,10 @@ export class XuiService {
     return client;
   }
 
-  private buildOfficialClientCreatePayload(input: { protocol: string; uuid?: string; subId?: string; email: string; enabled: boolean; expireAt?: Date | null; trafficLimitGb: Prisma.Decimal | number | string | null }) {
+  private buildOfficialClientCreatePayload(input: { protocol: string; uuid?: string; subId?: string; email: string; clientName?: string; enabled: boolean; expireAt?: Date | null; trafficLimitGb: Prisma.Decimal | number | string | null }) {
     const client: Record<string, unknown> = {
       email: input.email,
+      comment: input.clientName || input.email,
       enable: input.enabled,
       expiryTime: input.expireAt ? input.expireAt.getTime() : 0,
       totalGB: this.gbToBytes(input.trafficLimitGb),
@@ -4432,7 +4441,11 @@ export class XuiService {
 
   customerClientEmail(name: string, loginUsername: string, inboundId: number) {
     const source = String(loginUsername || name || 'user').normalize('NFKC').trim();
-    return this.readableIdentifier(source, `user-${inboundId}`, 160);
+    const localPart = source.toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
+      .slice(0, 48) || 'user';
+    return `${localPart}.${inboundId}@shiye.io`;
   }
 
   private readableIdentifier(value: string, fallback: string, maxLength: number) {

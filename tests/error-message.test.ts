@@ -17,6 +17,13 @@ test('unknown English errors are not exposed to users', () => {
   assert.equal(readableError(new Error('unexpected parser state at offset 18'), '保存失败'), '保存失败');
 });
 
+test('official field validation errors remain visible', () => {
+  assert.equal(
+    readableError(new Error('body.client.email: value is not a valid email address'), '绑定失败'),
+    '官方面板校验失败（官方返回：body.client.email: value is not a valid email address）'
+  );
+});
+
 test('common HTTP statuses use Chinese messages', () => {
   assert.equal(userFacingErrorMessage(401, ''), '登录已失效，请重新登录');
   assert.equal(userFacingErrorMessage(403, ''), '没有操作权限');

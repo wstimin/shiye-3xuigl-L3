@@ -90,7 +90,7 @@ test('official 3.6 client creation accepts universal fields and lets the panel g
   });
 
   await client.addClient(3, {
-    email: 'managed-user-3',
+    email: 'managed-user-3@example.com',
     totalGB: 0,
     expiryTime: 0,
     tgId: 0,
@@ -100,7 +100,7 @@ test('official 3.6 client creation accepts universal fields and lets the panel g
 
   assert.deepEqual(requestBody, {
     client: {
-      email: 'managed-user-3',
+      email: 'managed-user-3@example.com',
       totalGB: 0,
       expiryTime: 0,
       tgId: 0,
@@ -216,12 +216,12 @@ test('3.6 success-false validation details remain available to callers', async (
   assert.throws(() => service.assertXuiSuccess(response), /client\.email: invalid email/);
 });
 
-test('generated managed client identifiers stay short and readable', () => {
+test('generated managed client identifiers are short valid emails and stable per inbound', () => {
   const service = new XuiService({} as never, {} as never, testLocks());
   const first = service.customerClientEmail('测试', 'ceshi1', 9);
   const second = service.customerClientEmail('不同显示名', 'ceshi1', 9);
 
-  assert.equal(first, 'ceshi1');
+  assert.equal(first, 'ceshi1.9@shiye.io');
   assert.equal(first, second);
 });
 
@@ -341,8 +341,8 @@ test('subscription-managed bindings can renew but cannot create or delete remote
   );
 });
 
-test('managed client settings rename the official client and local binding together', async () => {
-  const customerNode = { ...customerNodeFixture(), xuiEmail: 'old-name' };
+test('managed client settings rename the official comment without changing its stable identifier', async () => {
+  const customerNode = { ...customerNodeFixture(), clientName: '旧名称' };
   let remotePatch: Record<string, unknown> | undefined;
   let localPatch: Record<string, unknown> | undefined;
   const service = new XuiService({
@@ -358,16 +358,18 @@ test('managed client settings rename the official client and local binding toget
   } as never, {} as never, testLocks()) as any;
   service.patchCustomerNodeRemote = async (_customerId: string, _customerNodeId: string, patch: Record<string, unknown>) => {
     remotePatch = patch;
-    return { synced: true, remoteWrite: true, before: { email: 'old-name', expiryTime: 0 } };
+    return { synced: true, remoteWrite: true, before: { comment: '旧名称', expiryTime: 0 } };
   };
 
   await service.patchCustomerNodeRemoteClientUnlocked('customer-1', 'customer-node-1', {
-    email: 'ceshi1-us',
+    clientName: 'ceshi1-us',
     expireAt: new Date('2030-01-01T00:00:00Z')
   });
 
-  assert.equal(remotePatch?.email, 'ceshi1-us');
-  assert.equal(localPatch?.xuiEmail, 'ceshi1-us');
+  assert.equal(remotePatch?.comment, 'ceshi1-us');
+  assert.equal(remotePatch?.email, undefined);
+  assert.equal(localPatch?.clientName, 'ceshi1-us');
+  assert.equal(localPatch?.xuiEmail, 'user@example.com');
 });
 
 test('fully-managed client deletion uses the global delete endpoint and not detach', async () => {
@@ -430,6 +432,7 @@ function customerNodeFixture() {
     id: 'customer-node-1',
     customerId: 'customer-1',
     serviceNodeId: 'service-node-1',
+    clientName: '测试用户',
     xuiEmail: 'user@example.com',
     uuid: null,
     expireAt: null,

@@ -46,7 +46,7 @@ if (installerScript) {
 
 if (migrationCheckScript) requireMatch(migrationCheckScript, /_prisma_migrations/, 'Migration safety check must read Prisma migration history.');
 
-if (packageMetadata.version !== '1.0.4') errors.push('Release package version must be 1.0.4.');
+if (packageMetadata.version !== '1.0.5') errors.push('Release package version must be 1.0.5.');
 
 if (nginxConfig) {
   requireMatch(nginxConfig, /location\s+\/\s*{/, 'Nginx must proxy the whole site from /.');

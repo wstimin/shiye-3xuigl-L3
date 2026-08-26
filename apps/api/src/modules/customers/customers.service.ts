@@ -24,6 +24,7 @@ export class CustomersService {
           { email: { contains: keyword } },
           { phone: { contains: keyword } },
           { remark: { contains: keyword } },
+          { nodes: { some: { clientName: { contains: keyword } } } },
           { nodes: { some: { xuiEmail: { contains: keyword } } } },
           { nodes: { some: { serviceNode: { name: { contains: keyword } } } } },
           { nodes: { some: { serviceNode: { server: { name: { contains: keyword } } } } } }
@@ -189,6 +190,7 @@ const customerSelect = {
   nodes: {
     select: {
       id: true,
+      clientName: true,
       xuiEmail: true,
       uuid: true,
       expireAt: true,

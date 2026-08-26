@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NodesService } from '../apps/api/src/modules/nodes/nodes.service.js';
+import { XuiService } from '../apps/api/src/modules/xui/xui.service.js';
+import { XuiClient } from '../packages/xui-client/src/index.js';
 import { testLocks } from './test-locks.js';
 
 const baseInput = {
@@ -187,7 +189,7 @@ test('binding refreshes remote identity without creating or modifying the remote
   assert.equal(remoteWriteCalls, 0);
 });
 
-test('managed binding uses the readable login name when no custom client name is supplied', async () => {
+test('managed binding separates the readable name from the official email identifier', async () => {
   let storedNode: any;
   let createInput: any;
   const serviceNode = { id: 'service-node-1', inboundId: 12, trafficLimitGb: 100 };
@@ -205,7 +207,7 @@ test('managed binding uses the readable login name when no custom client name is
     }
   } as any;
   const xui = {
-    customerClientEmail: (_name: string, loginUsername: string) => loginUsername,
+    customerClientEmail: (_name: string, loginUsername: string, inboundId: number) => `${loginUsername}.${inboundId}@shiye.io`,
     createCustomerNodeRemoteClient: async (_customerId: string, _customerNodeId: string, input: any) => {
       createInput = input;
       return { created: true, remoteWrite: true, binding: storedNode };
@@ -221,8 +223,145 @@ test('managed binding uses the readable login name when no custom client name is
     trafficLimitGb: 100
   });
 
-  assert.equal(storedNode.xuiEmail, 'malai');
-  assert.equal(createInput.email, 'malai');
+  assert.equal(storedNode.clientName, 'malai');
+  assert.equal(storedNode.xuiEmail, 'malai.12@shiye.io');
+  assert.equal(createInput.clientName, 'malai');
+  assert.equal(createInput.email, 'malai.12@shiye.io');
+});
+
+test('legacy binding requests treat xuiEmail as a display name instead of sending it to the official email field', async () => {
+  let storedNode: any;
+  let createInput: any;
+  const serviceNode = { id: 'service-node-1', inboundId: 8, trafficLimitGb: 100 };
+  const prisma = {
+    customer: { findUnique: async () => ({ id: 'customer-1', name: '测试', loginUsername: 'ceshi1' }) },
+    serviceNode: { findUnique: async () => serviceNode },
+    customerNode: {
+      findFirst: async () => null,
+      create: async ({ data }: any) => {
+        storedNode = { id: 'customer-node-1', ...data, trafficLimitGb: 100 };
+        return storedNode;
+      },
+      findUnique: async () => storedNode,
+      delete: async () => ({})
+    }
+  } as any;
+  const xui = {
+    customerClientEmail: (_name: string, loginUsername: string, inboundId: number) => `${loginUsername}.${inboundId}@shiye.io`,
+    createCustomerNodeRemoteClient: async (_customerId: string, _customerNodeId: string, input: any) => {
+      createInput = input;
+      return { created: true, remoteWrite: true, binding: storedNode };
+    }
+  } as any;
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
+
+  await service.bindCustomerNode('customer-1', {
+    serviceNodeId: 'service-node-1',
+    xuiEmail: 'ceshi1',
+    remoteAction: 'create',
+    remoteControl: 'fully_managed',
+    takeover: true,
+    trafficLimitGb: 100
+  });
+
+  assert.equal(storedNode.clientName, 'ceshi1');
+  assert.equal(storedNode.xuiEmail, 'ceshi1.8@shiye.io');
+  assert.equal(createInput.clientName, 'ceshi1');
+  assert.equal(createInput.email, 'ceshi1.8@shiye.io');
+});
+
+test('screenshot binding reaches the official 3.6 add endpoint with separate email and comment fields', async () => {
+  let storedNode: any;
+  let remoteCreated = false;
+  let officialRequest: { path: string; body: unknown } | undefined;
+  const customer = { id: 'customer-1', name: '测试', loginUsername: 'ceshi1' };
+  const serviceNode = {
+    id: 'service-node-1',
+    serverId: 'server-1',
+    name: '美国8',
+    inboundId: 8,
+    protocol: 'vless',
+    config: {},
+    trafficLimitGb: 100,
+    server: { id: 'server-1', enabled: true, baseUrl: 'https://panel.example.com', config: {} }
+  };
+  const prisma = {
+    customer: { findUnique: async () => customer },
+    serviceNode: { findUnique: async () => serviceNode },
+    customerNode: {
+      findFirst: async ({ where }: any) => {
+        if (where.id === 'customer-node-1' && where.customerId === 'customer-1') return storedNode;
+        return null;
+      },
+      create: async ({ data }: any) => {
+        storedNode = { id: 'customer-node-1', ...data, serviceNode, customer };
+        return storedNode;
+      },
+      update: async ({ data }: any) => {
+        storedNode = { ...storedNode, ...data };
+        return storedNode;
+      },
+      findUnique: async () => storedNode,
+      delete: async () => ({})
+    },
+    renewalLog: { findFirst: async () => null },
+    syncLog: { create: async () => ({}) }
+  } as any;
+  const officialClient = new XuiClient({
+    baseUrl: 'https://panel.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/panel/api/inbounds/get/8') {
+        return new Response(JSON.stringify({ success: true, obj: { id: 8, protocol: 'vless' } }), { status: 200 });
+      }
+      if (path === '/panel/api/clients/get/ceshi1.8%40shiye.io') {
+        return new Response(JSON.stringify({ detail: 'not found' }), { status: 404 });
+      }
+      if (path === '/panel/api/clients/list') {
+        const obj = remoteCreated
+          ? [{ client: { email: 'ceshi1.8@shiye.io', comment: 'ceshi1' }, inboundIds: [8] }]
+          : [];
+        return new Response(JSON.stringify({ success: true, obj }), { status: 200 });
+      }
+      if (path === '/panel/api/clients/add') {
+        officialRequest = { path, body: init?.body ? JSON.parse(String(init.body)) : undefined };
+        remoteCreated = true;
+        return new Response(JSON.stringify({ success: true, msg: 'Client added' }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request ${path}` }), { status: 500 });
+    }
+  });
+  const xui = new XuiService(prisma, {} as never, testLocks()) as any;
+  xui.createAuthenticatedClient = async () => officialClient;
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
+
+  await service.bindCustomerNode('customer-1', {
+    serviceNodeId: 'service-node-1',
+    clientName: 'ceshi1',
+    expireAt: new Date('2026-09-26T13:56:41+08:00'),
+    remoteAction: 'create',
+    remoteControl: 'fully_managed',
+    takeover: true
+  });
+
+  assert.deepEqual(officialRequest, {
+    path: '/panel/api/clients/add',
+    body: {
+      client: {
+        email: 'ceshi1.8@shiye.io',
+        comment: 'ceshi1',
+        enable: true,
+        expiryTime: new Date('2026-09-26T13:56:41+08:00').getTime(),
+        totalGB: 100 * 1024 ** 3,
+        limitIp: 0,
+        tgId: 0
+      },
+      inboundIds: [8]
+    }
+  });
+  assert.equal(storedNode.clientName, 'ceshi1');
+  assert.equal(storedNode.xuiEmail, 'ceshi1.8@shiye.io');
 });
 
 test('retrying a service config task only synchronizes current config and never creates an inbound', async () => {

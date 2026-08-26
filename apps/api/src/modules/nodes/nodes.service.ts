@@ -903,9 +903,13 @@ export class NodesService {
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
 
     if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
-    const xuiEmail = input.xuiEmail?.trim() || (input.remoteAction === 'create'
-      ? this.xui.customerClientEmail(customer.name, customer.loginUsername, serviceNode.inboundId)
-      : '');
+    const submittedName = input.clientName?.trim() || input.xuiEmail?.trim() || '';
+    const clientName = input.remoteAction === 'create'
+      ? submittedName || customer.loginUsername.trim() || customer.name.trim()
+      : input.clientName?.trim() || '';
+    const xuiEmail = input.remoteAction === 'create'
+      ? this.xui.customerClientEmail(clientName || customer.name, customer.loginUsername, serviceNode.inboundId)
+      : input.xuiEmail?.trim() || '';
     const uuid = input.uuid || null;
     if (!xuiEmail) throw new BadRequestException('必须填写准确的 3x-ui 客户端名称');
     if (input.remoteAction === 'create' && input.remoteControl !== 'fully_managed') {
@@ -917,6 +921,7 @@ export class NodesService {
       data: {
         customerId,
         serviceNodeId: input.serviceNodeId,
+        clientName: clientName || null,
         xuiEmail,
         uuid,
         expireAt: input.expireAt || null,
@@ -933,6 +938,7 @@ export class NodesService {
       if (input.remoteAction === 'create') {
         syncResult = await this.xui.createCustomerNodeRemoteClient(customerId, node.id, {
           email: xuiEmail,
+          clientName: clientName || undefined,
           uuid: input.uuid,
           expireAt: input.expireAt,
           trafficLimitGb: input.trafficLimitGb ?? Number(serviceNode.trafficLimitGb),
@@ -1007,6 +1013,7 @@ export class NodesService {
       where: { id: customerNodeId },
       data: {
         serviceNodeId: input.serviceNodeId,
+        clientName: input.clientName === undefined ? undefined : input.clientName.trim() || null,
         xuiEmail: nextXuiEmail,
         uuid: nextUuid,
         expireAt: input.expireAt === undefined ? undefined : input.expireAt || null,
@@ -1027,6 +1034,7 @@ export class NodesService {
         where: { id: customerNodeId },
         data: {
           serviceNodeId: current.serviceNodeId,
+          clientName: current.clientName,
           xuiEmail: current.xuiEmail,
           uuid: current.uuid,
           expireAt: current.expireAt,

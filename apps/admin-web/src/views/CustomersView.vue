@@ -27,6 +27,7 @@ import { notifyError } from '../notify';
 
 type CustomerNode = {
   id: string;
+  clientName?: string | null;
   xuiEmail: string;
   uuid?: string | null;
   expireAt: string | null;
@@ -92,9 +93,9 @@ const balanceDialogVisible = ref(false);
 const customerNodeDialogVisible = ref(false);
 const remoteClientDialogVisible = ref(false);
 const customerForm = reactive({ name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active' as 'active' | 'disabled', remark: '' });
-const bindForm = reactive({ customerId: '', serviceNodeId: '', xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
+const bindForm = reactive({ customerId: '', serviceNodeId: '', clientName: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
 const nodeEditForm = reactive({ customerId: '', customerNodeId: '', serviceNodeId: '', xuiEmail: '', expireAt: '', trafficLimitGb: undefined as number | undefined, remoteControl: 'reference' as CustomerNode['remoteControl'], originalServiceNodeId: '', originalXuiEmail: '', originalRemoteControl: 'reference' as CustomerNode['remoteControl'], takeover: false });
-const remoteClientForm = reactive({ customerId: '', customerNodeId: '', xuiEmail: '', mode: 'edit' as 'create' | 'edit', expireAt: '', trafficLimitGb: 0, enabled: true });
+const remoteClientForm = reactive({ customerId: '', customerNodeId: '', clientName: '', xuiEmail: '', mode: 'edit' as 'create' | 'edit', expireAt: '', trafficLimitGb: 0, enabled: true });
 const balanceForm = reactive({ customerId: '', mode: 'add' as 'add' | 'subtract' | 'set', amount: 0, remark: '' });
 const renewMonths = ref<Record<string, number>>({});
 const selectedCustomerForNodes = ref<Customer | null>(null);
@@ -196,7 +197,7 @@ async function bindNode() {
       method: 'POST',
       body: {
         serviceNodeId: bindForm.serviceNodeId,
-        xuiEmail: bindForm.xuiEmail.trim(),
+        clientName: bindForm.clientName.trim(),
         expireAt: dateForApi(bindForm.expireAt),
         trafficLimitGb: bindForm.trafficLimitGb,
         remoteControl: 'fully_managed',
@@ -206,7 +207,7 @@ async function bindNode() {
     });
     ElMessage.success('官方客户端已创建并绑定');
     bindDialogVisible.value = false;
-    Object.assign(bindForm, { xuiEmail: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
+    Object.assign(bindForm, { clientName: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
   } catch (caught) {
     notifyError(caught, '绑定失败');
@@ -369,6 +370,7 @@ function openRemoteClientDialog(customer: Customer, node: CustomerNode, mode: 'c
   Object.assign(remoteClientForm, {
     customerId: customer.id,
     customerNodeId: node.id,
+    clientName: node.clientName || node.xuiEmail,
     xuiEmail: node.xuiEmail,
     mode,
     expireAt: node.expireAt || '',
@@ -388,12 +390,13 @@ async function saveRemoteClient() {
       body: remoteClientForm.mode === 'create'
         ? {
             email: remoteClientForm.xuiEmail,
+            clientName: remoteClientForm.clientName.trim(),
             expireAt: remoteClientForm.expireAt || null,
             trafficLimitGb: remoteClientForm.trafficLimitGb,
             enabled: remoteClientForm.enabled
           }
         : {
-            email: remoteClientForm.xuiEmail.trim(),
+            clientName: remoteClientForm.clientName.trim(),
             expireAt: remoteClientForm.expireAt || null,
             trafficLimitGb: remoteClientForm.trafficLimitGb,
             enabled: remoteClientForm.enabled
@@ -411,7 +414,7 @@ async function saveRemoteClient() {
 
 async function deleteRemoteClient(customer: Customer, node: CustomerNode) {
   if (deletingRemoteClientIds.value.has(node.id)) return;
-  await ElMessageBox.confirm(`确认删除官方面板中的客户端「${node.xuiEmail}」？本地用户绑定会保留并标记停用，后续可使用同一标识重新创建；该操作不会删除用户、服务节点或其他官方账号。`, '删除远端客户端', {
+  await ElMessageBox.confirm(`确认删除官方面板中的客户端「${node.clientName || node.xuiEmail}」？本地用户绑定会保留并标记停用，后续可使用同一标识重新创建；该操作不会删除用户、服务节点或其他官方账号。`, '删除远端客户端', {
     type: 'warning',
     customClass: 'customer-dark-message-box',
     confirmButtonText: '删除远端客户端',
@@ -495,13 +498,13 @@ function openBindDialog(customer?: Customer) {
   if (customer) bindForm.customerId = customer.id;
   if (!bindForm.customerId && customers.value[0]) bindForm.customerId = customers.value[0].id;
   if (!bindForm.serviceNodeId && serviceNodes.value[0]) bindForm.serviceNodeId = serviceNodes.value[0].id;
-  bindForm.xuiEmail = bindClientName(bindForm.customerId);
+  bindForm.clientName = bindClientName(bindForm.customerId);
   bindForm.expireAt = bindForm.expireAt || defaultExpireAt();
   bindDialogVisible.value = true;
 }
 
 function handleBindCustomerChange(customerId: string) {
-  bindForm.xuiEmail = bindClientName(customerId);
+  bindForm.clientName = bindClientName(customerId);
 }
 
 function bindClientName(customerId: string) {
@@ -929,8 +932,8 @@ onMounted(loadCustomers);
         <article v-for="node in selectedCustomerForNodes.nodes" :key="node.id" class="customer-node-dialog-card entity-card">
           <div class="entity-card-head">
             <div>
-              <strong>{{ node.serviceNode?.name || node.xuiEmail }}</strong>
-              <span>{{ node.serviceNode?.server?.name || '-' }} / {{ node.xuiEmail }}</span>
+              <strong>{{ node.serviceNode?.name || node.clientName || node.xuiEmail }}</strong>
+              <span>{{ node.serviceNode?.server?.name || '-' }} / {{ node.clientName || node.xuiEmail }}</span>
             </div>
             <div class="tag-stack">
               <el-tag size="small" :type="node.status === 'active' ? 'success' : 'info'">{{ node.status === 'active' ? '启用' : '停用' }}</el-tag>
@@ -1018,7 +1021,7 @@ onMounted(loadCustomers);
           <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="客户端名称" class="form-item-full"><el-input v-model="bindForm.xuiEmail" maxlength="160" placeholder="例如：ceshi1-us，可自定义且需在该官方面板中唯一" /></el-form-item>
+      <el-form-item label="客户端名称" class="form-item-full"><el-input v-model="bindForm.clientName" maxlength="120" placeholder="例如：ceshi1-us，可在官方面板中修改" /></el-form-item>
       <el-form-item label="到期时间">
         <div class="date-picker-stack">
           <el-date-picker v-model="bindForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
@@ -1034,14 +1037,14 @@ onMounted(loadCustomers);
     </el-form>
     <template #footer>
       <el-button @click="bindDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId || !bindForm.xuiEmail.trim()" @click="bindNode">创建并绑定</el-button>
+      <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId || !bindForm.clientName.trim()" @click="bindNode">创建并绑定</el-button>
     </template>
   </el-dialog>
 
   <el-dialog v-model="remoteClientDialogVisible" class="customer-dark-dialog" :title="remoteClientForm.mode === 'create' ? '创建远端客户端' : '设置远端客户端'" width="680px" destroy-on-close>
     <div class="customer-dialog-intro"><ServerOff :size="18" /><div><strong>{{ remoteClientForm.mode === 'create' ? '在官方 3x-ui 入站中创建客户端' : '更新官方 3x-ui 客户端设置' }}</strong><span>{{ remoteClientForm.mode === 'create' ? '使用当前绑定名称创建，适用于远端账号尚不存在或已被人工删除的情况。' : '名称会同步修改官方客户端和本地绑定；到期、额度与启停也会同时更新。' }}</span></div></div>
     <el-form :model="remoteClientForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
-      <el-form-item label="客户端名称" class="form-item-full"><el-input v-model="remoteClientForm.xuiEmail" maxlength="160" :disabled="remoteClientForm.mode === 'create'" placeholder="在官方面板中显示的唯一名称" /></el-form-item>
+      <el-form-item label="客户端名称" class="form-item-full"><el-input v-model="remoteClientForm.clientName" maxlength="120" placeholder="在官方面板中显示的名称" /></el-form-item>
       <el-form-item label="到期时间">
         <el-date-picker v-model="remoteClientForm.expireAt" type="datetime" placeholder="留空表示不限期" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
       </el-form-item>
@@ -1050,7 +1053,7 @@ onMounted(loadCustomers);
     </el-form>
     <template #footer>
       <el-button @click="remoteClientDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!remoteClientForm.xuiEmail.trim()" @click="saveRemoteClient">{{ remoteClientForm.mode === 'create' ? '创建' : '保存' }}</el-button>
+      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!remoteClientForm.clientName.trim()" @click="saveRemoteClient">{{ remoteClientForm.mode === 'create' ? '创建' : '保存' }}</el-button>
     </template>
   </el-dialog>
 

@@ -156,6 +156,7 @@ model CustomerNode {
   id             String        @id @default(cuid())
   customerId     String
   serviceNodeId  String
+  clientName     String?       @db.VarChar(120)
   xuiEmail       String        @db.VarChar(160)
   uuid           String?       @db.VarChar(80)
   expireAt       DateTime?

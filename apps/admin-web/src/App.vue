@@ -10,7 +10,7 @@ type Branding = { brandName: string; logoDataUrl: string };
 
 const fallbackBrandName = '十夜管理后台';
 const brandingUpdatedEvent = 'shiye:branding-updated';
-const appVersion = '1.0.4';
+const appVersion = '1.0.5';
 const navSections = [
   { label: '总览看板', items: [{ to: '/', label: '数据概览', icon: LayoutDashboard }] },
   {

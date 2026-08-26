@@ -20,6 +20,10 @@ export function userFacingErrorMessage(status: number, message: unknown, fallbac
   const text = normalizeMessage(message);
   if (text && chineseTextPattern.test(text)) return text;
 
+  if (text && /(?:body|query|path)\.[\w.-]+:|value is not a valid|field required|value_error|type_error/i.test(text)) {
+    return `官方面板校验失败（官方返回：${text}）`;
+  }
+
   if (text) {
     const translated = translatedPatterns.find(([pattern]) => pattern.test(text));
     if (translated) return preserveRemoteDetail(text, translated[1]);

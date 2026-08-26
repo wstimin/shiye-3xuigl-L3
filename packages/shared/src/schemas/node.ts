@@ -105,6 +105,7 @@ export const socksNodeUpsertSchema = z.object({
 
 export const customerNodeCreateSchema = z.object({
   serviceNodeId: z.string().min(1),
+  clientName: z.string().trim().min(1).max(120).optional().or(z.literal('')),
   xuiEmail: z.string().trim().min(1).max(160).optional().or(z.literal('')),
   uuid: z.string().trim().max(80).optional(),
   expireAt: z.coerce.date().optional().nullable(),
@@ -157,6 +158,7 @@ export const networkRouteUpsertSchema = z.object({
 
 export const remoteClientCreateSchema = z.object({
   email: z.string().trim().min(1).max(160),
+  clientName: z.string().trim().min(1).max(120).optional(),
   uuid: z.string().trim().max(80).optional(),
   subId: z.string().trim().max(80).optional(),
   expireAt: z.coerce.date().optional().nullable(),
@@ -166,6 +168,7 @@ export const remoteClientCreateSchema = z.object({
 
 export const remoteClientPatchSchema = z.object({
   email: z.string().trim().min(1).max(160).optional(),
+  clientName: z.string().trim().min(1).max(120).optional(),
   expireAt: z.coerce.date().optional().nullable(),
   trafficLimitGb: z.coerce.number().finite().min(0).optional(),
   enabled: z.boolean().optional()
