@@ -65,7 +65,7 @@ test('node form detects and displays Reality parameters without using TLS fields
   assert.doesNotMatch(source, /realityServerName\s*=\s*[^\n]*tlsServerName/);
 });
 
-test('Reality stream settings write minClient only when a minimum version is supplied', async () => {
+test('Reality stream settings default minClient to 1.0.0 and preserve an explicit version', async () => {
   const realityService = new XuiService({} as never, {} as never, testLocks()) as any;
   realityService.resolveRealityKeys = async () => ({ privateKey: 'private-key', publicKey: 'public-key' });
   realityService.resolveRealityTarget = async () => ({ target: 'cdn.example.com:443', serverName: 'cdn.example.com', source: 'scan' });
@@ -77,7 +77,7 @@ test('Reality stream settings write minClient only when a minimum version is sup
     realityMinClientVersion: '1.2.3'
   });
 
-  assert.equal(empty.realitySettings.minClient, '');
+  assert.equal(empty.realitySettings.minClient, '1.0.0');
   assert.equal(versioned.realitySettings.minClient, '1.2.3');
 });
 

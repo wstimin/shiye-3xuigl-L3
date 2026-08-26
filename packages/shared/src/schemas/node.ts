@@ -111,7 +111,7 @@ export const customerNodeCreateSchema = z.object({
   expireAt: z.coerce.date().optional().nullable(),
   trafficLimitGb: z.coerce.number().finite().min(0).optional(),
   remoteControl: clientControlModeSchema.default('reference'),
-  remoteAction: z.enum(['bind', 'create']).default('bind'),
+  remoteAction: z.literal('bind').default('bind'),
   takeover: z.boolean().default(false)
 });
 

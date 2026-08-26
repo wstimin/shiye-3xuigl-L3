@@ -2,7 +2,6 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { XuiService } from '../xui/xui.service.js';
 import { DatabaseLockService } from '../../shared/database-lock.service.js';
 
 type DisableExpiredResult = {
@@ -56,7 +55,6 @@ export class JobsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly xui: XuiService,
     private readonly locks: DatabaseLockService
   ) {}
 
@@ -140,7 +138,6 @@ export class JobsService {
     const expiredNodes = await this.prisma.customerNode.findMany({
       where: {
         status: 'active',
-        remoteControl: { not: 'reference' },
         expireAt: { not: null, lte: now }
       },
       orderBy: { expireAt: 'asc' },
@@ -161,17 +158,15 @@ export class JobsService {
           this.locks.withLock<DisableExpiredOutcome>(this.locks.customerNodeKey(node.id), async () => {
             const current = await this.prisma.customerNode.findUnique({
               where: { id: node.id },
-              select: { customerId: true, xuiEmail: true, status: true, expireAt: true, remoteControl: true, serviceNodeId: true }
+              select: { status: true, expireAt: true, serviceNodeId: true }
             });
-            if (!current || current.serviceNodeId !== node.serviceNodeId || current.status !== 'active' || current.remoteControl === 'reference' || !current.expireAt || current.expireAt > new Date()) {
+            if (!current || current.serviceNodeId !== node.serviceNodeId || current.status !== 'active' || !current.expireAt || current.expireAt > new Date()) {
               return { skipped: true, reason: '节点状态或到期时间已变化' } as const;
             }
             if (await this.hasPendingRenewal(node.id)) return { skipped: true, reason: '节点续费正在处理，已等待续费完成后再检查' } as const;
-            const remote = await this.xui.setCustomerNodeRemoteEnabled(current.customerId, node.id, false);
-            if (remote.skipped) return { skipped: true, reason: remote.reason } as const;
             await this.prisma.customerNode.update({
               where: { id: node.id },
-              data: { status: 'disabled', disabledReason: 'expired', lastSyncedAt: new Date() }
+              data: { status: 'disabled', disabledReason: 'expired' }
             });
             return { skipped: false } as const;
           })
@@ -232,7 +227,6 @@ export class JobsService {
     const activeNodes = await this.prisma.customerNode.findMany({
       where: {
         status: 'active',
-        remoteControl: { not: 'reference' },
         trafficLimitGb: { gt: new Prisma.Decimal(0) }
       },
       orderBy: { updatedAt: 'asc' },
@@ -256,33 +250,21 @@ export class JobsService {
           this.locks.withLock<DisableTrafficExceededOutcome>(this.locks.customerNodeKey(node.id), async () => {
             const current = await this.prisma.customerNode.findUnique({
               where: { id: node.id },
-              select: { customerId: true, status: true, trafficLimitGb: true, remoteControl: true, serviceNodeId: true }
+              select: { status: true, trafficLimitGb: true, usedTrafficGb: true, serviceNodeId: true }
             });
-            if (!current || current.serviceNodeId !== node.serviceNodeId || current.status !== 'active' || current.remoteControl === 'reference') return { skipped: true, reason: '节点状态或控制模式已变化', usedBytes: 0, usedTrafficGb: 0, limitBytes } as const;
+            if (!current || current.serviceNodeId !== node.serviceNodeId || current.status !== 'active') return { skipped: true, reason: '节点状态已变化', usedBytes: 0, usedTrafficGb: 0, limitBytes } as const;
             const currentLimitBytes = this.gbToBytes(Number(current.trafficLimitGb));
             if (currentLimitBytes <= 0) return { skipped: true, reason: '节点流量额度已取消', usedBytes: 0, usedTrafficGb: 0, limitBytes: currentLimitBytes } as const;
             if (await this.hasPendingRenewal(node.id)) return { skipped: true, reason: '节点续费正在处理，已等待续费完成后再检查', usedBytes: 0, usedTrafficGb: 0, limitBytes: currentLimitBytes } as const;
-            const trafficResult = await this.xui.customerNodeTraffic(current.customerId, node.id);
-            const traffic = this.objectValue(trafficResult.traffic);
-            const usedBytes = this.numberValue(traffic.up) + this.numberValue(traffic.down);
-            const usedTrafficGb = this.bytesToGb(usedBytes);
-            await this.prisma.customerNode.update({
-              where: { id: node.id },
-              data: { usedTrafficGb: new Prisma.Decimal(usedTrafficGb.toFixed(2)), lastSyncedAt: new Date() }
-            });
-            if (usedBytes < currentLimitBytes) return { skipped: true, belowLimit: true, usedBytes, usedTrafficGb, limitBytes: currentLimitBytes } as const;
-            const remote = await this.xui.setCustomerNodeRemoteEnabled(current.customerId, node.id, false);
-            if (remote.skipped) return { skipped: true, reason: remote.reason, usedBytes, usedTrafficGb, limitBytes: currentLimitBytes } as const;
-            await this.prisma.customerNode.update({
-              where: { id: node.id },
-              data: {
-                status: 'disabled',
-                disabledReason: 'traffic_exceeded',
-                usedTrafficGb: new Prisma.Decimal(usedTrafficGb.toFixed(2)),
-                lastSyncedAt: new Date()
-              }
-            });
-            return { skipped: false, usedBytes, usedTrafficGb, limitBytes: currentLimitBytes } as const;
+            const usedTrafficGb = Number(current.usedTrafficGb);
+            const usedBytes = this.gbToBytes(usedTrafficGb);
+            return {
+              skipped: true,
+              reason: '服务节点使用共享官方客户端，无法将官方总流量准确归属到单个用户，已跳过自动停用',
+              usedBytes,
+              usedTrafficGb,
+              limitBytes: currentLimitBytes
+            } as const;
           })
         );
 

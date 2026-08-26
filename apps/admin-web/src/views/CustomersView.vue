@@ -2,7 +2,6 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
-import 'element-plus/es/components/checkbox/style/css';
 import 'element-plus/es/components/date-picker/style/css';
 import 'element-plus/es/components/dialog/style/css';
 import 'element-plus/es/components/dropdown/style/css';
@@ -18,7 +17,7 @@ import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/switch/style/css';
 import 'element-plus/es/components/tag/style/css';
 import 'element-plus/es/components/tooltip/style/css';
-import { ElAlert, ElButton, ElCheckbox, ElDatePicker, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElForm, ElFormItem, ElInput, ElInputNumber, ElMessage, ElMessageBox, ElOption, ElPagination, ElSelect, ElSwitch, ElTag as ElTagComponent, ElTooltip } from 'element-plus';
+import { ElAlert, ElButton, ElDatePicker, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElForm, ElFormItem, ElInput, ElInputNumber, ElMessage, ElMessageBox, ElOption, ElPagination, ElSelect, ElSwitch, ElTag as ElTagComponent, ElTooltip } from 'element-plus';
 const ElTag = ElTagComponent as any;
 import { Activity, CalendarClock, CircleCheckBig, Edit3, KeyRound, Link2, MoreHorizontal, Plus, RefreshCw, RotateCcw, Search, ServerOff, Trash2, Unlink, UserRound, Users, Wallet } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
@@ -51,7 +50,19 @@ type Customer = {
   nodes?: CustomerNode[];
 };
 
-type ServiceNode = { id: string; name: string; server?: { name: string } };
+type ServiceNode = {
+  id: string;
+  name: string;
+  ownership: 'managed' | 'referenced' | 'shared';
+  config?: {
+    remoteClientEmail?: string;
+    remoteClientName?: string;
+    remoteClientExpireAt?: string | null;
+    remoteClientTrafficLimitGb?: number;
+    remoteClientEnabled?: boolean;
+  } | null;
+  server?: { name: string };
+};
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
 
 const customerAvatarPalettes = [
@@ -93,9 +104,9 @@ const balanceDialogVisible = ref(false);
 const customerNodeDialogVisible = ref(false);
 const remoteClientDialogVisible = ref(false);
 const customerForm = reactive({ name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active' as 'active' | 'disabled', remark: '' });
-const bindForm = reactive({ customerId: '', serviceNodeId: '', clientName: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
-const nodeEditForm = reactive({ customerId: '', customerNodeId: '', serviceNodeId: '', xuiEmail: '', expireAt: '', trafficLimitGb: undefined as number | undefined, remoteControl: 'reference' as CustomerNode['remoteControl'], originalServiceNodeId: '', originalXuiEmail: '', originalRemoteControl: 'reference' as CustomerNode['remoteControl'], takeover: false });
-const remoteClientForm = reactive({ customerId: '', customerNodeId: '', clientName: '', xuiEmail: '', mode: 'edit' as 'create' | 'edit', expireAt: '', trafficLimitGb: 0, enabled: true });
+const bindForm = reactive({ customerId: '', serviceNodeId: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
+const nodeEditForm = reactive({ customerId: '', customerNodeId: '', serviceNodeId: '', expireAt: '', trafficLimitGb: undefined as number | undefined });
+const remoteClientForm = reactive({ serviceNodeId: '', email: '', clientName: '', mode: 'edit' as 'create' | 'edit', expireAt: '', trafficLimitGb: 0, enabled: true });
 const balanceForm = reactive({ customerId: '', mode: 'add' as 'add' | 'subtract' | 'set', amount: 0, remark: '' });
 const renewMonths = ref<Record<string, number>>({});
 const selectedCustomerForNodes = ref<Customer | null>(null);
@@ -197,17 +208,13 @@ async function bindNode() {
       method: 'POST',
       body: {
         serviceNodeId: bindForm.serviceNodeId,
-        clientName: bindForm.clientName.trim(),
         expireAt: dateForApi(bindForm.expireAt),
-        trafficLimitGb: bindForm.trafficLimitGb,
-        remoteControl: 'fully_managed',
-        remoteAction: 'create',
-        takeover: true
+        trafficLimitGb: bindForm.trafficLimitGb
       }
     });
-    ElMessage.success('官方客户端已创建并绑定');
+    ElMessage.success('节点已绑定');
     bindDialogVisible.value = false;
-    Object.assign(bindForm, { clientName: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined });
+    Object.assign(bindForm, { expireAt: defaultExpireAt(), trafficLimitGb: undefined });
     await loadCustomers();
   } catch (caught) {
     notifyError(caught, '绑定失败');
@@ -225,11 +232,8 @@ async function updateCustomerNode() {
       method: 'PATCH',
       body: {
         serviceNodeId: nodeEditForm.serviceNodeId,
-        xuiEmail: nodeEditForm.xuiEmail,
         expireAt: nodeEditForm.expireAt || null,
-        trafficLimitGb: nodeEditForm.trafficLimitGb,
-        remoteControl: nodeEditForm.remoteControl,
-        takeover: nodeEditForm.takeover
+        trafficLimitGb: nodeEditForm.trafficLimitGb
       }
     });
     ElMessage.success('更新成功');
@@ -348,61 +352,76 @@ async function showNodeTraffic(customer: Customer, node: CustomerNode) {
   }
 }
 
-async function resetNodeTraffic(customer: Customer, node: CustomerNode) {
-  if (resettingTrafficIds.value.has(node.id)) return;
-  await ElMessageBox.confirm(`确认重置「${node.serviceNode?.name || node.xuiEmail}」这个远端客户端的流量？`, '重置客户端流量', { type: 'warning', customClass: 'customer-dark-message-box' });
-  resettingTrafficIds.value = new Set(resettingTrafficIds.value).add(node.id);
-  error.value = '';
+function serviceNodeForBinding(node: CustomerNode) {
+  return serviceNodes.value.find((item) => item.id === node.serviceNode?.id);
+}
+
+function serviceNodeHasRemoteClient(node: CustomerNode) {
+  return Boolean(serviceNodeForBinding(node)?.config?.remoteClientEmail);
+}
+
+function canManageRemoteClient(node: CustomerNode) {
+  return node.serviceNode?.ownership === 'managed';
+}
+
+async function resetNodeTraffic(node: CustomerNode) {
+  const serviceNodeId = node.serviceNode?.id;
+  if (!serviceNodeId || resettingTrafficIds.value.has(serviceNodeId)) return;
+  await ElMessageBox.confirm(
+    `确认重置「${node.serviceNode?.name || node.xuiEmail}」共享官方客户端的流量？该操作会影响此路由节点下所有绑定用户。`,
+    '重置共享客户端流量',
+    { type: 'warning', customClass: 'customer-dark-message-box' }
+  );
+  resettingTrafficIds.value = new Set(resettingTrafficIds.value).add(serviceNodeId);
   try {
-    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/reset-traffic`, { method: 'POST' });
-    ElMessage.success('远端客户端流量已重置');
+    await api(`/api/admin/service-nodes/${serviceNodeId}/reset-traffic`, { method: 'POST' });
+    ElMessage.success('共享官方客户端流量已重置');
     await loadCustomers();
   } catch (caught) {
     notifyError(caught, '重置失败');
   } finally {
     const next = new Set(resettingTrafficIds.value);
-    next.delete(node.id);
+    next.delete(serviceNodeId);
     resettingTrafficIds.value = next;
   }
 }
 
-function openRemoteClientDialog(customer: Customer, node: CustomerNode, mode: 'create' | 'edit') {
+function openRemoteClientDialog(node: CustomerNode, mode: 'create' | 'edit') {
+  const serviceNode = serviceNodeForBinding(node);
+  if (!serviceNode) return notifyError('服务节点信息不存在，请刷新后重试');
+  const config = serviceNode.config || {};
   Object.assign(remoteClientForm, {
-    customerId: customer.id,
-    customerNodeId: node.id,
-    clientName: node.clientName || node.xuiEmail,
-    xuiEmail: node.xuiEmail,
+    serviceNodeId: serviceNode.id,
+    email: config.remoteClientEmail || node.xuiEmail || '',
+    clientName: config.remoteClientName || node.clientName || config.remoteClientEmail || node.xuiEmail || '',
     mode,
-    expireAt: node.expireAt || '',
-    trafficLimitGb: Number(node.trafficLimitGb || 0),
-    enabled: node.status === 'active'
+    expireAt: config.remoteClientExpireAt || '',
+    trafficLimitGb: Number(config.remoteClientTrafficLimitGb ?? node.trafficLimitGb ?? 0),
+    enabled: config.remoteClientEnabled ?? true
   });
   remoteClientDialogVisible.value = true;
 }
 
 async function saveRemoteClient() {
-  if (updatingCustomerNode.value || !remoteClientForm.customerId || !remoteClientForm.customerNodeId) return;
+  if (updatingCustomerNode.value || !remoteClientForm.serviceNodeId) return;
+  await ElMessageBox.confirm(
+    `确认${remoteClientForm.mode === 'create' ? '创建' : '修改'}该路由节点的共享官方客户端？操作会影响此节点下所有绑定用户。`,
+    remoteClientForm.mode === 'create' ? '创建共享客户端' : '修改共享客户端',
+    { type: 'warning', customClass: 'customer-dark-message-box' }
+  );
   updatingCustomerNode.value = true;
-  error.value = '';
   try {
-    await api(`/api/admin/customers/${remoteClientForm.customerId}/nodes/${remoteClientForm.customerNodeId}/remote-client`, {
+    await api(`/api/admin/service-nodes/${remoteClientForm.serviceNodeId}/remote-client`, {
       method: remoteClientForm.mode === 'create' ? 'POST' : 'PATCH',
-      body: remoteClientForm.mode === 'create'
-        ? {
-            email: remoteClientForm.xuiEmail,
-            clientName: remoteClientForm.clientName.trim(),
-            expireAt: remoteClientForm.expireAt || null,
-            trafficLimitGb: remoteClientForm.trafficLimitGb,
-            enabled: remoteClientForm.enabled
-          }
-        : {
-            clientName: remoteClientForm.clientName.trim(),
-            expireAt: remoteClientForm.expireAt || null,
-            trafficLimitGb: remoteClientForm.trafficLimitGb,
-            enabled: remoteClientForm.enabled
-          }
+      body: {
+        email: remoteClientForm.email.trim(),
+        clientName: remoteClientForm.clientName.trim(),
+        expireAt: dateForApi(remoteClientForm.expireAt) ?? null,
+        trafficLimitGb: remoteClientForm.trafficLimitGb,
+        enabled: remoteClientForm.enabled
+      }
     });
-    ElMessage.success(remoteClientForm.mode === 'create' ? '远端客户端已创建' : '远端客户端已更新');
+    ElMessage.success(remoteClientForm.mode === 'create' ? '共享官方客户端已创建' : '共享官方客户端已更新');
     remoteClientDialogVisible.value = false;
     await loadCustomers();
   } catch (caught) {
@@ -412,25 +431,24 @@ async function saveRemoteClient() {
   }
 }
 
-async function deleteRemoteClient(customer: Customer, node: CustomerNode) {
-  if (deletingRemoteClientIds.value.has(node.id)) return;
-  await ElMessageBox.confirm(`确认删除官方面板中的客户端「${node.clientName || node.xuiEmail}」？本地用户绑定会保留并标记停用，后续可使用同一标识重新创建；该操作不会删除用户、服务节点或其他官方账号。`, '删除远端客户端', {
-    type: 'warning',
-    customClass: 'customer-dark-message-box',
-    confirmButtonText: '删除远端客户端',
-    cancelButtonText: '取消'
-  });
-  deletingRemoteClientIds.value = new Set(deletingRemoteClientIds.value).add(node.id);
-  error.value = '';
+async function deleteRemoteClient(node: CustomerNode) {
+  const serviceNodeId = node.serviceNode?.id;
+  if (!serviceNodeId || deletingRemoteClientIds.value.has(serviceNodeId)) return;
+  await ElMessageBox.confirm(
+    `确认删除「${node.serviceNode?.name || node.xuiEmail}」的共享官方客户端？所有本地用户绑定都会保留，但在重新创建客户端前无法同步或获取连接。`,
+    '删除共享官方客户端',
+    { type: 'warning', customClass: 'customer-dark-message-box', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+  );
+  deletingRemoteClientIds.value = new Set(deletingRemoteClientIds.value).add(serviceNodeId);
   try {
-    await api(`/api/admin/customers/${customer.id}/nodes/${node.id}/remote-client`, { method: 'DELETE' });
-    ElMessage.success('远端客户端已删除，本地绑定已保留');
+    await api(`/api/admin/service-nodes/${serviceNodeId}/remote-client`, { method: 'DELETE' });
+    ElMessage.success('共享官方客户端已删除，本地绑定已保留');
     await loadCustomers();
   } catch (caught) {
     notifyError(caught, '删除失败');
   } finally {
     const next = new Set(deletingRemoteClientIds.value);
-    next.delete(node.id);
+    next.delete(serviceNodeId);
     deletingRemoteClientIds.value = next;
   }
 }
@@ -498,18 +516,8 @@ function openBindDialog(customer?: Customer) {
   if (customer) bindForm.customerId = customer.id;
   if (!bindForm.customerId && customers.value[0]) bindForm.customerId = customers.value[0].id;
   if (!bindForm.serviceNodeId && serviceNodes.value[0]) bindForm.serviceNodeId = serviceNodes.value[0].id;
-  bindForm.clientName = bindClientName(bindForm.customerId);
   bindForm.expireAt = bindForm.expireAt || defaultExpireAt();
   bindDialogVisible.value = true;
-}
-
-function handleBindCustomerChange(customerId: string) {
-  bindForm.clientName = bindClientName(customerId);
-}
-
-function bindClientName(customerId: string) {
-  const customer = customers.value.find((item) => item.id === customerId);
-  return customer?.loginUsername.trim() || customer?.name.trim() || '';
 }
 
 function openBalanceDialog(customer?: Customer) {
@@ -528,14 +536,8 @@ function editCustomerNode(customer: Customer, node: CustomerNode) {
     customerId: customer.id,
     customerNodeId: node.id,
     serviceNodeId: node.serviceNode?.id || '',
-    xuiEmail: node.xuiEmail,
     expireAt: node.expireAt || '',
-    trafficLimitGb: node.trafficLimitGb === undefined || node.trafficLimitGb === null ? undefined : Number(node.trafficLimitGb),
-    remoteControl: node.remoteControl || 'reference',
-    originalServiceNodeId: node.serviceNode?.id || '',
-    originalXuiEmail: node.xuiEmail,
-    originalRemoteControl: node.remoteControl || 'reference',
-    takeover: false
+    trafficLimitGb: node.trafficLimitGb === undefined || node.trafficLimitGb === null ? undefined : Number(node.trafficLimitGb)
   });
   editNodeDialogVisible.value = true;
 }
@@ -621,19 +623,6 @@ function remoteControlLabel(mode: CustomerNode['remoteControl']) {
   if (mode === 'fully_managed') return '完全托管';
   if (mode === 'subscription_managed') return '订阅托管';
   return '只读引用';
-}
-
-function controlRank(mode: CustomerNode['remoteControl']) {
-  if (mode === 'fully_managed') return 2;
-  if (mode === 'subscription_managed') return 1;
-  return 0;
-}
-
-function editRequiresTakeover() {
-  if (nodeEditForm.remoteControl === 'reference') return false;
-  const identityChanged = nodeEditForm.serviceNodeId !== nodeEditForm.originalServiceNodeId
-    || nodeEditForm.xuiEmail.trim() !== nodeEditForm.originalXuiEmail;
-  return identityChanged || controlRank(nodeEditForm.remoteControl) > controlRank(nodeEditForm.originalRemoteControl);
 }
 
 function serviceNodeDeleteLabel(node: CustomerNode) {
@@ -955,16 +944,16 @@ onMounted(loadCustomers);
                 <el-option :value="6" label="6月" />
                 <el-option :value="12" label="12月" />
               </el-select>
-              <el-button size="small" type="primary" :loading="renewingIds.has(node.id)" :disabled="node.remoteControl === 'reference'" @click="renewNode(selectedCustomerForNodes, node)">续费</el-button>
+              <el-button size="small" type="primary" :loading="renewingIds.has(node.id)" @click="renewNode(selectedCustomerForNodes, node)">续费</el-button>
             </div>
             <div class="node-action-group remote-action">
-              <span class="action-group-label">远端客户端</span>
+              <span class="action-group-label">共享官方客户端</span>
               <el-button size="small" type="primary" plain :loading="syncingIds.has(node.id)" @click="syncNode(selectedCustomerForNodes, node)"><RefreshCw :size="15" />同步</el-button>
               <el-button size="small" class="customer-node-secondary-button" :loading="trafficIds.has(node.id)" @click="showNodeTraffic(selectedCustomerForNodes, node)"><Activity :size="15" />流量</el-button>
-              <el-button v-if="node.remoteControl !== 'reference'" size="small" class="customer-node-secondary-button" @click="openRemoteClientDialog(selectedCustomerForNodes, node, 'edit')"><Edit3 :size="15" />设置</el-button>
-              <el-button v-if="node.remoteControl === 'fully_managed'" size="small" class="customer-node-secondary-button" @click="openRemoteClientDialog(selectedCustomerForNodes, node, 'create')"><Plus :size="15" />创建</el-button>
-              <el-button size="small" class="customer-node-secondary-button" :loading="resettingTrafficIds.has(node.id)" :disabled="node.remoteControl !== 'fully_managed'" @click="resetNodeTraffic(selectedCustomerForNodes, node)"><RotateCcw :size="15" />重置</el-button>
-              <el-button v-if="node.remoteControl === 'fully_managed'" size="small" type="danger" plain :loading="deletingRemoteClientIds.has(node.id)" @click="deleteRemoteClient(selectedCustomerForNodes, node)"><Trash2 :size="15" />删除</el-button>
+              <el-button v-if="canManageRemoteClient(node) && serviceNodeHasRemoteClient(node)" size="small" class="customer-node-secondary-button" @click="openRemoteClientDialog(node, 'edit')"><Edit3 :size="15" />设置</el-button>
+              <el-button v-if="canManageRemoteClient(node) && !serviceNodeHasRemoteClient(node)" size="small" class="customer-node-secondary-button" @click="openRemoteClientDialog(node, 'create')"><Plus :size="15" />创建/恢复</el-button>
+              <el-button v-if="canManageRemoteClient(node)" size="small" class="customer-node-secondary-button" :loading="resettingTrafficIds.has(node.serviceNode?.id || '')" :disabled="!serviceNodeHasRemoteClient(node)" @click="resetNodeTraffic(node)"><RotateCcw :size="15" />重置</el-button>
+              <el-button v-if="canManageRemoteClient(node)" size="small" type="danger" plain :loading="deletingRemoteClientIds.has(node.serviceNode?.id || '')" :disabled="!serviceNodeHasRemoteClient(node)" @click="deleteRemoteClient(node)"><Trash2 :size="15" />删除</el-button>
             </div>
             <div class="node-action-group manage-action">
               <span class="action-group-label">本地绑定</span>
@@ -982,6 +971,23 @@ onMounted(loadCustomers);
     </template>
     <template #footer>
       <el-button class="customer-node-close-button" @click="customerNodeDialogVisible = false">关闭</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="remoteClientDialogVisible" class="customer-dark-dialog" :title="remoteClientForm.mode === 'create' ? '创建共享官方客户端' : '设置共享官方客户端'" width="680px" destroy-on-close>
+    <div class="customer-dialog-intro"><ServerOff :size="18" /><div><strong>{{ remoteClientForm.mode === 'create' ? '在官方 3x-ui 入站中创建客户端' : '更新官方 3x-ui 客户端设置' }}</strong><span>该客户端归路由节点所有，名称、到期、额度和启停会影响此节点下所有绑定用户。</span></div></div>
+    <el-form :model="remoteClientForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
+      <el-form-item label="客户端标识" class="form-item-full"><el-input v-model="remoteClientForm.email" maxlength="160" placeholder="例如：hk-premium，可在官方面板中识别" /></el-form-item>
+      <el-form-item label="显示名称" class="form-item-full"><el-input v-model="remoteClientForm.clientName" maxlength="120" placeholder="例如：香港高级线路" /></el-form-item>
+      <el-form-item label="到期时间">
+        <el-date-picker v-model="remoteClientForm.expireAt" type="datetime" placeholder="留空表示不限期" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
+      </el-form-item>
+      <el-form-item label="流量 GB"><el-input-number v-model="remoteClientForm.trafficLimitGb" :min="0" :precision="2" style="width: 100%" /></el-form-item>
+      <el-form-item label="启用状态" class="form-item-full"><el-switch v-model="remoteClientForm.enabled" inline-prompt active-text="启用" inactive-text="停用" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="remoteClientDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!remoteClientForm.email.trim() || !remoteClientForm.clientName.trim()" @click="saveRemoteClient">{{ remoteClientForm.mode === 'create' ? '创建' : '保存' }}</el-button>
     </template>
   </el-dialog>
 
@@ -1009,10 +1015,10 @@ onMounted(loadCustomers);
   </el-dialog>
 
   <el-dialog v-model="bindDialogVisible" class="customer-dark-dialog" title="绑定路由节点" width="680px" destroy-on-close>
-    <div class="customer-dialog-intro"><Link2 :size="18" /><div><strong>选择用户和路由节点即可完成绑定</strong><span>系统会在该节点对应的官方入站中创建独立客户端，并自动完成后续续费、停用和流量同步。</span></div></div>
+    <div class="customer-dialog-intro"><Link2 :size="18" /><div><strong>选择用户和路由节点即可完成绑定</strong><span>这里只建立本地用户授权，直接使用路由节点已有的官方客户端，不会创建或修改官方账号。</span></div></div>
     <el-form :model="bindForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="用户">
-        <el-select v-model="bindForm.customerId" placeholder="选择用户" style="width: 100%" @change="handleBindCustomerChange">
+        <el-select v-model="bindForm.customerId" placeholder="选择用户" style="width: 100%">
           <el-option v-for="customer in customers" :key="customer.id" :label="`${customer.name} / ${customer.loginUsername}`" :value="customer.id" />
         </el-select>
       </el-form-item>
@@ -1021,7 +1027,6 @@ onMounted(loadCustomers);
           <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="客户端名称" class="form-item-full"><el-input v-model="bindForm.clientName" maxlength="120" placeholder="例如：ceshi1-us，可在官方面板中修改" /></el-form-item>
       <el-form-item label="到期时间">
         <div class="date-picker-stack">
           <el-date-picker v-model="bindForm.expireAt" type="datetime" placeholder="到期时间，可留空" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
@@ -1037,44 +1042,17 @@ onMounted(loadCustomers);
     </el-form>
     <template #footer>
       <el-button @click="bindDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId || !bindForm.clientName.trim()" @click="bindNode">创建并绑定</el-button>
-    </template>
-  </el-dialog>
-
-  <el-dialog v-model="remoteClientDialogVisible" class="customer-dark-dialog" :title="remoteClientForm.mode === 'create' ? '创建远端客户端' : '设置远端客户端'" width="680px" destroy-on-close>
-    <div class="customer-dialog-intro"><ServerOff :size="18" /><div><strong>{{ remoteClientForm.mode === 'create' ? '在官方 3x-ui 入站中创建客户端' : '更新官方 3x-ui 客户端设置' }}</strong><span>{{ remoteClientForm.mode === 'create' ? '使用当前绑定名称创建，适用于远端账号尚不存在或已被人工删除的情况。' : '名称会同步修改官方客户端和本地绑定；到期、额度与启停也会同时更新。' }}</span></div></div>
-    <el-form :model="remoteClientForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
-      <el-form-item label="客户端名称" class="form-item-full"><el-input v-model="remoteClientForm.clientName" maxlength="120" placeholder="在官方面板中显示的名称" /></el-form-item>
-      <el-form-item label="到期时间">
-        <el-date-picker v-model="remoteClientForm.expireAt" type="datetime" placeholder="留空表示不限期" value-format="YYYY-MM-DDTHH:mm:ss.SSSZ" style="width: 100%" />
-      </el-form-item>
-      <el-form-item label="流量 GB"><el-input-number v-model="remoteClientForm.trafficLimitGb" :min="0" :precision="2" style="width: 100%" /></el-form-item>
-      <el-form-item label="启用状态" class="form-item-full"><el-switch v-model="remoteClientForm.enabled" inline-prompt active-text="启用" inactive-text="停用" /></el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="remoteClientDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!remoteClientForm.clientName.trim()" @click="saveRemoteClient">{{ remoteClientForm.mode === 'create' ? '创建' : '保存' }}</el-button>
+      <el-button type="primary" :loading="binding" :disabled="!bindForm.customerId || !bindForm.serviceNodeId" @click="bindNode">绑定</el-button>
     </template>
   </el-dialog>
 
   <el-dialog v-model="editNodeDialogVisible" class="customer-dark-dialog" title="编辑绑定节点" width="760px" destroy-on-close>
-    <div class="customer-dialog-intro"><Edit3 :size="18" /><div><strong>更新绑定资料</strong><span>保存后会校验并同步官方面板中已存在的客户端资料，不会创建、改名或替换远端账号。</span></div></div>
+    <div class="customer-dialog-intro"><Edit3 :size="18" /><div><strong>更新绑定资料</strong><span>这里只更新本地授权；切换服务节点时会读取目标节点已有客户端，不创建或修改官方账号。</span></div></div>
     <el-form :model="nodeEditForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="服务节点">
         <el-select v-model="nodeEditForm.serviceNodeId" placeholder="选择节点" style="width: 100%">
           <el-option v-for="node in serviceNodes" :key="node.id" :label="`${node.name} / ${node.server?.name || '-'}`" :value="node.id" />
         </el-select>
-      </el-form-item>
-      <el-form-item label="客户端名称"><el-input v-model="nodeEditForm.xuiEmail" placeholder="必填：准确的 3x-ui 客户端名称" /></el-form-item>
-      <el-form-item label="控制模式">
-        <el-select v-model="nodeEditForm.remoteControl" style="width: 100%">
-          <el-option label="只读引用（不修改远端账号）" value="reference" />
-          <el-option label="订阅生命周期托管（续费、停用、额度）" value="subscription_managed" />
-          <el-option label="完全托管（含创建、重置、删除）" value="fully_managed" />
-        </el-select>
-      </el-form-item>
-      <el-form-item v-if="editRequiresTakeover()" label="接管确认" class="form-item-full">
-        <el-checkbox v-model="nodeEditForm.takeover">确认授权本系统按新范围管理该官方客户端；不会改名或替换官方账号</el-checkbox>
       </el-form-item>
       <el-form-item label="到期时间">
         <div class="date-picker-stack">
@@ -1090,7 +1068,7 @@ onMounted(loadCustomers);
     </el-form>
     <template #footer>
       <el-button @click="editNodeDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!nodeEditForm.serviceNodeId || !nodeEditForm.xuiEmail.trim() || (editRequiresTakeover() && !nodeEditForm.takeover)" @click="updateCustomerNode">保存</el-button>
+      <el-button type="primary" :loading="updatingCustomerNode" :disabled="!nodeEditForm.serviceNodeId" @click="updateCustomerNode">保存</el-button>
     </template>
   </el-dialog>
 

@@ -61,10 +61,7 @@ async function loadNodes() {
 
 async function renewNode(nodeId: string) {
   const node = nodes.value.find((item) => item.id === nodeId);
-  if (!node || node.remoteControl === 'reference') {
-    renewErrorDialog.value = { title: '无法续费', message: '该节点绑定为只读引用，续费由原官方面板账号负责，不会影响原账号的有效期和余额。' };
-    return;
-  }
+  if (!node) return;
   renewingId.value = nodeId;
   message.value = '';
   renewErrorDialog.value = null;
@@ -174,13 +171,12 @@ function nodeStatusHint(node: UserNode) {
   const expireTime = node.expireAt ? new Date(node.expireAt).getTime() : null;
   const diff = expireTime ? expireTime - Date.now() : null;
 
-  if (node.status !== 'active' && node.disabledReason === 'expired') return { type: 'danger', label: '已到期', text: '节点因到期停用，续费成功后会重新同步远端状态。' };
+  if (node.status !== 'active' && node.disabledReason === 'expired') return { type: 'danger', label: '已到期', text: '节点因本系统授权到期停用，续费成功后会恢复本地访问授权。' };
   if (node.status !== 'active' && node.disabledReason === 'traffic_exceeded') return { type: 'danger', label: '流量用尽', text: '续费只延长有效期，不会重置流量，请联系管理员处理流量额度。' };
   if (node.status !== 'active' && node.disabledReason === 'admin') return { type: 'danger', label: '管理员停用', text: '该节点不能通过用户续费恢复，请联系管理员。' };
   if (node.status !== 'active') return { type: 'danger', label: '已停用', text: '该节点当前不可用，请联系管理员核对停用原因。' };
-  if (diff !== null && diff <= 0) return { type: 'danger', label: '已到期', text: '节点已到期，续费成功后会重新同步远端状态。' };
+  if (diff !== null && diff <= 0) return { type: 'danger', label: '已到期', text: '本系统访问授权已到期，续费成功后会恢复本地授权。' };
   if (limit > 0 && used >= limit) return { type: 'danger', label: '流量用尽', text: '可用流量已用完，续费不会重置流量，请联系管理员增加额度或重置流量。' };
-  if (node.remoteControl === 'reference') return { type: 'warning', label: '官方账号引用', text: '该绑定只读取官方面板账号状态，本系统不会续费、修改或删除原账号。' };
   if (diff !== null && diff <= 3 * 24 * 60 * 60 * 1000) return { type: 'warning', label: '临近到期', text: `还剩 ${daysLeft(diff)} 天到期，建议提前续费。` };
   if (diff !== null && diff <= 7 * 24 * 60 * 60 * 1000) return { type: 'warning', label: '即将到期', text: `还剩 ${daysLeft(diff)} 天到期。` };
   if (remaining !== null && limit > 0 && remaining / limit <= 0.1) return { type: 'warning', label: '流量不足', text: `剩余约 ${remaining.toFixed(2)} GB。` };
@@ -254,7 +250,7 @@ onMounted(loadNodes);
         </div>
       </div>
       <div v-else class="empty-hint">{{ node.linkError ? `节点链接获取失败：${node.linkError}` : '暂未获取到 3-x-ui 节点链接，请联系管理员同步节点。' }}</div>
-      <form v-if="node.remoteControl !== 'reference'" class="renew-form" @submit.prevent="renewNode(node.id)">
+      <form class="renew-form" @submit.prevent="renewNode(node.id)">
         <select v-model.number="monthsByNode[node.id]">
           <option :value="1">1 个月</option>
           <option :value="3">3 个月</option>
@@ -263,7 +259,7 @@ onMounted(loadNodes);
         </select>
         <button :disabled="renewingId === node.id">{{ renewingId === node.id ? '续费中' : '余额续费' }}</button>
       </form>
-      <div v-else class="empty-hint">只读引用账号不在本系统续费，请在原官方面板处理续费。</div>
+      <div class="empty-hint">续费只延长本系统访问授权，不修改路由节点共享的官方客户端。</div>
     </article>
     <div v-if="!loading && !filteredNodes.length" class="user-empty-state user-section-card">暂无符合条件的节点</div>
   </div>

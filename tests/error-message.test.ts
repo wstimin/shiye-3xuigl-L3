@@ -38,9 +38,7 @@ test('binding validation reports the exact field in Chinese', () => {
     () => pipe.transform({
       serviceNodeId: 'node-1',
       expireAt: '',
-      remoteControl: 'fully_managed',
-      remoteAction: 'create',
-      takeover: true
+      remoteAction: 'bind'
     }),
     (error) => {
       assert.ok(error instanceof BadRequestException);
@@ -59,9 +57,7 @@ test('binding validation accepts normalized ISO dates and omitted traffic limits
   const result = pipe.transform({
     serviceNodeId: 'node-1',
     expireAt: '2026-09-26T04:00:00.000Z',
-    remoteControl: 'fully_managed',
-    remoteAction: 'create',
-    takeover: true
+    remoteAction: 'bind'
   }) as { expireAt: Date; trafficLimitGb?: number };
 
   assert.equal(result.expireAt.toISOString(), '2026-09-26T04:00:00.000Z');

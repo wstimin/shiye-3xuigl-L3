@@ -63,9 +63,13 @@ type ServiceNodeConfig = {
   remoteInboundDrift?: boolean;
   remoteInboundLastCheckedAt?: string;
   remoteClientEmail?: string;
+  remoteClientName?: string;
   remoteClientUuid?: string;
   remoteClientSubId?: string;
   remoteClientLinks?: string[];
+  remoteClientExpireAt?: string | null;
+  remoteClientTrafficLimitGb?: number;
+  remoteClientEnabled?: boolean;
 };
 
 type CreateServiceInboundInput = {
@@ -480,6 +484,7 @@ export class XuiService {
       const verifiedPayload = await client.getInbound(inboundId);
       this.assertXuiSuccess(verifiedPayload);
       const verifiedInbound = this.remoteInboundFromPayload(verifiedPayload);
+      this.assertServiceInboundUpdateApplied(verifiedInbound, { ...input, inboundId }, port, streamSettings);
       const verifiedStreamSettings = this.xuiObject(this.parseMaybeJson(verifiedInbound.streamSettings));
       const verifiedTag = String(verifiedInbound.tag || tag);
       const verifiedRemark = String(verifiedInbound.remark || payload.remark);
@@ -653,7 +658,7 @@ export class XuiService {
         ...streamSettings,
         realitySettings: {
           ...realitySettings,
-          minClient: String(input.realityMinClientVersion ?? realitySettings.minClient ?? '').trim()
+          minClient: String(input.realityMinClientVersion || realitySettings.minClient || '1.0.0').trim()
         }
       };
     } else if (!crossesHysteriaBoundary && currentSecurity === nextSecurity && transportUnchanged) {
@@ -815,38 +820,37 @@ export class XuiService {
   private async syncServiceNodeTrafficLimitUnlocked(serviceNodeId: string) {
     const serviceNode = await this.prisma.serviceNode.findUnique({
       where: { id: serviceNodeId },
-      include: {
-        server: true,
-        customerNodes: { select: { id: true, customerId: true, status: true, remoteControl: true } }
-      }
+      include: { server: true }
     });
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
     if (serviceNode.ownership !== 'managed') throw new BadRequestException('引用入站不能同步远端客户端额度，请先明确接管');
     if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
     await this.assertNoPendingRenewalsForServiceNode(serviceNodeId, '同步客户端额度');
     const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
-    const results: Array<{ target: string; updated: boolean; skipped?: boolean; message?: string }> = [];
-
-    for (const node of serviceNode.customerNodes) {
-      if (node.remoteControl === 'reference') {
-        results.push({ target: `customer:${node.id}`, updated: false, skipped: true, message: '只读引用绑定不修改远端额度' });
-        continue;
-      }
-      if (!serviceNode.enabled && node.status === 'active') {
-        results.push({ target: `customer:${node.id}`, updated: false, skipped: true, message: '服务节点已停用，用户节点无需继续同步为启用' });
-        continue;
-      }
-      try {
-        await this.updateCustomerNodeRemoteQuota(node.customerId, node.id, serviceNode.trafficLimitGb);
-        results.push({ target: `customer:${node.id}`, updated: true });
-      } catch (error) {
-        results.push({ target: `customer:${node.id}`, updated: false, message: this.errorMessage(error) });
-      }
+    const xuiEmail = this.stringValue(config.remoteClientEmail);
+    if (!xuiEmail) throw new BadRequestException('服务节点缺少托管客户端标识，请先同步路由节点');
+    const client = await this.createAuthenticatedClient(serviceNode.server);
+    const rawInbounds = await client.listInbounds();
+    this.assertXuiSuccess(rawInbounds);
+    const existing = await this.findClient(client, {
+      email: xuiEmail,
+      uuid: this.stringValue(config.remoteClientUuid),
+      subId: this.stringValue(config.remoteClientSubId),
+      inboundId: serviceNode.inboundId
+    }, this.xuiArray(rawInbounds));
+    if (!existing.exists) throw new BadRequestException('服务节点的官方客户端不存在，精确同步不会创建新客户端');
+    const current = this.xuiObject(existing.raw);
+    const next = { ...current, totalGB: this.gbToBytes(serviceNode.trafficLimitGb) };
+    const response = await client.updateClient(existing.inboundId || serviceNode.inboundId, existing.email || xuiEmail, next);
+    this.assertXuiSuccess(response);
+    const verified = await client.getClientRecord(existing.email || xuiEmail);
+    if (!this.remoteClientFieldMatches('totalGB', verified.totalGB, next.totalGB)) {
+      throw new BadGatewayException('服务节点官方客户端流量额度未按预期更新');
     }
-
-    const updated = results.filter((item) => item.updated).length;
-    const skipped = results.filter((item) => item.skipped).length;
-    const failed = results.length - updated - skipped;
+    const results = [{ target: `service-client:${existing.email || xuiEmail}`, updated: true }];
+    const updated = 1;
+    const skipped = 0;
+    const failed = 0;
     if (failed === 0) await this.prisma.serviceNode.update({ where: { id: serviceNodeId }, data: { config: this.toJsonValue({ ...config, remoteManaged: true }) } });
     await this.writeSyncLog(serviceNode.serverId, 'service-node-traffic-limit-sync', failed ? 'partial' : 'success', `已同步 ${serviceNode.name} 的流量额度`, {
       serviceNodeId,
@@ -864,36 +868,227 @@ export class XuiService {
     return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.resetServiceNodeTrafficUnlocked(serviceNodeId));
   }
 
+  async createServiceNodeRemoteClient(serviceNodeId: string, input: z.infer<typeof remoteClientCreateSchema>) {
+    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.createServiceNodeRemoteClientUnlocked(serviceNodeId, input));
+  }
+
+  private async createServiceNodeRemoteClientUnlocked(serviceNodeId: string, input: z.infer<typeof remoteClientCreateSchema>) {
+    const serviceNode = await this.serviceNodeForRemoteClientManagement(serviceNodeId);
+    const client = await this.createAuthenticatedClient(serviceNode.server);
+    const occupied = await this.optionalV36ClientRecord(client, input.email);
+    if (occupied) {
+      const inboundIds = this.numberList(occupied.inboundIds);
+      if (!inboundIds.includes(serviceNode.inboundId)) {
+        throw new BadRequestException(`官方客户端 ${input.email} 已存在，但不属于当前入站，不能恢复绑定`);
+      }
+      const identity = this.v36ClientIdentity(occupied);
+      const restoredEmail = identity.email || input.email;
+      const restoredUuid = identity.uuid || input.uuid?.trim();
+      const restoredSubId = identity.subId || input.subId?.trim();
+      const restoredName = this.stringValue(occupied.comment) || input.clientName || restoredEmail;
+      const restoredLinks = await this.serviceNodeRemoteClientLinks(client, serviceNode, restoredEmail, restoredSubId, restoredUuid);
+      await this.persistServiceNodeRemoteClient(serviceNode, {
+        email: restoredEmail,
+        name: restoredName,
+        uuid: restoredUuid,
+        subId: restoredSubId,
+        links: restoredLinks,
+        expireAt: this.remoteClientExpiry(occupied),
+        trafficLimitGb: this.remoteClientTrafficLimitGb(occupied),
+        enabled: this.booleanValue(occupied.enable, true)
+      });
+      await this.writeSyncLog(serviceNode.serverId, 'service-node-client-restore', 'success', `已恢复共享客户端 ${restoredEmail}`, {
+        serviceNodeId,
+        inboundId: serviceNode.inboundId,
+        xuiEmail: restoredEmail
+      });
+      return { created: false, restored: true, remoteWrite: false, route: 'clients/get', serviceNodeId, inboundId: serviceNode.inboundId, xuiEmail: restoredEmail };
+    }
+
+    const credential = input.uuid?.trim() || this.credentialForProtocol(serviceNode.protocol);
+    const subId = input.subId?.trim() || this.subscriptionId(credential);
+    const payload = this.buildOfficialClientCreatePayload({
+      protocol: serviceNode.protocol,
+      uuid: credential,
+      subId,
+      email: input.email,
+      clientName: input.clientName || input.email,
+      enabled: input.enabled,
+      expireAt: input.expireAt,
+      trafficLimitGb: input.trafficLimitGb,
+      flow: this.clientFlowForServiceNode(serviceNode)
+    });
+
+    let response: unknown;
+    try {
+      response = await client.addClient(serviceNode.inboundId, payload);
+      this.assertXuiSuccess(response);
+      const verified = await this.findClient(client, { email: input.email, inboundId: serviceNode.inboundId }, []);
+      if (!verified.exists) throw new BadGatewayException('官方客户端创建后全局回读失败');
+      const record = this.xuiObject(verified.raw);
+      this.assertRemoteClientFields(record, payload);
+      const identity = this.v36ClientIdentity(record);
+      const links = await this.serviceNodeRemoteClientLinks(client, serviceNode, identity.email || input.email, identity.subId || subId, identity.uuid || credential);
+      await this.persistServiceNodeRemoteClient(serviceNode, {
+        email: identity.email || input.email,
+        name: this.stringValue(record.comment) || input.clientName || input.email,
+        uuid: identity.uuid || credential,
+        subId: identity.subId || subId,
+        links,
+        expireAt: input.expireAt || null,
+        trafficLimitGb: input.trafficLimitGb,
+        enabled: input.enabled
+      });
+      await this.writeSyncLog(serviceNode.serverId, 'service-node-client-create', 'success', `已创建共享客户端 ${input.email}`, {
+        serviceNodeId,
+        inboundId: serviceNode.inboundId,
+        xuiEmail: input.email,
+        response: this.toJsonValue(response)
+      });
+      return { created: true, route: 'clients/add', serviceNodeId, inboundId: serviceNode.inboundId, response };
+    } catch (error) {
+      await this.writeSyncLog(serviceNode.serverId, 'service-node-client-create', 'failed', this.errorMessage(error), {
+        serviceNodeId,
+        inboundId: serviceNode.inboundId,
+        xuiEmail: input.email,
+        request: this.sanitizePanelDiagnostic(payload),
+        response: response === undefined ? this.panelErrorPayload(error) : this.sanitizePanelDiagnostic(response)
+      });
+      if (error instanceof BadRequestException || error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException(`创建官方客户端失败：${this.officialPanelError(error)}`);
+    }
+  }
+
+  async patchServiceNodeRemoteClient(serviceNodeId: string, input: z.infer<typeof remoteClientPatchSchema>) {
+    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.patchServiceNodeRemoteClientUnlocked(serviceNodeId, input));
+  }
+
+  private async patchServiceNodeRemoteClientUnlocked(serviceNodeId: string, input: z.infer<typeof remoteClientPatchSchema>) {
+    const serviceNode = await this.serviceNodeForRemoteClientManagement(serviceNodeId);
+    const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+    const currentEmail = this.stringValue(config.remoteClientEmail);
+    if (!currentEmail) throw new BadRequestException('服务节点客户端不存在，请先创建或恢复官方客户端');
+    const client = await this.createAuthenticatedClient(serviceNode.server);
+    const current = await this.optionalV36ClientRecord(client, currentEmail);
+    if (!current) throw new BadRequestException('服务节点客户端不存在，请先创建或恢复官方客户端');
+
+    const nextEmail = input.email?.trim() || currentEmail;
+    if (nextEmail !== currentEmail && await this.optionalV36ClientRecord(client, nextEmail)) {
+      throw new BadRequestException(`官方客户端 ${nextEmail} 已存在，不能重名`);
+    }
+    const patch = {
+      ...(input.email === undefined ? {} : { email: nextEmail }),
+      ...(input.clientName === undefined ? {} : { comment: input.clientName.trim() }),
+      ...(input.expireAt === undefined ? {} : { expiryTime: input.expireAt ? input.expireAt.getTime() : 0 }),
+      ...(input.trafficLimitGb === undefined ? {} : { totalGB: this.gbToBytes(input.trafficLimitGb) }),
+      ...(input.enabled === undefined ? {} : { enable: input.enabled })
+    };
+    const next = { ...current, ...patch };
+
+    let response: unknown;
+    try {
+      response = await client.updateClient(serviceNode.inboundId, currentEmail, next);
+      this.assertXuiSuccess(response);
+      const verified = await this.findClient(client, { email: nextEmail, inboundId: serviceNode.inboundId }, []);
+      if (!verified.exists) throw new BadGatewayException('官方客户端修改后全局回读失败');
+      const record = this.xuiObject(verified.raw);
+      this.assertRemoteClientFields(record, patch);
+      const identity = this.v36ClientIdentity(record);
+      const uuid = identity.uuid || this.stringValue(config.remoteClientUuid);
+      const subId = identity.subId || this.stringValue(config.remoteClientSubId);
+      const links = await this.serviceNodeRemoteClientLinks(client, serviceNode, identity.email || nextEmail, subId, uuid);
+      await this.persistServiceNodeRemoteClient(serviceNode, {
+        email: identity.email || nextEmail,
+        name: this.stringValue(record.comment) || input.clientName || config.remoteClientName || nextEmail,
+        uuid,
+        subId,
+        links,
+        expireAt: input.expireAt === undefined ? config.remoteClientExpireAt : input.expireAt,
+        trafficLimitGb: input.trafficLimitGb === undefined ? config.remoteClientTrafficLimitGb : input.trafficLimitGb,
+        enabled: input.enabled === undefined ? config.remoteClientEnabled : input.enabled
+      });
+      await this.writeSyncLog(serviceNode.serverId, 'service-node-client-update', 'success', `已更新共享客户端 ${nextEmail}`, {
+        serviceNodeId,
+        inboundId: serviceNode.inboundId,
+        previousEmail: currentEmail,
+        xuiEmail: nextEmail,
+        fields: Object.keys(patch),
+        response: this.toJsonValue(response)
+      });
+      return { updated: true, route: 'clients/update', serviceNodeId, inboundId: serviceNode.inboundId, previousEmail: currentEmail, xuiEmail: nextEmail, response };
+    } catch (error) {
+      await this.writeSyncLog(serviceNode.serverId, 'service-node-client-update', 'failed', this.errorMessage(error), {
+        serviceNodeId,
+        inboundId: serviceNode.inboundId,
+        previousEmail: currentEmail,
+        xuiEmail: nextEmail,
+        fields: Object.keys(patch),
+        response: response === undefined ? this.panelErrorPayload(error) : this.sanitizePanelDiagnostic(response)
+      });
+      if (error instanceof BadRequestException || error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException(`修改官方客户端失败：${this.officialPanelError(error)}`);
+    }
+  }
+
+  async deleteServiceNodeRemoteClient(serviceNodeId: string, keepTraffic = false) {
+    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.deleteServiceNodeRemoteClientUnlocked(serviceNodeId, keepTraffic));
+  }
+
+  private async deleteServiceNodeRemoteClientUnlocked(serviceNodeId: string, keepTraffic: boolean) {
+    const serviceNode = await this.serviceNodeForRemoteClientManagement(serviceNodeId);
+    const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+    const xuiEmail = this.stringValue(config.remoteClientEmail);
+    if (!xuiEmail) throw new BadRequestException('服务节点客户端不存在，无需删除');
+    const client = await this.createAuthenticatedClient(serviceNode.server);
+    const result = await this.deleteRemoteClientWithClient(client, serviceNode.serverId, serviceNode.inboundId, xuiEmail, keepTraffic, {
+      serviceNodeId,
+      resourceOwner: 'service-node'
+    });
+    await this.clearServiceNodeRemoteClient(serviceNode);
+    await this.writeSyncLog(serviceNode.serverId, 'service-node-client-delete', 'success', `已删除共享客户端 ${xuiEmail}`, {
+      serviceNodeId,
+      inboundId: serviceNode.inboundId,
+      xuiEmail,
+      keepTraffic
+    });
+    return { ...result, serviceNodeId, bindingRetained: true };
+  }
+
   private async resetServiceNodeTrafficUnlocked(serviceNodeId: string) {
     const serviceNode = await this.prisma.serviceNode.findUnique({
       where: { id: serviceNodeId },
-      include: { server: true, customerNodes: { select: { remoteControl: true } } }
+      include: { server: true }
     });
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
     if (serviceNode.ownership !== 'managed') throw new BadRequestException('引用入站不能重置远端流量，请先明确接管');
     if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
-    await this.assertNoPendingRenewalsForServiceNode(serviceNodeId, '重置远端入站流量');
-    const protectedBindings = serviceNode.customerNodes.filter((node) => node.remoteControl !== 'fully_managed').length;
-    if (protectedBindings > 0) {
-      throw new BadRequestException(`该入站仍绑定 ${protectedBindings} 个非完全托管账号，整入站重置会影响这些官方账号，请改为逐个重置完全托管账号`);
-    }
+    const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+    const xuiEmail = this.stringValue(config.remoteClientEmail);
+    if (!xuiEmail) throw new BadRequestException('服务节点客户端不存在，请先创建或恢复官方客户端');
     const client = await this.createAuthenticatedClient(serviceNode.server);
-    const response = await client.resetInboundTraffic(serviceNode.inboundId);
+    const response = await client.resetClientTraffic(serviceNode.inboundId, xuiEmail);
     this.assertXuiSuccess(response);
+    const trafficPayload = await client.clientTraffic(xuiEmail);
+    this.assertXuiSuccess(trafficPayload);
+    const traffic = this.xuiObject(this.xuiObject(trafficPayload).obj || this.xuiObject(trafficPayload).data || trafficPayload);
+    for (const field of ['up', 'down']) {
+      if (traffic[field] !== undefined && Number(traffic[field]) !== 0) throw new BadGatewayException('官方客户端流量重置后回读校验失败');
+    }
     await this.prisma.serviceNode.update({
       where: { id: serviceNodeId },
-      data: { config: this.toJsonValue({ ...this.xuiObject(serviceNode.config), remoteManaged: true }) }
+      data: { config: this.toJsonValue({ ...config, remoteManaged: true }) }
     });
     await this.prisma.customerNode.updateMany({
       where: { serviceNodeId },
-      data: { usedTrafficGb: new Prisma.Decimal(0), lastSyncedAt: new Date() }
+      data: { usedTrafficGb: new Prisma.Decimal(0), lastSyncedAt: null }
     });
-    await this.writeSyncLog(serviceNode.serverId, 'service-node-reset-traffic', 'success', `已重置入站 ${serviceNode.inboundId} 的流量`, {
+    await this.writeSyncLog(serviceNode.serverId, 'service-node-reset-traffic', 'success', `已重置共享客户端 ${xuiEmail} 的流量`, {
       serviceNodeId,
       inboundId: serviceNode.inboundId,
+      xuiEmail,
       response: this.toJsonValue(response)
     });
-    return { reset: true, serviceNodeId, inboundId: serviceNode.inboundId, response };
+    return { reset: true, serviceNodeId, inboundId: serviceNode.inboundId, xuiEmail, response };
   }
 
   async resetCustomerNodeTraffic(customerId: string, customerNodeId: string) {
@@ -903,29 +1098,10 @@ export class XuiService {
   private async resetCustomerNodeTrafficUnlocked(customerId: string, customerNodeId: string) {
     const customerNode = await this.prisma.customerNode.findFirst({
       where: { id: customerNodeId, customerId },
-      include: { serviceNode: { include: { server: true } } }
+      select: { id: true }
     });
     if (!customerNode) throw new NotFoundException('用户节点不存在');
-    if (customerNode.remoteControl !== 'fully_managed') throw new BadRequestException('只有完全托管账号允许重置远端流量');
-    await this.assertNoPendingRenewal(customerNodeId, '重置远端流量');
-
-    const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
-    const inboundId = customerNode.serviceNode.inboundId;
-    if (!inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
-    const response = await client.resetClientTraffic(inboundId, customerNode.xuiEmail);
-    this.assertXuiSuccess(response);
-    await this.prisma.customerNode.update({
-      where: { id: customerNodeId },
-      data: { usedTrafficGb: new Prisma.Decimal(0), lastSyncedAt: new Date() }
-    });
-    await this.writeSyncLog(customerNode.serviceNode.serverId, 'customer-node-reset-traffic', 'success', `已重置客户端 ${customerNode.xuiEmail} 的流量`, {
-      customerId,
-      customerNodeId,
-      serviceNodeId: customerNode.serviceNodeId,
-      xuiEmail: customerNode.xuiEmail,
-      response: this.toJsonValue(response)
-    });
-    return { reset: true, customerId, customerNodeId, xuiEmail: customerNode.xuiEmail, response };
+    throw new BadRequestException('用户绑定不拥有官方客户端；请在路由节点管理中重置托管入站流量');
   }
 
   async customerNodeTraffic(customerId: string, customerNodeId: string) {
@@ -952,19 +1128,34 @@ export class XuiService {
   }
 
   private async deleteManagedServiceNodeInboundUnlocked(serviceNodeId: string) {
-    const serviceNode = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, include: { server: true } });
+    const serviceNode = await this.prisma.serviceNode.findUnique({
+      where: { id: serviceNodeId },
+      include: { server: true, customerNodes: { select: { xuiEmail: true, remoteControl: true, lastSyncedAt: true, config: true } } }
+    });
     if (!serviceNode?.inboundId) return { deleted: false, skipped: true };
     if (serviceNode.ownership !== 'managed') return { deleted: false, skipped: true, reason: '引用入站保留在官方面板' };
-    const protectedClients = await this.prisma.customerNode.count({
-      where: { serviceNodeId, remoteControl: { not: 'fully_managed' } }
-    });
-    if (protectedClients > 0) {
-      throw new BadRequestException(`该托管入站仍绑定 ${protectedClients} 个非完全托管账号，拒绝删除远端入站`);
-    }
-
     try {
       const client = await this.createAuthenticatedClient(serviceNode.server);
-      const remoteClientCleanup = { skipped: true, reason: '客户端将随入站一并删除' };
+      const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+      const ownedClientEmails = new Set<string>();
+      const serviceClientEmail = this.stringValue(config.remoteClientEmail);
+      if (serviceClientEmail) ownedClientEmails.add(serviceClientEmail);
+      for (const node of serviceNode.customerNodes) {
+        if (node.remoteControl === 'fully_managed' && this.shouldDeleteRemoteClient(node) && node.xuiEmail) ownedClientEmails.add(node.xuiEmail);
+      }
+      const clientResults = [];
+      for (const xuiEmail of ownedClientEmails) {
+        clientResults.push(await this.deleteRemoteClientWithClient(client, serviceNode.serverId, serviceNode.inboundId, xuiEmail, false, {
+          serviceNodeId,
+          resourceOwner: 'service-node'
+        }));
+      }
+      const remoteClientCleanup = {
+        deleted: clientResults.length,
+        emails: [...ownedClientEmails],
+        verified: true,
+        results: clientResults
+      };
       const beforeDelete = await this.remoteInboundExists(client, serviceNode.inboundId);
       if (!beforeDelete.exists) {
         await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'success', `入站 ${serviceNode.inboundId} 已不存在`, {
@@ -987,7 +1178,6 @@ export class XuiService {
       });
       return { deleted: true, inboundId: serviceNode.inboundId, remoteClientCleanup, verified, response };
     } catch (error) {
-      if (this.isRemoteNotFound(error)) return { deleted: true, inboundId: serviceNode.inboundId, alreadyAbsent: true };
       await this.writeSyncLog(serviceNode.serverId, 'service-node-inbound-delete', 'failed', this.errorMessage(error), { serviceNodeId, inboundId: serviceNode.inboundId });
       throw new BadGatewayException(`删除远端 3x-ui 入站失败：${this.errorMessage(error)}`);
     }
@@ -1920,26 +2110,11 @@ export class XuiService {
   private async deleteCustomerNodeUnlocked(customerId: string, customerNodeId: string, keepTraffic = false) {
     const customerNode = await this.prisma.customerNode.findFirst({
       where: { id: customerNodeId, customerId },
-      include: { serviceNode: { include: { server: true } } }
-    });
-    if (!customerNode) throw new NotFoundException('用户节点不存在');
-    if (customerNode.remoteControl !== 'fully_managed') throw new BadRequestException('只有完全托管账号允许从远端删除');
-    const pendingRenewal = await this.prisma.renewalLog.findFirst({
-      where: { customerNodeId, status: 'pending' },
       select: { id: true }
     });
-    if (pendingRenewal) throw new BadRequestException('该用户节点存在待处理续费，完成自动恢复或人工对账后才能删除远端账号');
-    if (!customerNode.serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
-    const result = await this.deleteRemoteClient(customerNode.serviceNode.server, customerNode.serviceNode.inboundId, customerNode.xuiEmail, keepTraffic, {
-      customerId,
-      customerNodeId,
-      serviceNodeId: customerNode.serviceNodeId
-    });
-    await this.prisma.customerNode.update({
-      where: { id: customerNode.id },
-      data: { status: 'disabled', disabledReason: 'admin', lastSyncedAt: null }
-    });
-    return { ...result, bindingRetained: true };
+    if (!customerNode) throw new NotFoundException('用户节点不存在');
+    void keepTraffic;
+    throw new BadRequestException('用户绑定不拥有官方客户端；解绑只删除本地关系，官方客户端由路由节点管理');
   }
 
   async deleteServiceNodeClients(serviceNodeId: string, keepTraffic = false) {
@@ -2045,7 +2220,6 @@ export class XuiService {
       const xuiEmail = existing.email || customerNode.xuiEmail;
       const remoteClient = this.xuiObject(existing.raw);
       const clientName = this.stringValue(remoteClient.comment) || customerNode.clientName || xuiEmail;
-      await this.assertRemoteClientBindingAvailable(customerNode.serviceNodeId, xuiEmail, customerNode.id);
       const serviceConfig = this.xuiObject(customerNode.serviceNode.config) as ServiceNodeConfig;
       const links = await this.linksForClient(client, xuiEmail, subId, {
           serverId,
@@ -2110,120 +2284,10 @@ export class XuiService {
   }
 
   private async createCustomerNodeRemoteClientUnlocked(customerId: string, customerNodeId: string, input: z.infer<typeof remoteClientCreateSchema>, lockedServiceNodeId: string) {
-    const node = await this.customerNodeForRemoteOperation(customerId, customerNodeId);
-    if (node.serviceNodeId !== lockedServiceNodeId) throw new BadRequestException('绑定关系已被其他操作修改，请刷新后重试');
-    if (node.remoteControl !== 'fully_managed') throw new BadRequestException('只有完全托管绑定允许创建远端账号');
-    await this.assertNoPendingRenewal(customerNodeId, '创建远端账号');
-    if (input.email !== node.xuiEmail) throw new BadRequestException('创建远端客户端必须使用当前绑定的官方标识；如需更换标识，请先修改本地绑定并明确确认接管');
-    await this.assertRemoteClientBindingAvailable(node.serviceNodeId, input.email, node.id);
-    const inboundId = node.serviceNode.inboundId;
-    if (!inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
-    const requestedUuid = input.uuid?.trim();
-    const requestedSubId = input.subId?.trim();
-    let client: XuiClient;
-    let payload: Record<string, unknown> | undefined;
-    let response: unknown;
-    try {
-      client = await this.createAuthenticatedClient(node.serviceNode.server, true, false, true);
-      const inboundPayload = await client.getInbound(inboundId).catch((error) => {
-        if (this.isRemoteNotFound(error)) throw new BadRequestException(`官方面板中的入站 ${inboundId} 已不存在，请重新同步或重新创建服务节点`);
-        throw error;
-      });
-      this.assertXuiSuccess(inboundPayload);
-      const remoteInbound = this.remoteInboundFromPayload(inboundPayload);
-      const remoteInboundId = this.inboundIdOf(remoteInbound);
-      if (remoteInboundId && remoteInboundId !== inboundId) {
-        throw new BadRequestException(`官方面板返回的入站 ID 与服务节点不一致：期望 ${inboundId}，实际 ${remoteInboundId}`);
-      }
-      const localProtocol = String(node.serviceNode.protocol || '').trim().toLowerCase();
-      const remoteProtocol = String(remoteInbound.protocol || '').trim().toLowerCase();
-      if (!remoteProtocol) throw new BadRequestException(`官方入站 ${inboundId} 缺少协议配置，无法创建客户端`);
-      if (localProtocol !== remoteProtocol) {
-        throw new BadRequestException(`服务节点协议与官方入站不一致：本地为 ${localProtocol || '未知'}，官方为 ${remoteProtocol}`);
-      }
-      const occupied = await this.optionalV36ClientRecord(client, input.email);
-      if (occupied) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
-      const listed = await this.findClient(client, { email: input.email }, []);
-      if (listed.exists) throw new BadRequestException(`远端客户端 ${input.email} 已存在`);
-
-      payload = this.buildOfficialClientCreatePayload({
-        protocol: remoteProtocol,
-        uuid: requestedUuid,
-        subId: requestedSubId,
-        email: input.email,
-        clientName: input.clientName || node.clientName || input.email,
-        enabled: input.enabled,
-        expireAt: input.expireAt,
-        trafficLimitGb: input.trafficLimitGb
-      });
-      response = await client.addClient(inboundId, payload);
-      this.assertXuiSuccess(response);
-    } catch (error) {
-      await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-create', 'failed', this.errorMessage(error), {
-        customerId,
-        customerNodeId,
-        serviceNodeId: node.serviceNodeId,
-        inboundId,
-        xuiEmail: input.email,
-        phase: payload ? 'remote-create' : 'remote-preflight',
-        request: payload ? { client: this.sanitizePanelDiagnostic(payload), inboundIds: [inboundId] } : undefined,
-        response: response === undefined ? this.panelErrorPayload(error) : this.sanitizePanelDiagnostic(response)
-      });
-      if (error instanceof BadRequestException) throw error;
-      throw new BadGatewayException(`创建官方客户端失败：${this.officialPanelError(error)}`);
-    }
-    try {
-      const verified = await this.findClient(client, { email: input.email, inboundId }, []);
-      if (!verified.exists) throw new BadGatewayException('远端客户端创建后回读失败');
-      const savedConfig = this.xuiObject(node.config);
-      const binding = await this.prisma.customerNode.update({
-        where: { id: node.id },
-        data: {
-          clientName: input.clientName || node.clientName || input.email,
-          xuiEmail: input.email,
-          uuid: verified.uuid || requestedUuid || null,
-          expireAt: input.expireAt || null,
-          trafficLimitGb: new Prisma.Decimal(input.trafficLimitGb),
-          status: input.enabled ? 'active' : 'disabled',
-          disabledReason: input.enabled ? null : 'admin',
-          lastSyncedAt: new Date(),
-          config: this.toJsonValue({ ...savedConfig, uuid: verified.uuid || requestedUuid, subId: verified.subId || requestedSubId })
-        },
-        include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
-      });
-      await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-create', 'success', `已创建客户端 ${input.email}`, {
-        customerId,
-        customerNodeId,
-        serviceNodeId: node.serviceNodeId,
-        inboundId,
-        xuiEmail: input.email,
-        uuid: verified.uuid || requestedUuid,
-        subId: verified.subId || requestedSubId,
-        response: this.toJsonValue(response)
-      });
-      return { created: true, remoteWrite: true, route: 'clients/add', response, binding };
-    } catch (error) {
-      await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-create', 'failed', this.errorMessage(error), {
-        customerId,
-        customerNodeId,
-        serviceNodeId: node.serviceNodeId,
-        inboundId,
-        xuiEmail: input.email,
-        phase: 'verify-or-save',
-        rollbackAttempted: true
-      });
-      try {
-        await this.deleteRemoteClientWithClient(client, node.serviceNode.serverId, inboundId, input.email, false, {
-          customerId,
-          customerNodeId,
-          serviceNodeId: node.serviceNodeId,
-          rollbackOf: 'clients/add'
-        });
-      } catch (cleanupError) {
-        throw new BadGatewayException(`远端客户端已创建，但本地保存失败且自动回滚失败，请立即人工核对 ${input.email}：${this.errorMessage(cleanupError)}`);
-      }
-      throw error;
-    }
+    await this.customerNodeForRemoteOperation(customerId, customerNodeId);
+    void input;
+    void lockedServiceNodeId;
+    throw new BadRequestException('绑定用户不会创建官方客户端；官方客户端由路由节点创建和管理');
   }
 
   async patchCustomerNodeRemoteClient(customerId: string, customerNodeId: string, input: z.infer<typeof remoteClientPatchSchema>) {
@@ -2231,56 +2295,9 @@ export class XuiService {
   }
 
   private async patchCustomerNodeRemoteClientUnlocked(customerId: string, customerNodeId: string, input: z.infer<typeof remoteClientPatchSchema>) {
-    const node = await this.customerNodeForRemoteOperation(customerId, customerNodeId);
-    if (node.remoteControl === 'reference') throw new BadRequestException('只读引用绑定不能修改远端账号');
-    await this.assertNoPendingRenewal(customerNodeId, '修改远端账号');
-    const nextEmail = input.email?.trim() || node.xuiEmail;
-    const nextClientName = input.clientName?.trim() || node.clientName || nextEmail;
-    if (nextEmail !== node.xuiEmail) await this.assertRemoteClientBindingAvailable(node.serviceNodeId, nextEmail, customerNodeId);
-    const patch = {
-      ...(nextEmail === node.xuiEmail ? {} : { email: nextEmail }),
-      ...(input.clientName === undefined ? {} : { comment: nextClientName }),
-      ...(input.expireAt === undefined ? {} : { expiryTime: input.expireAt ? input.expireAt.getTime() : 0 }),
-      ...(input.trafficLimitGb === undefined ? {} : { totalGB: this.gbToBytes(input.trafficLimitGb) }),
-      ...(input.enabled === undefined ? {} : { enable: input.enabled })
-    };
-    const result = await this.patchCustomerNodeRemote(customerId, customerNodeId, patch, 'account');
-    const before = 'before' in result ? result.before : undefined;
-    if (!before) throw new BadGatewayException('远端客户端修改前状态缺失，无法保证本地保存一致性');
-    try {
-      await this.prisma.customerNode.update({
-        where: { id: customerNodeId },
-        data: {
-          expireAt: input.expireAt === undefined ? undefined : input.expireAt,
-          trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb),
-          clientName: input.clientName === undefined ? undefined : nextClientName,
-          xuiEmail: nextEmail,
-          status: input.enabled === undefined ? undefined : input.enabled ? 'active' : 'disabled',
-          disabledReason: input.enabled === undefined ? undefined : input.enabled ? null : 'admin'
-        }
-      });
-      return result;
-    } catch (error) {
-      try {
-        await this.patchCustomerNodeRemote(customerId, customerNodeId, before, 'account', true, nextEmail);
-        await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-account-save', 'failed', this.errorMessage(error), {
-          customerId,
-          customerNodeId,
-          xuiEmail: node.xuiEmail,
-          remoteRolledBack: true
-        });
-      } catch (rollbackError) {
-        await this.writeSyncLog(node.serviceNode.serverId, 'customer-node-account-save', 'failed', this.errorMessage(error), {
-          customerId,
-          customerNodeId,
-          xuiEmail: node.xuiEmail,
-          remoteRolledBack: false,
-          rollbackError: this.errorMessage(rollbackError)
-        });
-        throw new BadGatewayException(`官方客户端已修改，但本地保存及自动回滚失败，请立即人工核对 ${node.xuiEmail}：${this.errorMessage(rollbackError)}`);
-      }
-      throw new BadGatewayException(`本地保存失败，官方客户端修改已自动回滚：${this.errorMessage(error)}`);
-    }
+    await this.customerNodeForRemoteOperation(customerId, customerNodeId);
+    void input;
+    throw new BadRequestException('用户绑定不拥有官方客户端；请在路由节点管理中修改官方资源');
   }
 
   async deleteCustomerNodeRemoteClient(customerId: string, customerNodeId: string, keepTraffic = false) {
@@ -2342,62 +2359,10 @@ export class XuiService {
       include: { serviceNode: { include: { server: true } } }
     });
     if (!node) throw new NotFoundException('用户节点不存在');
-    if (node.remoteControl === 'reference') {
-      return { synced: false, skipped: true, remoteWrite: false, reason: '该绑定为只读引用，不修改远端账号', operation };
-    }
-    if (!allowPendingRenewal) await this.assertNoPendingRenewal(customerNodeId, '修改远端账号');
-    const inboundId = node.serviceNode.inboundId;
-    if (!inboundId) throw new BadRequestException('服务节点缺少 3x-ui 入站 ID');
-    const client = await this.createAuthenticatedClient(node.serviceNode.server);
-    const rawInbounds = await client.listInbounds();
-    this.assertXuiSuccess(rawInbounds);
-    const existing = await this.findClient(client, {
-      email: lookupEmail || node.xuiEmail,
-      uuid: node.uuid || this.stringValue(this.xuiObject(node.config).uuid),
-      subId: this.stringValue(this.xuiObject(node.config).subId),
-      inboundId
-    }, this.xuiArray(rawInbounds));
-    if (!existing.exists) throw new BadRequestException('远端 3x-ui 客户端不存在，精确更新不会创建新账号');
-
-    const current = this.xuiObject(existing.raw);
-    const next = { ...current, ...patch };
-    const before = Object.fromEntries(Object.keys(patch).map((key) => [key, current[key]]));
-    const identifier = existing.email || node.xuiEmail;
-    const response = await client.updateClient(existing.inboundId || inboundId, identifier, next);
-    this.assertXuiSuccess(response);
-
-    const verifyPayload = await client.listInbounds();
-    this.assertXuiSuccess(verifyPayload);
-    const refreshed = await this.findClient(client, {
-      email: typeof patch.email === 'string' ? patch.email : existing.email || node.xuiEmail,
-      uuid: existing.uuid || node.uuid || undefined,
-      subId: existing.subId,
-      inboundId
-    }, this.xuiArray(verifyPayload));
-    if (!refreshed.exists) throw new BadGatewayException('远端客户端更新后回读失败');
-    const verified = this.xuiObject(refreshed.raw);
-    for (const [key, value] of Object.entries(patch)) {
-      if (!this.remoteClientFieldMatches(key, verified[key], value)) throw new BadGatewayException(`远端客户端字段 ${key} 未按预期更新`);
-    }
-    const syncedAt = new Date();
-    await this.prisma.customerNode.update({ where: { id: node.id }, data: { lastSyncedAt: syncedAt } });
-    const detail = { customerId, customerNodeId, inboundId, xuiEmail: existing.email || node.xuiEmail, operation, fields: Object.keys(patch) };
-    const operationName = operation === 'expiry' ? '到期时间' : operation === 'enable' ? '启用状态' : operation === 'quota' ? '流量额度' : '账号配置';
-    await this.writeSyncLog(node.serviceNode.serverId, `customer-node-${operation}-update`, 'success', `已更新客户端 ${node.xuiEmail} 的${operationName}`, detail);
-    return {
-      synced: true,
-      remoteWrite: true,
-      route: 'clients/update',
-      operation,
-      fields: Object.keys(patch),
-      before,
-      detail,
-      response,
-      verified: {
-        expiryTime: Number(verified.expiryTime) > 0 ? Number(verified.expiryTime) : 0,
-        enable: this.booleanValue(verified.enable, false)
-      }
-    };
+    void patch;
+    void allowPendingRenewal;
+    void lookupEmail;
+    return { synced: false, skipped: true, remoteWrite: false, reason: '用户绑定只管理本地授权，不修改服务节点共享的官方客户端', operation };
   }
 
   private async customerNodeForRemoteOperation(customerId: string, customerNodeId: string) {
@@ -2418,20 +2383,6 @@ export class XuiService {
     return this.locks.withLock(this.locks.serviceNodeKey(node.serviceNodeId), () =>
       this.locks.withLock(this.locks.customerNodeKey(customerNodeId), operation)
     );
-  }
-
-  private async assertRemoteClientBindingAvailable(serviceNodeId: string, xuiEmail: string, excludeCustomerNodeId?: string) {
-    const occupied = await this.prisma.customerNode.findFirst({
-      where: {
-        serviceNodeId,
-        xuiEmail,
-        ...(excludeCustomerNodeId ? { id: { not: excludeCustomerNodeId } } : {})
-      },
-      select: { id: true }
-    });
-    if (occupied) {
-      throw new BadRequestException('该官方 3x-ui 客户端已绑定其他本地用户；请先解绑原关系，系统不会自动修改或删除远端账号');
-    }
   }
 
   private async assertNoPendingRenewal(customerNodeId: string, action: string) {
@@ -2455,6 +2406,125 @@ export class XuiService {
     if (!node) throw new NotFoundException('服务节点不存在');
     if (node.ownership !== 'managed') throw new BadRequestException('该入站为官方面板引用资源，请明确接管后再执行远端写操作');
     return node;
+  }
+
+  private async serviceNodeForRemoteClientManagement(serviceNodeId: string) {
+    const serviceNode = await this.prisma.serviceNode.findUnique({
+      where: { id: serviceNodeId },
+      include: { server: true }
+    });
+    if (!serviceNode) throw new NotFoundException('服务节点不存在');
+    if (serviceNode.ownership !== 'managed') throw new BadRequestException('该入站为官方面板引用资源，请明确接管后再管理官方客户端');
+    if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
+    return { ...serviceNode, inboundId: serviceNode.inboundId };
+  }
+
+  private assertRemoteClientFields(actual: Record<string, unknown>, expected: Record<string, unknown>) {
+    for (const [key, value] of Object.entries(expected)) {
+      if (value === undefined) continue;
+      const actualValue = key === 'id' ? actual.id ?? actual.uuid : actual[key];
+      if (!this.remoteClientFieldMatches(key, actualValue, value)) {
+        throw new BadGatewayException(`官方客户端字段 ${key} 未按预期写入`);
+      }
+    }
+  }
+
+  private async serviceNodeRemoteClientLinks(
+    client: XuiClient,
+    serviceNode: { id: string; serverId: string; inboundId: number; name: string; protocol: string; config: Prisma.JsonValue | null; server: XuiServerConfig },
+    email: string,
+    subId?: string,
+    uuid?: string
+  ) {
+    const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+    return this.linksForClient(client, email, subId, {
+      serverId: serviceNode.serverId,
+      inboundId: serviceNode.inboundId,
+      serviceNodeName: serviceNode.name,
+      protocol: serviceNode.protocol,
+      encryption: String(config.encryption || 'none'),
+      server: serviceNode.server,
+      uuid
+    }).catch(() => [] as string[]);
+  }
+
+  private async persistServiceNodeRemoteClient(
+    serviceNode: { id: string; config: Prisma.JsonValue | null },
+    remote: {
+      email: string;
+      name: string;
+      uuid?: string;
+      subId?: string;
+      links: string[];
+      expireAt?: Date | string | null;
+      trafficLimitGb?: number;
+      enabled?: boolean;
+    }
+  ) {
+    const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+    const remoteClientExpireAt = remote.expireAt instanceof Date ? remote.expireAt.toISOString() : remote.expireAt;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.serviceNode.update({
+        where: { id: serviceNode.id },
+        data: {
+          config: this.toJsonValue({
+            ...config,
+            remoteManaged: true,
+            remoteClientEmail: remote.email,
+            remoteClientName: remote.name,
+            remoteClientUuid: remote.uuid,
+            remoteClientSubId: remote.subId,
+            remoteClientLinks: remote.links,
+            remoteClientExpireAt,
+            remoteClientTrafficLimitGb: remote.trafficLimitGb,
+            remoteClientEnabled: remote.enabled
+          })
+        }
+      });
+      const bindings = await tx.customerNode.findMany({ where: { serviceNodeId: serviceNode.id }, select: { id: true, config: true } });
+      for (const binding of bindings) {
+        const bindingConfig = this.xuiObject(binding.config);
+        await tx.customerNode.update({
+          where: { id: binding.id },
+          data: {
+            clientName: remote.name,
+            xuiEmail: remote.email,
+            uuid: remote.uuid || null,
+            lastSyncedAt: new Date(),
+            config: this.toJsonValue({ ...bindingConfig, uuid: remote.uuid, subId: remote.subId, links: this.renameShareLinks(remote.links, remote.name) })
+          }
+        });
+      }
+    });
+  }
+
+  private async clearServiceNodeRemoteClient(serviceNode: { id: string; config: Prisma.JsonValue | null }) {
+    const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+    const nextConfig = { ...config };
+    for (const key of [
+      'remoteClientEmail',
+      'remoteClientName',
+      'remoteClientUuid',
+      'remoteClientSubId',
+      'remoteClientLinks',
+      'remoteClientExpireAt',
+      'remoteClientTrafficLimitGb',
+      'remoteClientEnabled'
+    ] as const) delete nextConfig[key];
+    await this.prisma.$transaction(async (tx) => {
+      await tx.serviceNode.update({ where: { id: serviceNode.id }, data: { config: this.toJsonValue(nextConfig) } });
+      const bindings = await tx.customerNode.findMany({ where: { serviceNodeId: serviceNode.id }, select: { id: true, config: true } });
+      for (const binding of bindings) {
+        const bindingConfig = this.xuiObject(binding.config);
+        delete bindingConfig.uuid;
+        delete bindingConfig.subId;
+        delete bindingConfig.links;
+        await tx.customerNode.update({
+          where: { id: binding.id },
+          data: { uuid: null, lastSyncedAt: null, config: this.toJsonValue(bindingConfig) }
+        });
+      }
+    });
   }
 
   private remoteClientFieldMatches(key: string, actual: unknown, expected: unknown) {
@@ -2899,7 +2969,7 @@ export class XuiService {
   }
 
   private async deleteRemoteClientWithClient(client: XuiClient, serverId: string | null | undefined, inboundId: number, xuiEmail: string, keepTraffic: boolean, detail: Record<string, unknown>) {
-    const beforeDelete = await this.remoteClientExists(client, inboundId, xuiEmail);
+    const beforeDelete = await this.remoteGlobalClientExists(client, xuiEmail);
     if (!beforeDelete.exists) {
       await this.writeSyncLog(serverId || null, 'customer-node-delete', 'success', `远端客户端 ${xuiEmail} 已不存在`, { ...detail, inboundId, xuiEmail, keepTraffic, beforeDelete });
       return { deleted: true, inboundId, xuiEmail, alreadyAbsent: true, verified: { absent: true, checked: true, retried: false } };
@@ -2907,7 +2977,7 @@ export class XuiService {
     const deleteOperation = () => client.deleteClient(inboundId, xuiEmail, undefined, keepTraffic);
     const payload = await deleteOperation();
     this.assertXuiSuccess(payload);
-    const verified = await this.verifyRemoteClientDeleted(client, inboundId, xuiEmail, deleteOperation);
+    const verified = await this.verifyRemoteClientDeleted(client, xuiEmail, deleteOperation);
     await this.writeSyncLog(serverId || null, 'customer-node-delete', 'success', `已删除远端客户端 ${xuiEmail}`, {
       ...detail,
       inboundId,
@@ -2925,44 +2995,21 @@ export class XuiService {
     };
   }
 
-  private async verifyRemoteClientDeleted(client: XuiClient, inboundId: number, xuiEmail: string, retryDelete: () => Promise<unknown>) {
-    const firstCheck = await this.remoteClientExists(client, inboundId, xuiEmail);
+  private async verifyRemoteClientDeleted(client: XuiClient, xuiEmail: string, retryDelete: () => Promise<unknown>) {
+    const firstCheck = await this.remoteGlobalClientExists(client, xuiEmail);
     if (!firstCheck.exists) return { absent: true, checked: true, retried: false };
 
     const retryResponse = await retryDelete();
     this.assertXuiSuccess(retryResponse);
-    const secondCheck = await this.remoteClientExists(client, inboundId, xuiEmail);
+    const secondCheck = await this.remoteGlobalClientExists(client, xuiEmail);
     if (secondCheck.exists) throw new Error(`3x-ui client ${xuiEmail} still exists after retry delete`);
 
     return { absent: true, checked: true, retried: true, retryResponse: this.toJsonValue(retryResponse) };
   }
 
-  private async remoteClientExists(client: XuiClient, inboundId: number, xuiEmail: string) {
-    try {
-      const payload = await client.getInbound(inboundId);
-      this.assertXuiSuccess(payload);
-      const object = this.xuiObject(payload);
-      const inbound = this.xuiObject(object.obj ?? object.data ?? payload);
-      const settings = this.xuiObject(this.parseMaybeJson(inbound.settings));
-      const clients = Array.isArray(settings.clients) ? settings.clients : [];
-      for (const item of clients) {
-        const identity = this.clientIdentity(item);
-        if (identity.email === xuiEmail) {
-          return {
-            exists: true,
-            ...identity,
-            clientId: this.clientIdForProtocol(item, String(inbound.protocol || '')),
-            clientCount: clients.length,
-            inbound,
-            settings
-          };
-        }
-      }
-      return { exists: false, clientCount: clients.length, inbound, settings };
-    } catch (error) {
-      if (this.isRemoteNotFound(error)) return { exists: false };
-      throw error;
-    }
+  private async remoteGlobalClientExists(client: XuiClient, xuiEmail: string) {
+    const record = await this.optionalV36ClientRecord(client, xuiEmail);
+    return { exists: Boolean(record), record };
   }
 
   private shouldDeleteRemoteClient(customerNode?: { lastSyncedAt: Date | null; config: Prisma.JsonValue | null } | null) {
@@ -2997,7 +3044,7 @@ export class XuiService {
     return client;
   }
 
-  private buildOfficialClientCreatePayload(input: { protocol: string; uuid?: string; subId?: string; email: string; clientName?: string; enabled: boolean; expireAt?: Date | null; trafficLimitGb: Prisma.Decimal | number | string | null }) {
+  private buildOfficialClientCreatePayload(input: { protocol: string; uuid?: string; subId?: string; email: string; clientName?: string; enabled: boolean; expireAt?: Date | null; trafficLimitGb: Prisma.Decimal | number | string | null; flow?: string }) {
     const client: Record<string, unknown> = {
       email: input.email,
       comment: input.clientName || input.email,
@@ -3010,9 +3057,16 @@ export class XuiService {
     if (input.subId) client.subId = input.subId;
     if (input.uuid) {
       if (input.protocol === 'trojan') client.password = input.uuid;
-      else if (input.protocol === 'shadowsocks') client.password = input.uuid;
+      else if (input.protocol === 'shadowsocks') {
+        client.method = MANAGED_SHADOWSOCKS_METHOD;
+        client.password = input.uuid;
+      }
       else if (input.protocol === 'hysteria' || input.protocol === 'hysteria2') client.auth = input.uuid;
-      else client.id = input.uuid;
+      else {
+        client.id = input.uuid;
+        if (input.protocol === 'vmess') client.security = 'auto';
+        if (input.flow) client.flow = input.flow;
+      }
     }
     return client;
   }
@@ -3211,7 +3265,7 @@ export class XuiService {
           serverNames: [serverName],
           privateKey: keys.privateKey,
           publicKey: keys.publicKey,
-          minClient: String(transportInput.realityMinClientVersion || '').trim(),
+          minClient: String(transportInput.realityMinClientVersion || '1.0.0').trim(),
           maxClient: '',
           maxTimediff: 0,
           alpn: ['h3', 'h2', 'http/1.1'],
@@ -3562,6 +3616,7 @@ export class XuiService {
       if (!expectedReality || !actualReality || expectedReality.target !== actualReality.target || expectedReality.serverName !== actualReality.serverName) {
         throw new BadGatewayException('远端 Reality 配置未更新');
       }
+      if (actualReality.minClientVersion !== expectedReality.minClientVersion) throw new BadGatewayException('远端 Reality 最小客户端版本未更新');
     }
   }
 
@@ -4687,6 +4742,16 @@ export class XuiService {
     const gb = Number(value);
     if (!Number.isFinite(gb) || gb <= 0) return 0;
     return Math.round(gb * 1024 * 1024 * 1024);
+  }
+
+  private remoteClientTrafficLimitGb(record: Record<string, unknown>) {
+    const bytes = Number(record.totalGB || 0);
+    return Number.isFinite(bytes) && bytes > 0 ? bytes / 1024 / 1024 / 1024 : 0;
+  }
+
+  private remoteClientExpiry(record: Record<string, unknown>) {
+    const timestamp = Number(record.expiryTime || 0);
+    return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp) : null;
   }
 
   private subscriptionId(uuid: string) {

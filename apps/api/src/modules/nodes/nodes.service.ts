@@ -628,15 +628,6 @@ export class NodesService {
         where: { status: 'pending', customerNode: { serviceNodeId: id } }
       });
       if (pendingRenewals > 0) throw new BadRequestException('该路由节点存在待处理续费，完成自动恢复或人工对账后才能删除');
-      if (current.ownership === 'managed') {
-        const protectedClients = await this.prisma.customerNode.count({
-          where: { serviceNodeId: id, remoteControl: { not: 'fully_managed' } }
-        });
-        if (protectedClients > 0) {
-          throw new BadRequestException(`该托管入站仍绑定 ${protectedClients} 个非完全托管账号，删除远端入站会连带删除这些账号；请先解绑或明确调整控制模式`);
-        }
-      }
-      const remoteClientCleanup = { skipped: true, reason: current.ownership === 'managed' ? '客户端将随托管入站一并删除' : '引用入站的客户端保留在官方面板' };
       const remoteConfigCleanup = current.ownership === 'managed' && current.inboundId
         ? await this.xui.syncServiceNodeRemoteConfig(id, { removeOnly: true })
         : { skipped: true, reason: current.ownership === 'managed' ? '服务节点缺少入站 ID' : '引用入站只删除本地记录' };
@@ -658,7 +649,16 @@ export class NodesService {
         cleanupActions.push(this.prisma.socksNode.delete({ where: { id: localImportedSocksCleanup.deleteSocksNodeId } }));
       }
       await this.prisma.$transaction(cleanupActions);
-      return { deleted: true, id, state: 'success', message: '删除成功', remoteClientCleanup, remoteConfigCleanup, remoteInboundCleanup, localImportedSocksCleanup };
+      return {
+        deleted: true,
+        id,
+        state: 'success',
+        message: '删除成功',
+        remoteClientCleanup: 'remoteClientCleanup' in remoteInboundCleanup ? remoteInboundCleanup.remoteClientCleanup : undefined,
+        remoteConfigCleanup,
+        remoteInboundCleanup,
+        localImportedSocksCleanup
+      };
     } catch (error) {
       if (recordFailure) {
         recoveryTaskRecorded = Boolean(
@@ -903,50 +903,29 @@ export class NodesService {
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
 
     if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
-    const submittedName = input.clientName?.trim() || input.xuiEmail?.trim() || '';
-    const clientName = input.remoteAction === 'create'
-      ? submittedName || customer.loginUsername.trim() || customer.name.trim()
-      : input.clientName?.trim() || '';
-    const xuiEmail = input.remoteAction === 'create'
-      ? this.xui.customerClientEmail(clientName || customer.name, customer.loginUsername, serviceNode.inboundId)
-      : input.xuiEmail?.trim() || '';
-    const uuid = input.uuid || null;
-    if (!xuiEmail) throw new BadRequestException('必须填写准确的 3x-ui 客户端名称');
-    if (input.remoteAction === 'create' && input.remoteControl !== 'fully_managed') {
-      throw new BadRequestException('创建远端客户端必须使用完全托管模式');
-    }
-    this.assertClientTakeoverConfirmed('reference', input.remoteControl, false, input.takeover);
-    await this.assertRemoteClientBindingAvailable(input.serviceNodeId, xuiEmail);
+    const remoteClient = await this.serviceNodeRemoteClientIdentity(serviceNode);
+    const xuiEmail = remoteClient.email;
+    const uuid = remoteClient.uuid || null;
+    if (!xuiEmail) throw new BadRequestException('该路由节点没有可绑定的官方客户端，请先同步或修复路由节点');
     const node = await this.prisma.customerNode.create({
       data: {
         customerId,
         serviceNodeId: input.serviceNodeId,
-        clientName: clientName || null,
+        clientName: null,
         xuiEmail,
         uuid,
         expireAt: input.expireAt || null,
         trafficLimitGb: new Prisma.Decimal(input.trafficLimitGb ?? serviceNode.trafficLimitGb),
         status: 'active',
-        remoteControl: input.remoteControl,
-        config: this.toJsonValue({ uuid })
+        remoteControl: 'reference',
+        config: this.toJsonValue({ uuid, subId: remoteClient.subId })
       },
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
     });
 
-    let syncResult: Awaited<ReturnType<XuiService['refreshCustomerNodeBinding']>> | Awaited<ReturnType<XuiService['createCustomerNodeRemoteClient']>>;
+    let syncResult: Awaited<ReturnType<XuiService['refreshCustomerNodeBinding']>>;
     try {
-      if (input.remoteAction === 'create') {
-        syncResult = await this.xui.createCustomerNodeRemoteClient(customerId, node.id, {
-          email: xuiEmail,
-          clientName: clientName || undefined,
-          uuid: input.uuid,
-          expireAt: input.expireAt,
-          trafficLimitGb: input.trafficLimitGb ?? Number(serviceNode.trafficLimitGb),
-          enabled: true
-        });
-      } else {
-        syncResult = await this.xui.refreshCustomerNodeBinding(customerId, node.id);
-      }
+      syncResult = await this.xui.refreshCustomerNodeBinding(customerId, node.id);
     } catch (error) {
       await this.prisma.customerNode.delete({ where: { id: node.id } }).catch(() => undefined);
       throw error;
@@ -994,31 +973,27 @@ export class NodesService {
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
 
     const nodeChanged = serviceNodeId !== current.serviceNodeId;
-    const nextXuiEmail = nodeChanged
-      ? input.xuiEmail?.trim()
-      : input.xuiEmail === undefined || input.xuiEmail === '' ? current.xuiEmail : input.xuiEmail.trim();
-    if (!nextXuiEmail) throw new BadRequestException('切换入站时必须填写准确的官方 3x-ui 客户端名称');
-    const nextUuid = nodeChanged ? input.uuid || null : input.uuid === undefined ? current.uuid : input.uuid || current.uuid;
-    const nextRemoteControl = input.remoteControl || current.remoteControl;
-    if (input.remoteAction === 'create') throw new BadRequestException('编辑绑定不能创建远端客户端，请使用远端客户端操作');
-    const identityChanged = nodeChanged || nextXuiEmail !== current.xuiEmail;
-    this.assertClientTakeoverConfirmed(current.remoteControl, nextRemoteControl, identityChanged, input.takeover === true);
+    const remoteClient = nodeChanged
+      ? await this.serviceNodeRemoteClientIdentity(serviceNode)
+      : { email: current.xuiEmail, uuid: current.uuid || undefined, subId: stringValue(jsonObject(current.config).subId) };
+    const nextXuiEmail = remoteClient.email;
+    if (!nextXuiEmail) throw new BadRequestException('该路由节点没有可绑定的官方客户端，请先同步或修复路由节点');
+    const nextUuid = remoteClient.uuid || null;
     const currentConfig = jsonObject(current.config);
     const nextConfig = nodeChanged
-      ? { uuid: nextUuid }
+      ? { uuid: nextUuid, subId: remoteClient.subId }
       : currentConfig;
 
-    await this.assertRemoteClientBindingAvailable(serviceNodeId, nextXuiEmail, customerNodeId);
     const node = await this.prisma.customerNode.update({
       where: { id: customerNodeId },
       data: {
         serviceNodeId: input.serviceNodeId,
-        clientName: input.clientName === undefined ? undefined : input.clientName.trim() || null,
+        clientName: nodeChanged ? null : undefined,
         xuiEmail: nextXuiEmail,
         uuid: nextUuid,
         expireAt: input.expireAt === undefined ? undefined : input.expireAt || null,
         trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb ?? serviceNode.trafficLimitGb),
-        remoteControl: input.remoteControl,
+        remoteControl: 'reference',
         config: this.toJsonValue(nextConfig)
       },
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
@@ -1027,8 +1002,6 @@ export class NodesService {
     let syncResult: Awaited<ReturnType<XuiService['refreshCustomerNodeBinding']>>;
     try {
       syncResult = await this.xui.refreshCustomerNodeBinding(customerId, customerNodeId);
-      const refreshedEmail = syncResult.node?.xuiEmail || nextXuiEmail;
-      await this.assertRemoteClientBindingAvailable(serviceNodeId, refreshedEmail, customerNodeId);
     } catch (error) {
       await this.prisma.customerNode.update({
         where: { id: customerNodeId },
@@ -1055,31 +1028,36 @@ export class NodesService {
     return { node: syncedNode, sync: syncResult };
   }
 
-  private async assertRemoteClientBindingAvailable(serviceNodeId: string, xuiEmail: string, excludeCustomerNodeId?: string) {
-    const occupied = await this.prisma.customerNode.findFirst({
-      where: {
-        serviceNodeId,
-        xuiEmail,
-        ...(excludeCustomerNodeId ? { id: { not: excludeCustomerNodeId } } : {})
-      },
-      select: { id: true, customerId: true }
-    });
-    if (occupied) {
-      throw new BadRequestException('该官方 3x-ui 客户端已绑定其他本地用户；请先解绑原关系，系统不会自动修改或删除远端账号');
-    }
-  }
+  private async serviceNodeRemoteClientIdentity(serviceNode: { id: string; serverId: string; inboundId: number | null; config: Prisma.JsonValue | null }) {
+    if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
+    const config = jsonObject(serviceNode.config) as ServiceNodeConfig;
+    const saved = {
+      email: stringValue(config.remoteClientEmail),
+      uuid: stringValue(config.remoteClientUuid),
+      subId: stringValue(config.remoteClientSubId)
+    };
+    if (saved.email) return saved;
 
-  private assertClientTakeoverConfirmed(
-    current: 'reference' | 'subscription_managed' | 'fully_managed',
-    next: 'reference' | 'subscription_managed' | 'fully_managed',
-    identityChanged: boolean,
-    takeover: boolean
-  ) {
-    const controlRank = { reference: 0, subscription_managed: 1, fully_managed: 2 } as const;
-    const requiresTakeover = next !== 'reference' && (identityChanged || controlRank[next] > controlRank[current]);
-    if (requiresTakeover && !takeover) {
-      throw new BadRequestException('启用或扩大远端控制权限必须明确确认接管；接管只授权本系统管理该绑定，不会改名或替换官方账号');
+    const validation = await this.xui.validateServiceNodeInbound(serviceNode.serverId, serviceNode.inboundId);
+    const resolved = {
+      email: validation.remoteClient.email || '',
+      uuid: validation.remoteClient.uuid || '',
+      subId: validation.remoteClient.subId || ''
+    };
+    if (resolved.email) {
+      await this.prisma.serviceNode.update({
+        where: { id: serviceNode.id },
+        data: {
+          config: this.toJsonValue({
+            ...config,
+            remoteClientEmail: resolved.email,
+            remoteClientUuid: resolved.uuid || undefined,
+            remoteClientSubId: resolved.subId || undefined
+          })
+        }
+      });
     }
+    return resolved;
   }
 
   async unbindCustomerNode(customerId: string, customerNodeId: string) {
@@ -1463,8 +1441,8 @@ export class NodesService {
       realityTarget: input.realityTarget === undefined ? previous.realityTarget || '' : input.realityTarget || '',
       realityServerName: input.realityServerName === undefined ? previous.realityServerName || '' : input.realityServerName || '',
       realityMinClientVersion: input.realityMinClientVersion === undefined
-        ? previous.realityMinClientVersion || ''
-        : input.realityMinClientVersion || '',
+        ? previous.realityMinClientVersion || ((input.encryption || previous.encryption) === 'reality' ? '1.0.0' : '')
+        : input.realityMinClientVersion || ((input.encryption || previous.encryption) === 'reality' ? '1.0.0' : ''),
       socksRelayEnabled: input.socksRelayEnabled === undefined ? Boolean(previous.socksRelayEnabled) : input.socksRelayEnabled,
       socksNodeId: input.socksNodeId === undefined ? previous.socksNodeId || null : input.socksNodeId || null
     };

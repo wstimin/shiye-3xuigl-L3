@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,15 +26,15 @@ const requiredPaths = [
   'install.sh'
 ];
 
-const optionalPaths = [
-  'uninstall.sh',
-  'README.md',
-  'DEPLOY.md',
-  'ARCHITECTURE.md',
-  'UNINSTALL.md',
-  '1Panel部署教程.md',
-  '宝塔部署教程.md',
-  '部署教程.md'
+const optionalPaths = ['uninstall.sh'];
+
+const runtimeScripts = [
+  'check-update-migrations.mjs',
+  'deploy-check.mjs',
+  'install-check.mjs',
+  'install.mjs',
+  'panel-start.mjs',
+  'sync-admin.mjs'
 ];
 
 const runtimeFiles = [
@@ -57,6 +57,7 @@ for (const path of optionalPaths) {
 }
 
 copyRuntimeScripts();
+pruneBuildMetadata(stageRoot);
 validateStage();
 
 console.log(`Release package staged at ${relative(root, stageRoot)}`);
@@ -79,9 +80,21 @@ function copyRuntimeScripts() {
   const destinationDirectory = resolve(stageRoot, 'scripts');
   mkdirSync(destinationDirectory, { recursive: true });
 
-  for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.mjs')) continue;
-    cpSync(join(sourceDirectory, entry.name), join(destinationDirectory, entry.name));
+  for (const name of runtimeScripts) {
+    const source = join(sourceDirectory, name);
+    if (!existsSync(source)) throw new Error(`Required runtime script is missing: scripts/${name}`);
+    cpSync(source, join(destinationDirectory, name));
+  }
+}
+
+function pruneBuildMetadata(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      pruneBuildMetadata(path);
+      continue;
+    }
+    if (entry.name.endsWith('.d.ts') || entry.name.endsWith('.d.ts.map') || entry.name.endsWith('.js.map')) rmSync(path);
   }
 }
 
@@ -90,8 +103,27 @@ function validateStage() {
     if (!existsSync(resolve(stageRoot, path))) throw new Error(`Staged runtime file is missing: ${path}`);
   }
 
-  const forbiddenPaths = ['.env', 'node_modules', 'apps/admin-web', 'apps/user-web'];
+  const forbiddenPaths = ['.env', 'node_modules', 'apps/admin-web', 'apps/user-web', 'tests'];
   for (const path of forbiddenPaths) {
     if (existsSync(resolve(stageRoot, path))) throw new Error(`Forbidden release content was staged: ${path}`);
+  }
+
+  validateRuntimeOnly(stageRoot);
+}
+
+function validateRuntimeOnly(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'src') throw new Error(`Source directory was staged: ${relative(stageRoot, path)}`);
+      validateRuntimeOnly(path);
+      continue;
+    }
+    if (extname(entry.name).toLowerCase() === '.md' || extname(entry.name).toLowerCase() === '.txt') {
+      throw new Error(`Documentation file was staged: ${relative(stageRoot, path)}`);
+    }
+    if (entry.name.endsWith('.d.ts') || entry.name.endsWith('.map')) {
+      throw new Error(`Build metadata was staged: ${relative(stageRoot, path)}`);
+    }
   }
 }

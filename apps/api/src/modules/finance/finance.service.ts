@@ -126,12 +126,9 @@ export class FinanceService {
       });
       if (!preflight) throw new NotFoundException('用户节点不存在');
       this.assertRenewalAllowed(preflight);
-      const remoteBefore = await this.xui.customerNodeRemoteState(customerId, customerNodeId);
-      const targetEnable = renewalTargetEnable(preflight, remoteBefore.enable);
       const now = new Date();
-      const remoteExpireAt = remoteBefore.expiryTime > 0 ? new Date(remoteBefore.expiryTime) : null;
 
-      const pending = await this.prisma.$transaction(async (tx) => {
+      return this.prisma.$transaction(async (tx) => {
         const customerNode = await tx.customerNode.findFirst({
           where: { id: customerNodeId, customerId },
           include: { serviceNode: true, customer: true }
@@ -141,7 +138,7 @@ export class FinanceService {
 
         const priceMonthly = new Prisma.Decimal(customerNode.serviceNode.priceMonthly);
         const amount = priceMonthly.mul(months);
-        const baseDate = latestDate(now, customerNode.expireAt, remoteExpireAt);
+        const baseDate = latestDate(now, customerNode.expireAt);
         const afterExpireAt = addMonths(baseDate, months);
         const beforeBalance = new Prisma.Decimal(customerNode.customer.balance);
         if (beforeBalance.lessThan(amount)) throw new BadRequestException('余额不足');
@@ -156,6 +153,12 @@ export class FinanceService {
         if (!updatedCustomer) throw new NotFoundException('用户不存在');
         const afterBalance = new Prisma.Decimal(updatedCustomer.balance);
         const actualBeforeBalance = afterBalance.plus(amount);
+        const sync = { remoteWrite: false, scope: 'local-authorization' };
+        const updatedNode = await tx.customerNode.update({
+          where: { id: customerNode.id },
+          data: { expireAt: afterExpireAt, status: 'active', disabledReason: null },
+          include: { serviceNode: { include: { server: true } } }
+        });
         const renewalLog = await tx.renewalLog.create({
           data: {
             idempotencyKey,
@@ -163,18 +166,17 @@ export class FinanceService {
             customerNodeId,
             months,
             amount,
-            status: 'pending',
+            status: 'success',
             beforeExpireAt,
             afterExpireAt,
             detail: toJsonValue({
               operator,
               requestId,
-              phase: 'debited',
+              phase: 'completed',
               serviceNodeName: customerNode.serviceNode.name,
               serviceNodeId: customerNode.serviceNodeId,
-              remoteBefore,
-              targetEnable,
-              afterBalance: afterBalance.toString()
+              afterBalance: afterBalance.toString(),
+              sync
             })
           }
         });
@@ -187,25 +189,19 @@ export class FinanceService {
             afterBalance,
             operator,
             remark: `续费 ${customerNode.serviceNode.name} ${months} 个月`,
-            detail: toJsonValue({ renewalLogId: renewalLog.id, customerNodeId, serviceNodeId: customerNode.serviceNodeId, months, syncStatus: 'pending' })
+            detail: toJsonValue({
+              renewalLogId: renewalLog.id,
+              customerNodeId,
+              serviceNodeId: customerNode.serviceNodeId,
+              months,
+              syncStatus: 'local-only',
+              completedAt: new Date().toISOString()
+            })
           }
         });
         await tx.renewalLog.update({ where: { id: renewalLog.id }, data: { balanceLogId: balanceLog.id } });
-
-        return {
-          customerNode,
-          amount,
-          afterBalance,
-          beforeExpireAt,
-          afterExpireAt,
-          renewalLog,
-          balanceLog,
-          remoteBefore,
-          detail: jsonObject(renewalLog.detail)
-        };
+        return { node: updatedNode, renewalLog: { ...renewalLog, balanceLogId: balanceLog.id }, amount, afterBalance, sync };
       });
-
-      return this.completePendingRenewal(customerId, pending, operator);
     });
   }
 
@@ -409,7 +405,6 @@ export class FinanceService {
   private assertRenewalAllowed(node: RenewalNode) {
     if (node.customer.status !== 'active') throw new BadRequestException('用户账号已停用，不能续费');
     if (!node.serviceNode.enabled) throw new BadRequestException('服务节点已停用，不能续费');
-    if (node.remoteControl === 'reference') throw new BadRequestException('该用户绑定为只读引用，不能通过本系统续费远端账号');
     if (node.disabledReason === 'admin') throw new BadRequestException('该节点已被管理员停用，不能由用户续费恢复');
     if (node.disabledReason === 'traffic_exceeded') throw new BadRequestException('该节点因流量用尽停用，续费只延长有效期，不会重置流量，请联系管理员处理流量额度');
     if (node.status === 'disabled' && node.disabledReason !== 'expired') throw new BadRequestException('该节点不是因到期停用，不能通过续费自动恢复');

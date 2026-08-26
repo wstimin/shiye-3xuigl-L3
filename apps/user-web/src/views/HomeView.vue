@@ -135,7 +135,7 @@ onMounted(loadDashboard);
               <div><strong>{{ node.serviceNode.name }}</strong><span>{{ node.serviceNode.server.name }} / {{ node.serviceNode.protocol }}</span></div>
               <span class="status-pill" :class="isNodeAvailable(node) ? 'success' : 'danger'">{{ isNodeAvailable(node) ? '正常可用' : '不可用' }}</span>
             </div>
-            <div v-if="node.remoteControl === 'reference'" class="user-feedback warning">官方账号只读引用，本系统不会续费或修改原账号。</div>
+            <div class="user-feedback warning">续费仅延长本系统访问授权，不修改路由节点共享的官方客户端。</div>
             <div class="service-preview-stats">
               <div><span>流量</span><strong>{{ node.usedTrafficGb }} / {{ node.trafficLimitGb }} GB</strong></div>
               <div><span>到期</span><strong>{{ formatDate(node.expireAt, true) }}</strong></div>

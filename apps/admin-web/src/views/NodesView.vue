@@ -63,6 +63,8 @@ type ServiceNodeConfig = {
   remoteMode?: 'create' | 'bind';
   remoteManaged?: boolean;
   remoteInboundPort?: number;
+  remoteClientEmail?: string;
+  remoteClientName?: string;
 };
 type ServiceNode = {
   id: string;
@@ -165,7 +167,7 @@ const form = reactive({
   xhttpMode: 'auto',
   realityTarget: '',
   realityServerName: '',
-  realityMinClientVersion: '',
+  realityMinClientVersion: '1.0.0',
   priceMonthly: 0,
   trafficLimitGb: 0,
   enabled: true,
@@ -317,8 +319,8 @@ async function syncTrafficLimit(node: ServiceNode) {
 async function resetRemoteTraffic(node: ServiceNode) {
   try {
     await ElMessageBox.confirm(
-      `确认重置「${node.name}」远端入站的流量统计？此操作不会清空每个客户端的流量。`,
-      '重置远端流量',
+      `确认重置「${node.name}」共享官方客户端的流量？该操作会影响此路由节点下所有绑定用户。`,
+      '重置共享客户端流量',
       { type: 'warning', customClass: 'node-dark-message-box' }
     );
   } catch {
@@ -328,7 +330,7 @@ async function resetRemoteTraffic(node: ServiceNode) {
   error.value = '';
   try {
     await api(`/api/admin/service-nodes/${node.id}/reset-traffic`, { method: 'POST' });
-    ElMessage.success('远端入站流量已重置');
+    ElMessage.success('共享官方客户端流量已重置');
   } catch (caught) {
     notifyError(caught, '重置失败');
   } finally {
@@ -394,7 +396,7 @@ function editNode(node: ServiceNode) {
     xhttpMode: config.xhttpMode || 'auto',
     realityTarget: config.realityTarget || '',
     realityServerName: config.realityServerName || '',
-    realityMinClientVersion: config.realityMinClientVersion || '',
+    realityMinClientVersion: config.realityMinClientVersion || (config.encryption === 'reality' ? '1.0.0' : ''),
     priceMonthly: Number(node.priceMonthly),
     trafficLimitGb: Number(node.trafficLimitGb),
     enabled: node.enabled,
@@ -528,7 +530,7 @@ function resetForm() {
     xhttpMode: 'auto',
     realityTarget: '',
     realityServerName: '',
-    realityMinClientVersion: '',
+    realityMinClientVersion: '1.0.0',
     priceMonthly: 0,
     trafficLimitGb: 0,
     enabled: true,
@@ -856,7 +858,7 @@ watch(() => form.transport, () => {
               <el-input v-model="form.realityServerName" readonly placeholder="自动检测后填写" />
             </el-form-item>
             <el-form-item label="最小客户端版本">
-              <el-input v-model="form.realityMinClientVersion" maxlength="40" placeholder="可选，例如 1.0.0" />
+              <el-input v-model="form.realityMinClientVersion" maxlength="40" placeholder="默认 1.0.0" />
             </el-form-item>
             <el-form-item class="node-dialog-full">
               <el-button class="node-secondary-button" :loading="detectingReality" :disabled="!form.serverId" @click="detectReality"><RefreshCw :size="15" />重新检测</el-button>

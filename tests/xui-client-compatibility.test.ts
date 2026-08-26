@@ -285,7 +285,7 @@ test('binding refresh reads identity and links without any remote write', async 
   ]);
 });
 
-test('reference bindings skip subscription writes and reject lifecycle writes', async () => {
+test('user bindings never own shared client lifecycle operations', async () => {
   const service = new XuiService({
     customerNode: { findFirst: async () => ({ ...customerNodeFixture(), remoteControl: 'reference' }) }
   } as never, {} as never, testLocks()) as any;
@@ -299,23 +299,23 @@ test('reference bindings skip subscription writes and reject lifecycle writes', 
       trafficLimitGb: 100,
       enabled: true
     }),
-    /只有完全托管绑定允许创建远端账号/
+    /绑定用户不会创建官方客户端/
   );
   await assert.rejects(
     () => service.patchCustomerNodeRemoteClient('customer-1', 'customer-node-1', { enabled: false }),
-    /只读引用绑定不能修改远端账号/
+    /用户绑定不拥有官方客户端/
   );
   await assert.rejects(
     () => service.deleteCustomerNodeRemoteClient('customer-1', 'customer-node-1'),
-    /只有完全托管账号允许从远端删除/
+    /用户绑定不拥有官方客户端/
   );
   await assert.rejects(
     () => service.resetCustomerNodeTraffic('customer-1', 'customer-node-1'),
-    /只有完全托管账号允许重置远端流量/
+    /用户绑定不拥有官方客户端/
   );
 });
 
-test('subscription-managed bindings can renew but cannot create or delete remote clients', async () => {
+test('legacy subscription-managed bindings still cannot own shared clients', async () => {
   const service = new XuiService({
     customerNode: { findFirst: async () => ({ ...customerNodeFixture(), remoteControl: 'subscription_managed' }) }
   } as never, {} as never, testLocks()) as any;
@@ -329,71 +329,233 @@ test('subscription-managed bindings can renew but cannot create or delete remote
       trafficLimitGb: 100,
       enabled: true
     }),
-    /只有完全托管绑定允许创建远端账号/
+    /绑定用户不会创建官方客户端/
   );
   await assert.rejects(
     () => service.deleteCustomerNodeRemoteClient('customer-1', 'customer-node-1'),
-    /只有完全托管账号允许从远端删除/
+    /用户绑定不拥有官方客户端/
   );
   await assert.rejects(
     () => service.resetCustomerNodeTraffic('customer-1', 'customer-node-1'),
-    /只有完全托管账号允许重置远端流量/
+    /用户绑定不拥有官方客户端/
   );
 });
 
-test('managed client settings rename the official comment without changing its stable identifier', async () => {
-  const customerNode = { ...customerNodeFixture(), clientName: '旧名称' };
-  let remotePatch: Record<string, unknown> | undefined;
-  let localPatch: Record<string, unknown> | undefined;
-  const service = new XuiService({
-    customerNode: {
-      findFirst: async ({ where }: any) => where.xuiEmail ? null : customerNode,
-      update: async ({ data }: any) => {
-        localPatch = data;
-        return { ...customerNode, ...data };
-      }
-    },
-    renewalLog: { findFirst: async () => null },
-    syncLog: { create: async () => ({}) }
-  } as never, {} as never, testLocks()) as any;
-  service.patchCustomerNodeRemote = async (_customerId: string, _customerNodeId: string, patch: Record<string, unknown>) => {
-    remotePatch = patch;
-    return { synced: true, remoteWrite: true, before: { comment: '旧名称', expiryTime: 0 } };
-  };
-
-  await service.patchCustomerNodeRemoteClientUnlocked('customer-1', 'customer-node-1', {
-    clientName: 'ceshi1-us',
-    expireAt: new Date('2030-01-01T00:00:00Z')
-  });
-
-  assert.equal(remotePatch?.comment, 'ceshi1-us');
-  assert.equal(remotePatch?.email, undefined);
-  assert.equal(localPatch?.clientName, 'ceshi1-us');
-  assert.equal(localPatch?.xuiEmail, 'user@example.com');
-});
-
-test('fully-managed client deletion uses the global delete endpoint and not detach', async () => {
+test('shared client deletion uses the global delete endpoint and not detach', async () => {
   const service = new XuiService({} as never, {} as never, testLocks()) as any;
   let deleteCalls = 0;
   let detachCalls = 0;
   let existenceChecks = 0;
-  service.remoteClientExists = async () => {
-    existenceChecks += 1;
-    return existenceChecks === 1
-      ? { exists: true, clientCount: 1, inbound: { id: 9 }, settings: { clients: [{ email: 'user@example.com' }] } }
-      : { exists: false, clientCount: 0 };
-  };
-  service.writeSyncLog = async () => undefined;
   const client = {
+    getClientRecord: async () => {
+      existenceChecks += 1;
+      if (existenceChecks === 1) return { email: 'user@example.com', inboundIds: [9] };
+      const error = new Error('3x-ui request failed: 404 - not found');
+      (error as any).status = 404;
+      throw error;
+    },
     deleteClient: async () => { deleteCalls += 1; return { success: true }; },
     detachClient: async () => { detachCalls += 1; return { success: true }; }
   };
+  service.isRemoteNotFound = (error: any) => error.status === 404;
+  service.writeSyncLog = async () => undefined;
 
   const result = await service.deleteRemoteClientWithClient(client, 'server-1', 9, 'user@example.com', false, {});
 
   assert.equal(result.deleted, true);
   assert.equal(deleteCalls, 1);
   assert.equal(detachCalls, 0);
+});
+
+test('service-node client settings can rename the official email and synchronize every binding', async () => {
+  const bindings = [
+    { id: 'binding-1', config: { subId: 'old-sub' } },
+    { id: 'binding-2', config: { subId: 'old-sub' } }
+  ];
+  const bindingUpdates: any[] = [];
+  let serviceConfig: any;
+  let updateRequest: any;
+  let renamed = false;
+  const serviceNode = {
+    id: 'service-node-1',
+    serverId: 'server-1',
+    inboundId: 9,
+    name: '美国节点',
+    protocol: 'vless',
+    ownership: 'managed',
+    config: { remoteClientEmail: 'old-client', remoteClientUuid: 'uuid-1', remoteClientSubId: 'sub-1', encryption: 'none' },
+    server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} }
+  };
+  const prisma = {
+    serviceNode: {
+      findUnique: async () => serviceNode,
+      update: async ({ data }: any) => { serviceConfig = data.config; return serviceNode; }
+    },
+    customerNode: {
+      findMany: async () => bindings,
+      update: async ({ where, data }: any) => { bindingUpdates.push({ id: where.id, data }); return data; }
+    },
+    syncLog: { create: async () => ({}) },
+    $transaction: async (operation: any) => operation({
+      serviceNode: { update: async ({ data }: any) => { serviceConfig = data.config; return serviceNode; } },
+      customerNode: {
+        findMany: async () => bindings,
+        update: async ({ where, data }: any) => { bindingUpdates.push({ id: where.id, data }); return data; }
+      }
+    })
+  };
+  const client = {
+    getClientRecord: async (email: string) => {
+      if (email === 'old-client') return { email: 'old-client', uuid: 'uuid-1', subId: 'sub-1', comment: '旧名称', inboundIds: [9], enable: true };
+      if (email === 'short-us' && renamed) return { email: 'short-us', uuid: 'uuid-1', subId: 'sub-1', comment: '美国短名', inboundIds: [9], enable: true };
+      const error = new Error('3x-ui request failed: 404 - not found');
+      (error as any).status = 404;
+      throw error;
+    },
+    updateClient: async (inboundId: number, email: string, payload: any) => {
+      updateRequest = { inboundId, email, payload };
+      renamed = true;
+      return { success: true };
+    },
+    listClients: async () => ({ success: true, obj: [{ client: { email: 'short-us', uuid: 'uuid-1', subId: 'sub-1', comment: '美国短名', enable: true }, inboundIds: [9] }] }),
+    clientLinks: async () => ({ success: true, obj: ['vless://uuid-1@example.com:443#old'] })
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.isRemoteNotFound = (error: any) => error.status === 404;
+  service.createAuthenticatedClient = async () => client;
+
+  const result = await service.patchServiceNodeRemoteClient('service-node-1', { email: 'short-us', clientName: '美国短名' });
+
+  assert.equal(result.updated, true);
+  assert.equal(updateRequest.inboundId, 9);
+  assert.equal(updateRequest.email, 'old-client');
+  assert.equal(updateRequest.payload.email, 'short-us');
+  assert.equal(updateRequest.payload.comment, '美国短名');
+  assert.equal(serviceConfig.remoteClientEmail, 'short-us');
+  assert.equal(serviceConfig.remoteClientName, '美国短名');
+  assert.equal(bindingUpdates.length, 2);
+  assert.deepEqual(bindingUpdates.map((item) => item.data.xuiEmail), ['short-us', 'short-us']);
+  assert.deepEqual(bindingUpdates.map((item) => item.data.clientName), ['美国短名', '美国短名']);
+});
+
+test('service-node create action restores an existing client attached to the same inbound without adding a duplicate', async () => {
+  let addCalls = 0;
+  let storedConfig: any;
+  const serviceNode = {
+    id: 'service-node-1', serverId: 'server-1', inboundId: 9, name: '美国节点', protocol: 'vless', ownership: 'managed', config: { encryption: 'none' },
+    server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} }
+  };
+  const prisma = {
+    serviceNode: { findUnique: async () => serviceNode },
+    syncLog: { create: async () => ({}) },
+    $transaction: async (operation: any) => operation({
+      serviceNode: { update: async ({ data }: any) => { storedConfig = data.config; return serviceNode; } },
+      customerNode: { findMany: async () => [], update: async () => ({}) }
+    })
+  };
+  const client = {
+    getClientRecord: async () => ({ email: 'short-us', uuid: 'uuid-1', subId: 'sub-1', comment: '美国短名', inboundIds: [9], totalGB: 107374182400, expiryTime: 0, enable: true }),
+    addClient: async () => { addCalls += 1; return { success: true }; },
+    clientLinks: async () => ({ success: true, obj: ['vless://uuid-1@example.com:443#old'] })
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.createAuthenticatedClient = async () => client;
+
+  const result = await service.createServiceNodeRemoteClient('service-node-1', { email: 'short-us', trafficLimitGb: 0, enabled: true });
+
+  assert.equal(result.restored, true);
+  assert.equal(result.remoteWrite, false);
+  assert.equal(addCalls, 0);
+  assert.equal(storedConfig.remoteClientEmail, 'short-us');
+  assert.equal(storedConfig.remoteClientTrafficLimitGb, 100);
+});
+
+test('service-node traffic reset uses the official client endpoint and clears all local binding counters', async () => {
+  let resetArgs: any;
+  let localReset: any;
+  const serviceNode = {
+    id: 'service-node-1', serverId: 'server-1', inboundId: 9, ownership: 'managed', config: { remoteClientEmail: 'short-us' },
+    server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} }
+  };
+  const prisma = {
+    serviceNode: { findUnique: async () => serviceNode, update: async () => serviceNode },
+    customerNode: { updateMany: async (args: any) => { localReset = args; return { count: 2 }; } },
+    syncLog: { create: async () => ({}) }
+  };
+  const client = {
+    resetClientTraffic: async (inboundId: number, email: string) => { resetArgs = { inboundId, email }; return { success: true }; },
+    clientTraffic: async () => ({ success: true, obj: { up: 0, down: 0 } })
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.createAuthenticatedClient = async () => client;
+
+  await service.resetServiceNodeTraffic('service-node-1');
+
+  assert.deepEqual(resetArgs, { inboundId: 9, email: 'short-us' });
+  assert.equal(localReset.where.serviceNodeId, 'service-node-1');
+  assert.equal(localReset.data.usedTrafficGb.toString(), '0');
+  assert.equal(localReset.data.lastSyncedAt, null);
+});
+
+test('managed service-node deletion verifies client absence before deleting and verifying the inbound', async () => {
+  const operations: string[] = [];
+  let clientExists = true;
+  let inboundExists = true;
+  const serviceNode = {
+    id: 'service-node-1',
+    serverId: 'server-1',
+    inboundId: 9,
+    ownership: 'managed',
+    config: { remoteClientEmail: 'short-us' },
+    server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} },
+    customerNodes: [{ xuiEmail: 'short-us', remoteControl: 'reference', lastSyncedAt: null, config: {} }]
+  };
+  const prisma = {
+    serviceNode: { findUnique: async () => serviceNode },
+    syncLog: { create: async () => ({}) }
+  };
+  const notFound = () => {
+    const error = new Error('3x-ui request failed: 404 - not found');
+    (error as any).status = 404;
+    return error;
+  };
+  const client = {
+    getClientRecord: async () => {
+      operations.push('check-client');
+      if (!clientExists) throw notFound();
+      return { email: 'short-us', inboundIds: [9] };
+    },
+    deleteClient: async () => {
+      operations.push('delete-client');
+      clientExists = false;
+      return { success: true };
+    },
+    getInbound: async () => {
+      operations.push('check-inbound');
+      if (!inboundExists) throw notFound();
+      return { success: true, obj: { id: 9 } };
+    },
+    deleteInbound: async () => {
+      operations.push('delete-inbound');
+      inboundExists = false;
+      return { success: true };
+    }
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.isRemoteNotFound = (error: any) => error.status === 404;
+  service.createAuthenticatedClient = async () => client;
+
+  const result = await service.deleteManagedServiceNodeInbound('service-node-1');
+
+  assert.equal(result.deleted, true);
+  assert.deepEqual(operations, [
+    'check-client',
+    'delete-client',
+    'check-client',
+    'check-inbound',
+    'delete-inbound',
+    'check-inbound'
+  ]);
 });
 
 test('explicit detach remains a separate official 3.6 operation', async () => {

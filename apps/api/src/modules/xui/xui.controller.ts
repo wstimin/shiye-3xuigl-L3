@@ -158,6 +158,33 @@ export class XuiController {
   @Roles('admin')
   resetServiceNodeTraffic(@Param('id') id: string) { return this.xui.resetServiceNodeTraffic(id); }
 
+  @Post('admin/service-nodes/:id/remote-client')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  createServiceNodeRemoteClient(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(remoteClientCreateSchema)) body: z.infer<typeof remoteClientCreateSchema>
+  ) {
+    return this.xui.createServiceNodeRemoteClient(id, body);
+  }
+
+  @Patch('admin/service-nodes/:id/remote-client')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  patchServiceNodeRemoteClient(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(remoteClientPatchSchema)) body: z.infer<typeof remoteClientPatchSchema>
+  ) {
+    return this.xui.patchServiceNodeRemoteClient(id, body);
+  }
+
+  @Delete('admin/service-nodes/:id/remote-client')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  deleteServiceNodeRemoteClient(@Param('id') id: string, @Query('keepTraffic') keepTraffic?: string) {
+    return this.xui.deleteServiceNodeRemoteClient(id, keepTraffic === 'true' || keepTraffic === '1');
+  }
+
   @Post('admin/customers/:id/nodes/:nodeId/sync')
   @UseGuards(AuthGuard)
   @Roles('admin')
