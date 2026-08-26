@@ -195,6 +195,7 @@ const customerSelect = {
       uuid: true,
       expireAt: true,
       trafficLimitGb: true,
+      usedTrafficGb: true,
       status: true,
       remoteControl: true,
       lastSyncedAt: true,

@@ -17,6 +17,10 @@ type UserNode = {
   trafficLimitGb: string;
   usedTrafficGb: string;
   usedTrafficBytes?: number;
+  trafficStatus?: 'live' | 'cached' | 'error';
+  trafficError?: string | null;
+  officialTrafficTotalBytes?: number | null;
+  officialTrafficUnlimited?: boolean | null;
   links?: string[];
   linkError?: string | null;
   subId?: string;
@@ -48,6 +52,22 @@ const trafficPercent = (node: UserNode) => {
   const limit = numericValue(node.trafficLimitGb);
   return limit > 0 ? Math.min((numericValue(node.usedTrafficGb) / limit) * 100, 100) : 0;
 };
+
+function trafficUsageText(node: UserNode) {
+  if (node.trafficStatus === 'error') return '暂不可用';
+  return formatTraffic(node.usedTrafficBytes, node.usedTrafficGb);
+}
+
+function trafficLimitText(node: UserNode) {
+  const limit = numericValue(node.trafficLimitGb);
+  return limit > 0 ? `${limit.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} GB` : '无限流量';
+}
+
+function trafficStateText(node: UserNode) {
+  if (node.trafficStatus === 'cached') return node.trafficError || '官方实时流量获取失败，当前显示上次成功同步的数据。';
+  if (node.trafficStatus === 'error') return node.trafficError || '官方实时流量暂不可用，请联系管理员检查面板连接。';
+  return '';
+}
 
 async function loadNodes() {
   loading.value = true;
@@ -236,8 +256,9 @@ onMounted(loadNodes);
       </div>
       <div class="node-status-hint" :class="nodeStatusHint(node).type">{{ nodeStatusHint(node).text }}</div>
       <div class="node-traffic-block">
-        <div><span>流量使用</span><strong>{{ formatTraffic(node.usedTrafficBytes, node.usedTrafficGb) }} / {{ node.trafficLimitGb }} GB</strong></div>
+        <div><span>流量使用</span><strong>{{ trafficUsageText(node) }} / {{ trafficLimitText(node) }}</strong></div>
         <span class="node-traffic-track"><i :class="nodeStatusHint(node).type" :style="{ width: `${trafficPercent(node)}%` }"></i></span>
+        <div v-if="trafficStateText(node)" class="empty-hint">{{ trafficStateText(node) }}</div>
       </div>
       <div class="node-meta">
         <span>到期：{{ formatDate(node.expireAt) }}</span>

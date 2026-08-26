@@ -116,6 +116,20 @@ type ClientMatch = {
   subId?: string;
 };
 
+type OfficialClientTraffic = {
+  xuiEmail: string;
+  upBytes: number;
+  downBytes: number;
+  usedBytes: number;
+  usedTrafficGb: number;
+  totalBytes: number | null;
+  unlimited: boolean | null;
+  enabled: boolean | null;
+  syncedAt: Date;
+  traffic: Record<string, unknown>;
+  raw: unknown;
+};
+
 type ServiceInboundClientIdentity = {
   email?: string;
   uuid?: string;
@@ -1121,6 +1135,46 @@ export class XuiService {
     return this.syncCustomerNodeTraffic(customerId, customerNodeId);
   }
 
+  async serviceNodeTrafficSnapshots(serviceNodeIds: string[]) {
+    if (!serviceNodeIds.length) return [];
+    const serviceNodes = await this.prisma.serviceNode.findMany({
+      where: { id: { in: serviceNodeIds } },
+      include: { server: true }
+    });
+    const grouped = new Map<string, typeof serviceNodes>();
+    for (const serviceNode of serviceNodes) {
+      const current = grouped.get(serviceNode.serverId) || [];
+      current.push(serviceNode);
+      grouped.set(serviceNode.serverId, current);
+    }
+
+    const results = await Promise.all([...grouped.values()].map(async (group) => {
+      const first = group[0];
+      if (!first) return [];
+      let client: XuiClient;
+      try {
+        client = await this.createAuthenticatedClient(first.server);
+      } catch (error) {
+        const message = this.trafficReadError(error);
+        return group.map((serviceNode) => ({ serviceNodeId: serviceNode.id, status: 'error' as const, error: message }));
+      }
+      return Promise.all(group.map(async (serviceNode) => {
+        const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+        const xuiEmail = this.stringValue(config.remoteClientEmail);
+        if (!xuiEmail) {
+          return { serviceNodeId: serviceNode.id, status: 'error' as const, error: '路由节点缺少官方客户端标识，无法读取流量' };
+        }
+        try {
+          const traffic = await this.readOfficialClientTraffic(client, xuiEmail);
+          return { serviceNodeId: serviceNode.id, status: 'live' as const, ...traffic };
+        } catch (error) {
+          return { serviceNodeId: serviceNode.id, status: 'error' as const, xuiEmail, error: this.trafficReadError(error) };
+        }
+      }));
+    }));
+    return results.flat();
+  }
+
   async syncCustomerNodeTraffic(customerId: string, customerNodeId: string) {
     return this.withCustomerNodeLock(customerId, customerNodeId, () => this.syncCustomerNodeTrafficUnlocked(customerId, customerNodeId));
   }
@@ -1132,31 +1186,22 @@ export class XuiService {
     });
     if (!customerNode) throw new NotFoundException('用户节点不存在');
 
-    const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
-    const payload = await client.clientTraffic(customerNode.xuiEmail);
-    this.assertXuiSuccess(payload);
-    const traffic = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
-    if (!Object.hasOwn(traffic, 'up') || !Object.hasOwn(traffic, 'down')) {
-      throw new BadGatewayException('官方客户端流量数据缺少 up/down 字段');
+    const serviceConfig = this.xuiObject(customerNode.serviceNode.config) as ServiceNodeConfig;
+    const serviceClientEmail = this.stringValue(serviceConfig.remoteClientEmail);
+    if (!serviceClientEmail) throw new BadGatewayException('路由节点缺少官方客户端标识，请管理员先修复节点配置');
+    if (serviceClientEmail !== customerNode.xuiEmail) {
+      throw new BadGatewayException('绑定记录与路由节点的官方客户端标识不一致，请管理员重新同步绑定');
     }
-    const upBytes = this.trafficBytes(traffic.up);
-    const downBytes = this.trafficBytes(traffic.down);
-    const usedBytes = upBytes + downBytes;
-    const usedTrafficGb = usedBytes / 1024 / 1024 / 1024;
-    const syncedAt = new Date();
+    const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
+    const snapshot = await this.readOfficialClientTraffic(client, customerNode.xuiEmail);
     await this.prisma.customerNode.update({
       where: { id: customerNode.id },
-      data: { usedTrafficGb: new Prisma.Decimal(usedTrafficGb), lastSyncedAt: syncedAt }
+      data: { usedTrafficGb: new Prisma.Decimal(snapshot.usedTrafficGb), lastSyncedAt: snapshot.syncedAt }
     });
     return {
       customerId,
       customerNodeId,
-      xuiEmail: customerNode.xuiEmail,
-      usedBytes,
-      usedTrafficGb,
-      syncedAt,
-      traffic,
-      raw: payload
+      ...snapshot
     };
   }
 
@@ -4776,6 +4821,43 @@ export class XuiService {
   private positiveInteger(value: unknown) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : undefined;
+  }
+
+  private async readOfficialClientTraffic(client: XuiClient, xuiEmail: string): Promise<OfficialClientTraffic> {
+    const payload = await client.clientTraffic(xuiEmail);
+    this.assertXuiSuccess(payload);
+    const traffic = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
+    if (!Object.hasOwn(traffic, 'up') || !Object.hasOwn(traffic, 'down')) {
+      throw new BadGatewayException('官方客户端流量数据缺少 up/down 字段');
+    }
+    const upBytes = this.trafficBytes(traffic.up);
+    const downBytes = this.trafficBytes(traffic.down);
+    const usedBytes = upBytes + downBytes;
+    const hasTotal = Object.hasOwn(traffic, 'total') && Number.isFinite(Number(traffic.total));
+    const totalBytes = hasTotal ? this.trafficBytes(traffic.total) : null;
+    return {
+      xuiEmail,
+      upBytes,
+      downBytes,
+      usedBytes,
+      usedTrafficGb: usedBytes / 1024 / 1024 / 1024,
+      totalBytes,
+      unlimited: totalBytes === null ? null : totalBytes === 0,
+      enabled: Object.hasOwn(traffic, 'enable') ? this.booleanValue(traffic.enable, false) : null,
+      syncedAt: new Date(),
+      traffic,
+      raw: payload
+    };
+  }
+
+  private trafficReadError(error: unknown) {
+    const message = this.errorMessage(error);
+    if (/401|403|unauthor|forbidden|登录|认证|凭据|密码/i.test(message)) return '官方面板认证失败，无法读取客户端流量';
+    if (/not found|不存在|未找到|找不到|404/i.test(message)) return '官方面板中未找到该客户端，请核对客户端标识';
+    if (/timeout|超时/i.test(message)) return '官方面板响应超时，当前显示的数据可能不是实时数据';
+    if (/network|fetch failed|econn|enotfound|网络|连接/i.test(message)) return '无法连接官方面板，当前显示的数据可能不是实时数据';
+    if (/缺少 up\/down/i.test(message)) return '官方客户端流量响应缺少必要字段';
+    return `官方客户端流量获取失败：${message}`;
   }
 
   private trafficBytes(value: unknown) {

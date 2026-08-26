@@ -477,6 +477,8 @@ test('user node listing returns freshly synchronized official traffic', async ()
   assert.equal(result[0].usedTrafficGb.toString(), '1.5');
   assert.equal(result[0].usedTrafficBytes, 1.5 * 1024 ** 3);
   assert.equal(result[0].lastSyncedAt, syncedAt);
+  assert.equal(result[0].trafficStatus, 'live');
+  assert.equal(result[0].trafficError, null);
   assert.deepEqual(result[0].links, ['vless://example']);
 });
 
@@ -504,6 +506,8 @@ test('user node listing falls back to stored traffic when the official read fail
   assert.equal(result[0].usedTrafficGb, 2.25);
   assert.equal(result[0].usedTrafficBytes, 2.25 * 1024 ** 3);
   assert.equal(result[0].lastSyncedAt, storedAt);
+  assert.equal(result[0].trafficStatus, 'cached');
+  assert.equal(result[0].trafficError, '官方客户端流量获取失败，请联系管理员检查面板连接和客户端绑定');
 });
 
 

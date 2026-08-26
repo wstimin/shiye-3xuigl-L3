@@ -611,7 +611,7 @@ test('customer-node traffic sync stores the official up and down byte total', as
     customerId: 'customer-1',
     xuiEmail: 'short-us',
     serviceNodeId: 'service-node-1',
-    serviceNode: { server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} } }
+    serviceNode: { config: { remoteClientEmail: 'short-us' }, server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} } }
   };
   const prisma = {
     customerNode: {
@@ -629,9 +629,40 @@ test('customer-node traffic sync stores the official up and down byte total', as
 
   assert.equal(result.usedBytes, 1610612736);
   assert.equal(result.usedTrafficGb, 1.5);
+  assert.equal(result.totalBytes, null);
+  assert.equal(result.unlimited, null);
   assert.equal(storedUpdate.where.id, 'customer-node-1');
   assert.equal(storedUpdate.data.usedTrafficGb.toString(), '1.5');
   assert.equal(storedUpdate.data.lastSyncedAt instanceof Date, true);
+});
+
+test('customer-node traffic sync treats official total zero as unlimited traffic', async () => {
+  const customerNode = {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    xuiEmail: 'short-us',
+    serviceNodeId: 'service-node-1',
+    serviceNode: {
+      config: { remoteClientEmail: 'short-us' },
+      server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} }
+    }
+  };
+  const prisma = {
+    customerNode: {
+      findFirst: async () => customerNode,
+      update: async () => customerNode
+    }
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.createAuthenticatedClient = async () => ({
+    clientTraffic: async () => ({ success: true, obj: { up: 1024, down: 2048, total: 0 } })
+  });
+
+  const result = await service.syncCustomerNodeTraffic('customer-1', 'customer-node-1');
+
+  assert.equal(result.usedBytes, 3072);
+  assert.equal(result.totalBytes, 0);
+  assert.equal(result.unlimited, true);
 });
 
 test('customer-node traffic sync rejects an official response without counters', async () => {
@@ -641,7 +672,7 @@ test('customer-node traffic sync rejects an official response without counters',
     customerId: 'customer-1',
     xuiEmail: 'short-us',
     serviceNodeId: 'service-node-1',
-    serviceNode: { server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} } }
+    serviceNode: { config: { remoteClientEmail: 'short-us' }, server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} } }
   };
   const prisma = {
     customerNode: {
@@ -654,6 +685,30 @@ test('customer-node traffic sync rejects an official response without counters',
 
   await assert.rejects(() => service.syncCustomerNodeTraffic('customer-1', 'customer-node-1'), /缺少 up\/down 字段/);
   assert.equal(localUpdates, 0);
+});
+
+test('customer-node traffic sync rejects a stale binding identity before reading the panel', async () => {
+  let remoteReads = 0;
+  const customerNode = {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    xuiEmail: 'old-email',
+    serviceNodeId: 'service-node-1',
+    serviceNode: {
+      config: { remoteClientEmail: 'current-email' },
+      server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} }
+    }
+  };
+  const prisma = {
+    customerNode: { findFirst: async () => customerNode }
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.createAuthenticatedClient = async () => ({
+    clientTraffic: async () => { remoteReads += 1; return { success: true, obj: { up: 0, down: 0 } }; }
+  });
+
+  await assert.rejects(() => service.syncCustomerNodeTraffic('customer-1', 'customer-node-1'), /标识不一致/);
+  assert.equal(remoteReads, 0);
 });
 
 test('managed service-node deletion verifies client absence before deleting and verifying the inbound', async () => {

@@ -31,6 +31,7 @@ type CustomerNode = {
   uuid?: string | null;
   expireAt: string | null;
   trafficLimitGb?: string | null;
+  usedTrafficGb?: string | null;
   status: string;
   remoteControl: 'reference' | 'subscription_managed' | 'fully_managed';
   lastSyncedAt: string | null;
@@ -62,6 +63,13 @@ type ServiceNode = {
     remoteClientEnabled?: boolean;
   } | null;
   server?: { name: string };
+  traffic?: {
+    status: 'live' | 'error';
+    usedBytes?: number;
+    totalBytes?: number | null;
+    unlimited?: boolean | null;
+    error?: string;
+  };
 };
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
 
@@ -358,6 +366,20 @@ function serviceNodeForBinding(node: CustomerNode) {
 
 function serviceNodeHasRemoteClient(node: CustomerNode) {
   return Boolean(serviceNodeForBinding(node)?.config?.remoteClientEmail);
+}
+
+function customerNodeTrafficText(node: CustomerNode) {
+  const traffic = serviceNodeForBinding(node)?.traffic;
+  if (traffic?.status === 'error') return '获取失败';
+  if (traffic?.status === 'live') return formatBytes(traffic.usedBytes || 0);
+  const cachedGb = Number(node.usedTrafficGb);
+  return Number.isFinite(cachedGb) && cachedGb >= 0 ? `${cachedGb.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} GB` : '未同步';
+}
+
+function customerNodeTrafficTitle(node: CustomerNode) {
+  const traffic = serviceNodeForBinding(node)?.traffic;
+  if (traffic?.status === 'error') return traffic.error || '官方客户端流量获取失败';
+  return traffic?.status === 'live' ? `官方实时已用 ${formatBytes(traffic.usedBytes || 0)}` : '当前显示本地缓存数据';
 }
 
 function canManageRemoteClient(node: CustomerNode) {
@@ -746,7 +768,8 @@ function nodeExpireStatus(node: CustomerNode) {
 }
 
 function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return '-';
+  if (!Number.isFinite(value) || value < 0) return '-';
+  if (value === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let size = value;
   let unit = 0;
@@ -932,7 +955,7 @@ onMounted(loadCustomers);
           </div>
           <div class="entity-card-stats">
             <div><span>到期</span><strong>{{ formatDate(node.expireAt) }}</strong></div>
-            <div><span>流量</span><strong>{{ node.trafficLimitGb ?? '-' }} GB</strong></div>
+            <div><span>已用流量</span><strong :title="customerNodeTrafficTitle(node)">{{ customerNodeTrafficText(node) }}</strong></div>
             <div><span>同步</span><strong>{{ formatDate(node.lastSyncedAt) }}</strong></div>
           </div>
           <div class="node-actions node-action-grid customer-node-dialog-actions">

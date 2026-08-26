@@ -145,8 +145,17 @@ export class NodesService {
       orderBy: { createdAt: 'desc' },
       include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
     });
-    const tasks = await this.pendingTasks('service-node', nodes.map((node) => node.id));
-    return nodes.map((node) => ({ ...node, syncTasks: tasks.get(node.id) || [] }));
+    const nodeIds = nodes.map((node) => node.id);
+    const [tasks, trafficSnapshots] = await Promise.all([
+      this.pendingTasks('service-node', nodeIds),
+      this.xui.serviceNodeTrafficSnapshots(nodeIds)
+    ]);
+    const trafficByNode = new Map(trafficSnapshots.map((traffic) => [traffic.serviceNodeId, traffic]));
+    return nodes.map((node) => ({
+      ...node,
+      syncTasks: tasks.get(node.id) || [],
+      traffic: trafficByNode.get(node.id) || { serviceNodeId: node.id, status: 'error', error: '未能读取官方客户端流量' }
+    }));
   }
 
   async createServiceNode(input: z.infer<typeof serviceNodeUpsertSchema>) {
@@ -882,17 +891,25 @@ export class NodesService {
     });
     return Promise.all(nodes.map(async (node) => {
       let linkError: string | null = null;
+      let trafficError: string | null = null;
       const [links, traffic] = await Promise.all([
         this.xui.customerNodeLinks(customerId, node.id).catch((error) => {
           linkError = error instanceof Error ? error.message : String(error);
           return [] as string[];
         }),
-        this.xui.syncCustomerNodeTraffic(customerId, node.id).catch(() => null)
+        this.xui.syncCustomerNodeTraffic(customerId, node.id).catch((error) => {
+          trafficError = this.trafficErrorMessage(error);
+          return null;
+        })
       ]);
       return {
         ...node,
         ...(traffic ? { usedTrafficGb: new Prisma.Decimal(traffic.usedTrafficGb), lastSyncedAt: traffic.syncedAt } : {}),
         usedTrafficBytes: traffic?.usedBytes ?? Math.max(Number(node.usedTrafficGb), 0) * 1024 ** 3,
+        trafficStatus: traffic ? 'live' : node.lastSyncedAt ? 'cached' : 'error',
+        trafficError,
+        officialTrafficTotalBytes: traffic?.totalBytes ?? null,
+        officialTrafficUnlimited: traffic?.unlimited ?? null,
         links,
         linkError,
         subId: jsonObject(node.config).subId || node.xuiEmail
@@ -1421,6 +1438,17 @@ export class NodesService {
       }
     }
     return error instanceof Error ? error.message : String(error);
+  }
+
+  private trafficErrorMessage(error: unknown) {
+    const message = this.errorMessage(error);
+    if (/标识不一致/i.test(message)) return '绑定记录与路由节点的官方客户端标识不一致，请联系管理员同步绑定';
+    if (/缺少官方客户端标识/i.test(message)) return '路由节点缺少官方客户端标识，请联系管理员修复节点配置';
+    if (/401|403|unauthor|forbidden|登录|认证|凭据|密码/i.test(message)) return '官方面板认证失败，暂时无法读取流量';
+    if (/not found|不存在|未找到|找不到|404/i.test(message)) return '官方面板中未找到绑定的客户端，请联系管理员核对绑定';
+    if (/timeout|超时/i.test(message)) return '官方面板响应超时，当前显示上次成功同步的数据';
+    if (/network|fetch failed|econn|enotfound|网络|连接/i.test(message)) return '暂时无法连接官方面板，当前显示上次成功同步的数据';
+    return '官方客户端流量获取失败，请联系管理员检查面板连接和客户端绑定';
   }
 
   private async ensureServer(id: string) {
