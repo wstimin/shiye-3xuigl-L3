@@ -285,14 +285,121 @@ test('binding refresh reads identity and links without any remote write', async 
   ]);
 });
 
-test('user bindings never own shared client lifecycle operations', async () => {
+test('node authorization uses the official full-row update endpoint without adding or deleting clients', async () => {
+  const requests: Array<{ path: string; method: string; body: any }> = [];
+  let remoteClient = {
+    email: 'shared@example.com',
+    uuid: 'shared-uuid',
+    password: 'keep-password',
+    flow: 'xtls-rprx-vision',
+    comment: '东京节点',
+    totalGB: 107374182400,
+    expiryTime: 0,
+    enable: false,
+    inboundIds: [9],
+    createdAt: 100
+  };
+  const client = new XuiClient({
+    baseUrl: 'https://panel.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ path, method: init?.method || 'GET', body });
+      if (path === '/panel/api/inbounds/list') return jsonResponse({ success: true, obj: [{ id: 9 }] });
+      if (path === '/panel/api/clients/list') return jsonResponse({ success: true, obj: [{ client: remoteClient, inboundIds: [9] }] });
+      if (path === '/panel/api/clients/get/shared%40example.com') {
+        return jsonResponse({ success: true, obj: JSON.stringify({ client: remoteClient, inboundIds: [9] }) });
+      }
+      if (path === '/panel/api/clients/update/shared%40example.com') {
+        remoteClient = { ...remoteClient, ...body };
+        return jsonResponse({ success: true, msg: 'Client updated' });
+      }
+      return jsonResponse({ message: `unexpected request ${path}` }, 500);
+    }
+  });
+  const serviceNode = customerNodeFixture().serviceNode;
+  let storedConfig: any = serviceNode.config;
+  const service = new XuiService({
+    serviceNode: {
+      findUnique: async () => ({ ...serviceNode, config: storedConfig }),
+      update: async ({ data }: any) => {
+        storedConfig = data.config;
+        return { ...serviceNode, config: storedConfig };
+      }
+    },
+    syncLog: { create: async () => ({}) }
+  } as never, {} as never, testLocks()) as any;
+  service.createAuthenticatedClient = async () => client;
+
+  const expireAt = new Date('2030-01-01T00:00:00Z');
+  const result = await service.updateServiceNodeRemoteAuthorization('service-node-1', {
+    email: 'shared@example.com',
+    uuid: 'shared-uuid'
+  }, expireAt, true);
+
+  const updateRequest = requests.find((request) => request.path === '/panel/api/clients/update/shared%40example.com');
+  assert.equal(result.remoteWrite, true);
+  assert.equal(updateRequest?.method, 'POST');
+  assert.deepEqual(updateRequest?.body, {
+    email: 'shared@example.com',
+    uuid: 'shared-uuid',
+    password: 'keep-password',
+    flow: 'xtls-rprx-vision',
+    totalGB: 107374182400,
+    expiryTime: expireAt.getTime(),
+    enable: true,
+    comment: '东京节点'
+  });
+  assert.equal(requests.some((request) => request.path === '/panel/api/clients/add'), false);
+  assert.equal(requests.some((request) => request.path.includes('/panel/api/clients/del/')), false);
+  assert.equal(storedConfig.remoteClientExpireAt, expireAt.toISOString());
+  assert.equal(storedConfig.remoteClientEnabled, true);
+});
+
+test('customer links reject every inactive authorization layer before contacting the panel', async () => {
+  const cases = [
+    { patch: { customer: { status: 'disabled' } }, message: /用户账号已停用/ },
+    { patch: { serviceNode: { enabled: false } }, message: /服务节点已停用/ },
+    { patch: { status: 'disabled' }, message: /节点已停用/ },
+    { patch: { expireAt: new Date('2020-01-01T00:00:00Z') }, message: /节点已到期/ }
+  ];
+
+  for (const item of cases) {
+    const fixture = customerNodeFixture();
+    const node = {
+      ...fixture,
+      ...item.patch,
+      customer: { status: 'active', ...(item.patch as any).customer },
+      serviceNode: { ...fixture.serviceNode, ...(item.patch as any).serviceNode }
+    };
+    const service = new XuiService({
+      customerNode: { findFirst: async () => node }
+    } as never, {} as never, testLocks()) as any;
+    service.createAuthenticatedClient = async () => {
+      throw new Error('inactive authorization must not contact the panel');
+    };
+
+    await assert.rejects(() => service.customerNodeLinks('customer-1', 'customer-node-1'), item.message);
+  }
+});
+
+test('user bindings can synchronize node authorization but never own shared client lifecycle operations', async () => {
   const service = new XuiService({
     customerNode: { findFirst: async () => ({ ...customerNodeFixture(), remoteControl: 'reference' }) }
   } as never, {} as never, testLocks()) as any;
+  let authorizationPatch: any;
+  service.patchCustomerNodeRemote = async (_customerId: string, _customerNodeId: string, patch: unknown, operation: string) => {
+    authorizationPatch = { patch, operation };
+    return { synced: true, remoteWrite: true };
+  };
 
   const expiry = await service.updateCustomerNodeExpiry('customer-1', 'customer-node-1', new Date('2030-01-01T00:00:00Z'), true);
-  assert.equal(expiry.skipped, true);
-  assert.equal(expiry.remoteWrite, false);
+  assert.equal(expiry.remoteWrite, true);
+  assert.deepEqual(authorizationPatch, {
+    patch: { expiryTime: new Date('2030-01-01T00:00:00Z').getTime(), enable: true },
+    operation: 'expiry'
+  });
   await assert.rejects(
     () => service.createCustomerNodeRemoteClient('customer-1', 'customer-node-1', {
       email: 'new@example.com',

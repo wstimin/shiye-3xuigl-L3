@@ -191,12 +191,11 @@ test('same renewal request is idempotent and debits only once', async () => {
   await fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 2, 'admin', requestId);
   const repeated = await fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 2, 'admin', requestId);
   assert.equal(fixture.debitCount, 1);
-  assert.equal(fixture.remoteWrites.length, 0);
+  assert.equal(fixture.remoteWrites.length, 1);
   assert.equal(fixture.customer.balance.toFixed(2), '80.00');
   assert.equal(fixture.node.expireAt.toISOString(), '2030-03-01T00:00:00.000Z');
   assert.equal(fixture.renewalLogs[0].status, 'success');
-  assert.equal(fixture.renewalLogs[0].detail.sync.remoteWrite, false);
-  assert.equal(fixture.balanceLogs[0].detail.syncStatus, 'local-only');
+  assert.equal(fixture.balanceLogs[0].detail.syncStatus, 'success');
   assert.equal((repeated as any).idempotent, true);
 });
 
@@ -210,41 +209,44 @@ test('different request is rejected while the node has a pending renewal', async
   assert.equal(fixture.remoteWrites.length, 0);
 });
 
-test('reference binding renews local authorization without a remote write', async () => {
+test('reference binding renews the existing shared client without creating another client', async () => {
   const fixture = renewalFixture({ node: { remoteControl: 'reference' } });
-  const result = await fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 1, 'admin', '33333333-3333-4333-8333-333333333333');
+  await fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 1, 'admin', '33333333-3333-4333-8333-333333333333');
   assert.equal(fixture.debitCount, 1);
-  assert.equal(fixture.remoteWrites.length, 0);
+  assert.equal(fixture.remoteWrites.length, 1);
   assert.equal(fixture.customer.balance.toFixed(2), '90.00');
   assert.equal(fixture.node.expireAt.toISOString(), '2030-02-01T00:00:00.000Z');
-  assert.deepEqual((result as any).sync, { remoteWrite: false, scope: 'local-authorization' });
 });
 
-test('renewal ignores remote update response failures because it is local authorization only', async () => {
+test('lost update response is completed when remote state confirms application', async () => {
   const fixture = renewalFixture({ remoteMode: 'throw-applied' });
   await fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 1, 'admin', '44444444-4444-4444-8444-444444444444');
   assert.equal(fixture.customer.balance.toFixed(2), '90.00');
   assert.equal(fixture.renewalLogs[0].status, 'success');
-  assert.equal(fixture.balanceLogs[0].detail.syncStatus, 'local-only');
-  assert.equal(fixture.remoteWrites.length, 0);
+  assert.equal(fixture.balanceLogs[0].detail.syncStatus, 'success');
   assert.equal(fixture.refunds.length, 0);
 });
 
-test('renewal does not call a rejecting remote client', async () => {
+test('failed remote update refunds only when remote state is confirmed unchanged', async () => {
   const fixture = renewalFixture({ remoteMode: 'throw-unchanged' });
-  await fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 1, 'admin', '55555555-5555-4555-8555-555555555555');
-  assert.equal(fixture.customer.balance.toFixed(2), '90.00');
-  assert.equal(fixture.renewalLogs[0].status, 'success');
-  assert.equal(fixture.remoteWrites.length, 0);
-  assert.equal(fixture.refunds.length, 0);
+  await assert.rejects(
+    () => fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 1, 'admin', '55555555-5555-4555-8555-555555555555'),
+    /remote rejected update/
+  );
+  assert.equal(fixture.customer.balance.toFixed(2), '100.00');
+  assert.equal(fixture.renewalLogs[0].status, 'failed');
+  assert.equal(fixture.balanceLogs[0].detail.syncStatus, 'refunded');
+  assert.equal(fixture.refunds.length, 1);
 });
 
-test('renewal never becomes pending because of an unavailable shared remote client', async () => {
+test('unknown remote result remains pending and is not refunded', async () => {
   const fixture = renewalFixture({ remoteMode: 'throw-unknown' });
-  await fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 1, 'admin', '66666666-6666-4666-8666-666666666666');
+  await assert.rejects(
+    () => fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 1, 'admin', '66666666-6666-4666-8666-666666666666'),
+    /系统将自动恢复/
+  );
   assert.equal(fixture.customer.balance.toFixed(2), '90.00');
-  assert.equal(fixture.renewalLogs[0].status, 'success');
-  assert.equal(fixture.remoteWrites.length, 0);
+  assert.equal(fixture.renewalLogs[0].status, 'pending');
   assert.equal(fixture.refunds.length, 0);
 });
 
@@ -259,12 +261,14 @@ test('admin and traffic-disabled nodes cannot be restored by renewal', async () 
   }
 });
 
-test('local commit failure performs no remote write or rollback', async () => {
+test('local commit failure refunds after exact remote rollback is confirmed', async () => {
   const fixture = renewalFixture({ finalLocalFails: true });
   await assert.rejects(
     () => fixture.service.renewCustomerNode('customer-1', 'customer-node-1', 1, 'admin', '88888888-8888-4888-8888-888888888888'),
     /local commit failed/
   );
-  assert.equal(fixture.remoteWrites.length, 0);
-  assert.equal(fixture.refunds.length, 0);
+  assert.equal(fixture.remoteWrites.length, 2);
+  assert.equal(fixture.remoteWrites[1].expireAt?.toISOString(), '2030-01-01T00:00:00.000Z');
+  assert.equal(fixture.customer.balance.toFixed(2), '100.00');
+  assert.equal(fixture.refunds.length, 1);
 });

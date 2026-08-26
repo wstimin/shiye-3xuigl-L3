@@ -65,7 +65,7 @@ test('node form detects and displays Reality parameters without using TLS fields
   assert.doesNotMatch(source, /realityServerName\s*=\s*[^\n]*tlsServerName/);
 });
 
-test('Reality stream settings default minClient to 1.0.0 and preserve an explicit version', async () => {
+test('Reality stream settings keep an empty official minClientVer and preserve an explicit version', async () => {
   const realityService = new XuiService({} as never, {} as never, testLocks()) as any;
   realityService.resolveRealityKeys = async () => ({ privateKey: 'private-key', publicKey: 'public-key' });
   realityService.resolveRealityTarget = async () => ({ target: 'cdn.example.com:443', serverName: 'cdn.example.com', source: 'scan' });
@@ -77,11 +77,12 @@ test('Reality stream settings default minClient to 1.0.0 and preserve an explici
     realityMinClientVersion: '1.2.3'
   });
 
-  assert.equal(empty.realitySettings.minClient, '1.0.0');
-  assert.equal(versioned.realitySettings.minClient, '1.2.3');
+  assert.equal(empty.realitySettings.minClientVer, '');
+  assert.equal(versioned.realitySettings.minClientVer, '1.2.3');
+  assert.equal('minClient' in empty.realitySettings, false);
 });
 
-test('Reality inbound creation sends a manually supplied minClient to 3x-ui', async () => {
+test('Reality inbound creation sends a manually supplied minClientVer to 3x-ui', async () => {
   let submittedInbound: any;
   const client = {
     listInbounds: async () => ({ success: true, obj: [] }),
@@ -112,7 +113,7 @@ test('Reality inbound creation sends a manually supplied minClient to 3x-ui', as
     port: 24443
   });
 
-  assert.equal(submittedInbound.streamSettings.realitySettings.minClient, '1.0.0');
+  assert.equal(submittedInbound.streamSettings.realitySettings.minClientVer, '1.0.0');
 });
 
 
@@ -218,7 +219,8 @@ test('full Reality inbound update preserves credentials and verifies the remote 
   assert.equal(submitted.streamSettings.realitySettings.privateKey, 'private-key');
   assert.equal(submitted.streamSettings.realitySettings.publicKey, 'public-key');
   assert.deepEqual(submitted.streamSettings.realitySettings.shortIds, ['a1b2c3d4']);
-  assert.equal(submitted.streamSettings.realitySettings.minClient, '1.0.0');
+  assert.equal(submitted.streamSettings.realitySettings.minClientVer, '1.0.0');
+  assert.equal('minClient' in submitted.streamSettings.realitySettings, false);
   assert.equal(submitted.streamSettings.realitySettings.settings.shortId, 'a1b2c3d4');
 });
 

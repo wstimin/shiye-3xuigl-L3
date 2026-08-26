@@ -167,7 +167,7 @@ const form = reactive({
   xhttpMode: 'auto',
   realityTarget: '',
   realityServerName: '',
-  realityMinClientVersion: '1.0.0',
+  realityMinClientVersion: '',
   priceMonthly: 0,
   trafficLimitGb: 0,
   enabled: true,
@@ -396,7 +396,7 @@ function editNode(node: ServiceNode) {
     xhttpMode: config.xhttpMode || 'auto',
     realityTarget: config.realityTarget || '',
     realityServerName: config.realityServerName || '',
-    realityMinClientVersion: config.realityMinClientVersion || (config.encryption === 'reality' ? '1.0.0' : ''),
+    realityMinClientVersion: config.realityMinClientVersion || '',
     priceMonthly: Number(node.priceMonthly),
     trafficLimitGb: Number(node.trafficLimitGb),
     enabled: node.enabled,
@@ -530,7 +530,7 @@ function resetForm() {
     xhttpMode: 'auto',
     realityTarget: '',
     realityServerName: '',
-    realityMinClientVersion: '1.0.0',
+    realityMinClientVersion: '',
     priceMonthly: 0,
     trafficLimitGb: 0,
     enabled: true,
@@ -858,7 +858,7 @@ watch(() => form.transport, () => {
               <el-input v-model="form.realityServerName" readonly placeholder="自动检测后填写" />
             </el-form-item>
             <el-form-item label="最小客户端版本">
-              <el-input v-model="form.realityMinClientVersion" maxlength="40" placeholder="默认 1.0.0" />
+              <el-input v-model="form.realityMinClientVersion" maxlength="40" placeholder="留空表示不限制" />
             </el-form-item>
             <el-form-item class="node-dialog-full">
               <el-button class="node-secondary-button" :loading="detectingReality" :disabled="!form.serverId" @click="detectReality"><RefreshCw :size="15" />重新检测</el-button>

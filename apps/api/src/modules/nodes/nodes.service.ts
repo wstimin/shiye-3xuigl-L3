@@ -903,10 +903,18 @@ export class NodesService {
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
 
     if (!serviceNode.inboundId) throw new BadRequestException('服务节点缺少官方 3x-ui 入站 ID');
+    const occupied = await this.prisma.customerNode.findFirst({
+      where: { serviceNodeId: input.serviceNodeId },
+      select: { id: true }
+    });
+    if (occupied) throw new BadRequestException('该节点已绑定其他用户，请先解除原绑定后再操作');
     const remoteClient = await this.serviceNodeRemoteClientIdentity(serviceNode);
     const xuiEmail = remoteClient.email;
     const uuid = remoteClient.uuid || null;
     if (!xuiEmail) throw new BadRequestException('该路由节点没有可绑定的官方客户端，请先同步或修复路由节点');
+    const remoteIdentity = { email: xuiEmail, uuid, subId: remoteClient.subId };
+    const expireAt = input.expireAt || null;
+    const enabled = !expireAt || expireAt > new Date();
     const node = await this.prisma.customerNode.create({
       data: {
         customerId,
@@ -914,19 +922,31 @@ export class NodesService {
         clientName: null,
         xuiEmail,
         uuid,
-        expireAt: input.expireAt || null,
+        expireAt,
         trafficLimitGb: new Prisma.Decimal(input.trafficLimitGb ?? serviceNode.trafficLimitGb),
-        status: 'active',
+        status: enabled ? 'active' : 'disabled',
+        disabledReason: enabled ? null : 'expired',
         remoteControl: 'reference',
         config: this.toJsonValue({ uuid, subId: remoteClient.subId })
       },
       include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
     });
 
-    let syncResult: Awaited<ReturnType<XuiService['refreshCustomerNodeBinding']>>;
+    let remoteBefore: Awaited<ReturnType<XuiService['serviceNodeRemoteClientState']>> | undefined;
+    let syncResult: Awaited<ReturnType<XuiService['updateServiceNodeRemoteAuthorization']>>;
     try {
-      syncResult = await this.xui.refreshCustomerNodeBinding(customerId, node.id);
+      await this.xui.refreshCustomerNodeBinding(customerId, node.id);
+      remoteBefore = await this.xui.serviceNodeRemoteClientState(serviceNode.id, remoteIdentity);
+      syncResult = await this.xui.updateServiceNodeRemoteAuthorization(serviceNode.id, remoteIdentity, expireAt, enabled);
     } catch (error) {
+      if (remoteBefore) {
+        await this.xui.updateServiceNodeRemoteAuthorization(
+          serviceNode.id,
+          remoteIdentity,
+          remoteBefore.expiryTime > 0 ? new Date(remoteBefore.expiryTime) : null,
+          remoteBefore.enable
+        ).catch(() => undefined);
+      }
       await this.prisma.customerNode.delete({ where: { id: node.id } }).catch(() => undefined);
       throw error;
     }
@@ -973,6 +993,13 @@ export class NodesService {
     if (!serviceNode) throw new NotFoundException('服务节点不存在');
 
     const nodeChanged = serviceNodeId !== current.serviceNodeId;
+    if (nodeChanged) {
+      const occupied = await this.prisma.customerNode.findFirst({
+        where: { serviceNodeId, id: { not: customerNodeId } },
+        select: { id: true }
+      });
+      if (occupied) throw new BadRequestException('目标节点已绑定其他用户，请先解除原绑定后再操作');
+    }
     const remoteClient = nodeChanged
       ? await this.serviceNodeRemoteClientIdentity(serviceNode)
       : { email: current.xuiEmail, uuid: current.uuid || undefined, subId: stringValue(jsonObject(current.config).subId) };
@@ -983,26 +1010,76 @@ export class NodesService {
     const nextConfig = nodeChanged
       ? { uuid: nextUuid, subId: remoteClient.subId }
       : currentConfig;
+    const nextExpireAt = input.expireAt === undefined ? current.expireAt : input.expireAt || null;
+    const expiryAllowsAccess = !nextExpireAt || nextExpireAt > new Date();
+    const nextEnabled = current.disabledReason === 'admin' || current.disabledReason === 'traffic_exceeded'
+      ? false
+      : expiryAllowsAccess;
+    const nextStatus = nextEnabled ? 'active' : 'disabled';
+    const nextDisabledReason = nextEnabled ? null : current.disabledReason === 'admin' || current.disabledReason === 'traffic_exceeded'
+      ? current.disabledReason
+      : 'expired';
+    const oldRemoteIdentity = {
+      email: current.xuiEmail,
+      uuid: current.uuid,
+      subId: stringValue(currentConfig.subId)
+    };
+    const targetRemoteIdentity = {
+      email: nextXuiEmail,
+      uuid: nextUuid,
+      subId: remoteClient.subId
+    };
 
-    const node = await this.prisma.customerNode.update({
-      where: { id: customerNodeId },
-      data: {
-        serviceNodeId: input.serviceNodeId,
-        clientName: nodeChanged ? null : undefined,
-        xuiEmail: nextXuiEmail,
-        uuid: nextUuid,
-        expireAt: input.expireAt === undefined ? undefined : input.expireAt || null,
-        trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb ?? serviceNode.trafficLimitGb),
-        remoteControl: 'reference',
-        config: this.toJsonValue(nextConfig)
-      },
-      include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
-    });
+    const oldRemoteBefore = await this.xui.serviceNodeRemoteClientState(current.serviceNodeId, oldRemoteIdentity);
+    if (nodeChanged) await this.xui.setServiceNodeRemoteClientEnabled(current.serviceNodeId, oldRemoteIdentity, false);
 
-    let syncResult: Awaited<ReturnType<XuiService['refreshCustomerNodeBinding']>>;
+    let node;
     try {
-      syncResult = await this.xui.refreshCustomerNodeBinding(customerId, customerNodeId);
+      node = await this.prisma.customerNode.update({
+        where: { id: customerNodeId },
+        data: {
+          serviceNodeId: input.serviceNodeId,
+          clientName: nodeChanged ? null : undefined,
+          xuiEmail: nextXuiEmail,
+          uuid: nextUuid,
+          expireAt: nextExpireAt,
+          trafficLimitGb: input.trafficLimitGb === undefined ? undefined : new Prisma.Decimal(input.trafficLimitGb ?? serviceNode.trafficLimitGb),
+          status: nextStatus,
+          disabledReason: nextDisabledReason,
+          remoteControl: 'reference',
+          config: this.toJsonValue(nextConfig)
+        },
+        include: { serviceNode: { include: { server: true } }, customer: { select: { id: true, name: true, loginUsername: true } } }
+      });
     } catch (error) {
+      if (nodeChanged) {
+        await this.xui.updateServiceNodeRemoteAuthorization(
+          current.serviceNodeId,
+          oldRemoteIdentity,
+          oldRemoteBefore.expiryTime > 0 ? new Date(oldRemoteBefore.expiryTime) : null,
+          oldRemoteBefore.enable
+        ).catch(() => undefined);
+      }
+      throw error;
+    }
+
+    let targetRemoteBefore: Awaited<ReturnType<XuiService['serviceNodeRemoteClientState']>> | undefined;
+    let syncResult: Awaited<ReturnType<XuiService['updateServiceNodeRemoteAuthorization']>>;
+    try {
+      await this.xui.refreshCustomerNodeBinding(customerId, customerNodeId);
+      targetRemoteBefore = nodeChanged
+        ? await this.xui.serviceNodeRemoteClientState(serviceNodeId, targetRemoteIdentity)
+        : oldRemoteBefore;
+      syncResult = await this.xui.updateServiceNodeRemoteAuthorization(serviceNodeId, targetRemoteIdentity, nextExpireAt, nextEnabled);
+    } catch (error) {
+      if (targetRemoteBefore) {
+        await this.xui.updateServiceNodeRemoteAuthorization(
+          serviceNodeId,
+          targetRemoteIdentity,
+          targetRemoteBefore.expiryTime > 0 ? new Date(targetRemoteBefore.expiryTime) : null,
+          targetRemoteBefore.enable
+        ).catch(() => undefined);
+      }
       await this.prisma.customerNode.update({
         where: { id: customerNodeId },
         data: {
@@ -1018,6 +1095,14 @@ export class NodesService {
           config: this.toJsonValue(current.config)
         }
       }).catch(() => undefined);
+      if (nodeChanged) {
+        await this.xui.updateServiceNodeRemoteAuthorization(
+          current.serviceNodeId,
+          oldRemoteIdentity,
+          oldRemoteBefore.expiryTime > 0 ? new Date(oldRemoteBefore.expiryTime) : null,
+          oldRemoteBefore.enable
+        ).catch(() => undefined);
+      }
       throw error;
     }
 
@@ -1069,15 +1154,34 @@ export class NodesService {
   }
 
   private async unbindCustomerNodeUnlocked(customerId: string, customerNodeId: string) {
-    const node = await this.prisma.customerNode.findFirst({ where: { id: customerNodeId, customerId }, select: { id: true } });
+    const node = await this.prisma.customerNode.findFirst({
+      where: { id: customerNodeId, customerId },
+      select: { id: true, serviceNodeId: true, xuiEmail: true, uuid: true, config: true }
+    });
     if (!node) throw new NotFoundException('用户节点不存在');
     const pendingRenewal = await this.prisma.renewalLog.findFirst({
       where: { customerNodeId, status: 'pending' },
       select: { id: true }
     });
     if (pendingRenewal) throw new BadRequestException('该用户节点存在待处理续费，完成自动恢复或人工对账后才能解绑');
-    const remoteCleanup: unknown = { skipped: true, reason: '这里只解除本地用户绑定，远端客户端仍归服务节点管理' };
-    await this.prisma.customerNode.delete({ where: { id: customerNodeId } });
+    const remoteIdentity = {
+      email: node.xuiEmail,
+      uuid: node.uuid,
+      subId: stringValue(jsonObject(node.config).subId)
+    };
+    const remoteBefore = await this.xui.serviceNodeRemoteClientState(node.serviceNodeId, remoteIdentity);
+    const remoteCleanup = await this.xui.setServiceNodeRemoteClientEnabled(node.serviceNodeId, remoteIdentity, false);
+    try {
+      await this.prisma.customerNode.delete({ where: { id: customerNodeId } });
+    } catch (error) {
+      await this.xui.updateServiceNodeRemoteAuthorization(
+        node.serviceNodeId,
+        remoteIdentity,
+        remoteBefore.expiryTime > 0 ? new Date(remoteBefore.expiryTime) : null,
+        remoteBefore.enable
+      ).catch(() => undefined);
+      throw error;
+    }
     return { deleted: true, id: customerNodeId, remoteCleanup };
   }
 
@@ -1441,8 +1545,8 @@ export class NodesService {
       realityTarget: input.realityTarget === undefined ? previous.realityTarget || '' : input.realityTarget || '',
       realityServerName: input.realityServerName === undefined ? previous.realityServerName || '' : input.realityServerName || '',
       realityMinClientVersion: input.realityMinClientVersion === undefined
-        ? previous.realityMinClientVersion || ((input.encryption || previous.encryption) === 'reality' ? '1.0.0' : '')
-        : input.realityMinClientVersion || ((input.encryption || previous.encryption) === 'reality' ? '1.0.0' : ''),
+        ? previous.realityMinClientVersion || ''
+        : input.realityMinClientVersion || '',
       socksRelayEnabled: input.socksRelayEnabled === undefined ? Boolean(previous.socksRelayEnabled) : input.socksRelayEnabled,
       socksNodeId: input.socksNodeId === undefined ? previous.socksNodeId || null : input.socksNodeId || null
     };

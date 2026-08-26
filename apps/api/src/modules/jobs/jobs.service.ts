@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { XuiService } from '../xui/xui.service.js';
 import { DatabaseLockService } from '../../shared/database-lock.service.js';
 
 type DisableExpiredResult = {
@@ -55,6 +56,7 @@ export class JobsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly xui: XuiService,
     private readonly locks: DatabaseLockService
   ) {}
 
@@ -158,15 +160,16 @@ export class JobsService {
           this.locks.withLock<DisableExpiredOutcome>(this.locks.customerNodeKey(node.id), async () => {
             const current = await this.prisma.customerNode.findUnique({
               where: { id: node.id },
-              select: { status: true, expireAt: true, serviceNodeId: true }
+              select: { customerId: true, status: true, expireAt: true, serviceNodeId: true }
             });
             if (!current || current.serviceNodeId !== node.serviceNodeId || current.status !== 'active' || !current.expireAt || current.expireAt > new Date()) {
               return { skipped: true, reason: '节点状态或到期时间已变化' } as const;
             }
             if (await this.hasPendingRenewal(node.id)) return { skipped: true, reason: '节点续费正在处理，已等待续费完成后再检查' } as const;
+            await this.xui.setCustomerNodeRemoteEnabled(current.customerId, node.id, false);
             await this.prisma.customerNode.update({
               where: { id: node.id },
-              data: { status: 'disabled', disabledReason: 'expired' }
+              data: { status: 'disabled', disabledReason: 'expired', lastSyncedAt: new Date() }
             });
             return { skipped: false } as const;
           })

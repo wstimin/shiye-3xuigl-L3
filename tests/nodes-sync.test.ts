@@ -137,9 +137,10 @@ test('new Reality service nodes persist a manually supplied minimum client versi
   assert.equal(createdConfig.realityMinClientVersion, '1.0.0');
 });
 
-test('binding refreshes remote identity without creating or modifying the remote client', async () => {
+test('binding refreshes identity and synchronizes the shared client expiry without creating a client', async () => {
   let refreshCalls = 0;
-  let remoteWriteCalls = 0;
+  let clientLifecycleCalls = 0;
+  let expirySyncCalls = 0;
   let storedNode: any;
   const serviceNode = {
     id: 'service-node-1',
@@ -169,9 +170,14 @@ test('binding refreshes remote identity without creating or modifying the remote
       refreshCalls += 1;
       return { synced: true, remoteWrite: false, node: storedNode };
     },
-    createCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; },
-    patchCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; },
-    deleteCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; }
+    serviceNodeRemoteClientState: async () => ({ expiryTime: 0, enable: false }),
+    updateServiceNodeRemoteAuthorization: async () => {
+      expirySyncCalls += 1;
+      return { synced: true, remoteWrite: true };
+    },
+    createCustomerNodeRemoteClient: async () => { clientLifecycleCalls += 1; },
+    patchCustomerNodeRemoteClient: async () => { clientLifecycleCalls += 1; },
+    deleteCustomerNodeRemoteClient: async () => { clientLifecycleCalls += 1; }
   } as any;
   const service = new NodesService(prisma, encryption(), xui, testLocks());
 
@@ -184,7 +190,8 @@ test('binding refreshes remote identity without creating or modifying the remote
   });
 
   assert.equal(refreshCalls, 1);
-  assert.equal(remoteWriteCalls, 0);
+  assert.equal(expirySyncCalls, 1);
+  assert.equal(clientLifecycleCalls, 0);
 });
 
 test('binding always uses the service node shared client and ignores legacy create fields', async () => {
@@ -205,6 +212,7 @@ test('binding always uses the service node shared client and ignores legacy crea
     customer: { findUnique: async () => ({ id: 'customer-1', name: '测试', loginUsername: 'ceshi1' }) },
     serviceNode: { findUnique: async () => serviceNode },
     customerNode: {
+      findFirst: async () => null,
       create: async ({ data }: any) => {
         storedNode = { id: 'customer-node-1', ...data };
         return storedNode;
@@ -215,6 +223,8 @@ test('binding always uses the service node shared client and ignores legacy crea
   } as any;
   const xui = {
     refreshCustomerNodeBinding: async () => ({ synced: true, remoteWrite: false, node: storedNode }),
+    serviceNodeRemoteClientState: async () => ({ expiryTime: 0, enable: false }),
+    updateServiceNodeRemoteAuthorization: async () => ({ synced: true, remoteWrite: true }),
     createCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; },
     patchCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; }
   } as any;
@@ -238,7 +248,7 @@ test('binding always uses the service node shared client and ignores legacy crea
   assert.equal(remoteWriteCalls, 0);
 });
 
-test('multiple users can bind the same service node shared client without creating duplicates', async () => {
+test('a service node can only be bound to one user at a time', async () => {
   const storedNodes: any[] = [];
   const serviceNode = {
     id: 'service-node-1',
@@ -251,6 +261,7 @@ test('multiple users can bind the same service node shared client without creati
     customer: { findUnique: async ({ where }: any) => ({ id: where.id, name: where.id, loginUsername: where.id }) },
     serviceNode: { findUnique: async () => serviceNode },
     customerNode: {
+      findFirst: async ({ where }: any) => storedNodes.find((node) => node.serviceNodeId === where.serviceNodeId) || null,
       create: async ({ data }: any) => {
         const node = { id: `customer-node-${storedNodes.length + 1}`, ...data };
         storedNodes.push(node);
@@ -260,15 +271,151 @@ test('multiple users can bind the same service node shared client without creati
       delete: async () => ({})
     }
   } as any;
-  const xui = { refreshCustomerNodeBinding: async (_customerId: string, nodeId: string) => ({ synced: true, remoteWrite: false, node: storedNodes.find((node) => node.id === nodeId) }) };
+  const xui = {
+    refreshCustomerNodeBinding: async (_customerId: string, nodeId: string) => ({ synced: true, remoteWrite: false, node: storedNodes.find((node) => node.id === nodeId) }),
+    serviceNodeRemoteClientState: async () => ({ expiryTime: 0, enable: false }),
+    updateServiceNodeRemoteAuthorization: async () => ({ synced: true, remoteWrite: true })
+  };
   const service = new NodesService(prisma, encryption(), xui as any, testLocks());
 
   await service.bindCustomerNode('customer-1', { serviceNodeId: 'service-node-1', remoteAction: 'bind' });
-  await service.bindCustomerNode('customer-2', { serviceNodeId: 'service-node-1', remoteAction: 'bind' });
+  await assert.rejects(
+    () => service.bindCustomerNode('customer-2', { serviceNodeId: 'service-node-1', remoteAction: 'bind' }),
+    /已绑定其他用户/
+  );
 
-  assert.equal(storedNodes.length, 2);
-  assert.deepEqual(storedNodes.map((node) => node.xuiEmail), ['us-premium', 'us-premium']);
-  assert.deepEqual(storedNodes.map((node) => node.remoteControl), ['reference', 'reference']);
+  assert.equal(storedNodes.length, 1);
+  assert.equal(storedNodes[0].xuiEmail, 'us-premium');
+});
+
+test('failed node switching restores each remote client by explicit service-node identity', async () => {
+  const oldNode = {
+    id: 'service-node-old',
+    serverId: 'server-1',
+    inboundId: 8,
+    trafficLimitGb: 100,
+    config: { remoteClientEmail: 'old@example.com', remoteClientUuid: 'old-uuid', remoteClientSubId: 'old-sub' }
+  };
+  const newNode = {
+    id: 'service-node-new',
+    serverId: 'server-1',
+    inboundId: 9,
+    trafficLimitGb: 100,
+    config: { remoteClientEmail: 'new@example.com', remoteClientUuid: 'new-uuid', remoteClientSubId: 'new-sub' }
+  };
+  let storedNode: any = {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    serviceNodeId: oldNode.id,
+    clientName: '旧节点',
+    xuiEmail: 'old@example.com',
+    uuid: 'old-uuid',
+    expireAt: new Date('2030-01-01T00:00:00Z'),
+    trafficLimitGb: 100,
+    status: 'active',
+    disabledReason: null,
+    remoteControl: 'reference',
+    config: { subId: 'old-sub' },
+    serviceNode: oldNode
+  };
+  let localUpdateCalls = 0;
+  const remoteCalls: Array<{ action: string; serviceNodeId: string; email: string; enable?: boolean }> = [];
+  const prisma = {
+    customerNode: {
+      findFirst: async ({ where }: any) => {
+        if (where.serviceNodeId) return null;
+        return storedNode;
+      },
+      update: async ({ data }: any) => {
+        localUpdateCalls += 1;
+        if (localUpdateCalls === 2) throw new Error('local rollback failed');
+        storedNode = { ...storedNode, ...data, serviceNode: data.serviceNodeId === newNode.id ? newNode : oldNode };
+        return storedNode;
+      },
+      findUnique: async () => storedNode
+    },
+    serviceNode: { findUnique: async ({ where }: any) => where.id === newNode.id ? newNode : oldNode },
+    renewalLog: { findFirst: async () => null }
+  } as any;
+  let newAuthorizationUpdates = 0;
+  const xui = {
+    serviceNodeRemoteClientState: async (serviceNodeId: string, identity: any) => ({
+      serviceNodeId,
+      xuiEmail: identity.email,
+      expiryTime: 0,
+      enable: true
+    }),
+    setServiceNodeRemoteClientEnabled: async (serviceNodeId: string, identity: any, enable: boolean) => {
+      remoteCalls.push({ action: 'enable', serviceNodeId, email: identity.email, enable });
+      return { synced: true };
+    },
+    refreshCustomerNodeBinding: async () => ({ synced: true }),
+    updateServiceNodeRemoteAuthorization: async (serviceNodeId: string, identity: any, _expireAt: Date | null, enable: boolean) => {
+      remoteCalls.push({ action: 'authorization', serviceNodeId, email: identity.email, enable });
+      if (serviceNodeId === newNode.id && newAuthorizationUpdates++ === 0) throw new Error('target panel rejected update');
+      return { synced: true, remoteWrite: true };
+    }
+  } as any;
+  const service = new NodesService(prisma, encryption(), xui, testLocks());
+
+  await assert.rejects(
+    () => service.updateCustomerNode('customer-1', 'customer-node-1', { serviceNodeId: newNode.id }),
+    /target panel rejected update/
+  );
+
+  assert.deepEqual(remoteCalls, [
+    { action: 'enable', serviceNodeId: oldNode.id, email: 'old@example.com', enable: false },
+    { action: 'authorization', serviceNodeId: newNode.id, email: 'new@example.com', enable: true },
+    { action: 'authorization', serviceNodeId: newNode.id, email: 'new@example.com', enable: true },
+    { action: 'authorization', serviceNodeId: oldNode.id, email: 'old@example.com', enable: true }
+  ]);
+});
+
+test('unbinding disables the shared client, deletes only the local binding, and restores remote state on local failure', async () => {
+  for (const localDeleteFails of [false, true]) {
+    let remoteDeleteCalls = 0;
+    const authorizationCalls: Array<{ serviceNodeId: string; email: string; enable: boolean }> = [];
+    const node = {
+      id: 'customer-node-1',
+      serviceNodeId: 'service-node-1',
+      xuiEmail: 'shared@example.com',
+      uuid: 'shared-uuid',
+      config: { subId: 'shared-sub' }
+    };
+    const prisma = {
+      customerNode: {
+        findFirst: async () => node,
+        delete: async () => {
+          if (localDeleteFails) throw new Error('local delete failed');
+          return node;
+        }
+      },
+      renewalLog: { findFirst: async () => null }
+    } as any;
+    const xui = {
+      serviceNodeRemoteClientState: async () => ({ expiryTime: new Date('2030-01-01T00:00:00Z').getTime(), enable: true }),
+      setServiceNodeRemoteClientEnabled: async (serviceNodeId: string, identity: any, enable: boolean) => {
+        authorizationCalls.push({ serviceNodeId, email: identity.email, enable });
+        return { synced: true };
+      },
+      updateServiceNodeRemoteAuthorization: async (serviceNodeId: string, identity: any, _expireAt: Date | null, enable: boolean) => {
+        authorizationCalls.push({ serviceNodeId, email: identity.email, enable });
+        return { synced: true };
+      },
+      deleteCustomerNodeRemoteClient: async () => { remoteDeleteCalls += 1; }
+    } as any;
+    const service = new NodesService(prisma, encryption(), xui, testLocks());
+
+    if (localDeleteFails) {
+      await assert.rejects(() => service.unbindCustomerNode('customer-1', node.id), /local delete failed/);
+      assert.deepEqual(authorizationCalls.map((call) => call.enable), [false, true]);
+    } else {
+      const result = await service.unbindCustomerNode('customer-1', node.id);
+      assert.equal(result.deleted, true);
+      assert.deepEqual(authorizationCalls.map((call) => call.enable), [false]);
+    }
+    assert.equal(remoteDeleteCalls, 0);
+  }
 });
 
 test('retrying a service config task only synchronizes current config and never creates an inbound', async () => {

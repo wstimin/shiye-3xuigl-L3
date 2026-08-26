@@ -47,6 +47,36 @@ test('retired UI layers stay removed', () => {
   }
 });
 
+test('user pages remove decorative overlays while retaining functional modal backdrops', () => {
+  for (const selector of [
+    '.login-screen::before',
+    '.login-screen::after',
+    '.user-stat-card::after',
+    '.node-stat-grid article::after'
+  ]) {
+    assert.equal(userStyles.includes(selector), false, 'Decorative overlay returned: ' + selector);
+  }
+
+  assert.equal(userStyles.includes('.qr-modal'), true);
+  assert.equal(userStyles.includes('.user-nav-backdrop'), true);
+  assert.equal(userStyles.includes('background: #2c3440;'), true);
+});
+
+test('user shell base styles do not depend on later overrides to hide light surfaces', () => {
+  for (const lightRule of [
+    'background: rgba(255, 255, 255, 0.94)',
+    '.secondary-button { height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;',
+    '.payment-method-button { min-width: 0; min-height: 96px; display: grid; grid-template-rows: 30px minmax(20px, auto) 18px; justify-items: center; align-content: center; gap: 5px; border: 1px solid #d7dde8; border-radius: 8px; background: #fff;',
+    '.finance-form input, .finance-form select { min-width: 0; height: 42px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 12px; background: #fff;',
+    '.toast-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; border: 1px solid #dbe3ef; border-left-width: 4px; border-radius: 8px; background: #fff;'
+  ]) {
+    assert.equal(userStyles.includes(lightRule), false, 'Light base surface returned: ' + lightRule);
+  }
+
+  assert.equal(userStyles.includes('.user-sidebar { min-height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px; background: #2a313b;'), true);
+  assert.equal(userStyles.includes('.qr-box img { width: 220px; height: 220px; max-width: 100%; background: #fff; }'), true);
+});
+
 test('lazy Element Plus styles cannot expand desktop management filters', () => {
   for (const selector of [
     '.overview-shell .customer-filter-select',
