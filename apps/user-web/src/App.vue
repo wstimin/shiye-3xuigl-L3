@@ -12,6 +12,7 @@ type Branding = { brandName: string; logoDataUrl: string };
 type UserIdentity = { customer: { name: string; loginUsername: string } };
 
 const fallbackBrandName = '十夜用户中心';
+const appVersion = __SHIYE_BUILD_INFO__.version;
 const nav = [
   { to: '/', label: '用户概览', icon: Home },
   { to: '/nodes', label: '我的节点', icon: Network },
@@ -289,7 +290,7 @@ watch(() => route.fullPath, () => {
           </span>
         </div>
         <button class="logout-button" type="button" @click="logout"><LogOut :size="16" />退出登录</button>
-        <span class="user-version">Version 1.0.5</span>
+        <span class="user-version">Version {{ appVersion }}</span>
       </div>
     </aside>
     <div class="user-workspace">

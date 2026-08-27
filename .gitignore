@@ -30,6 +30,7 @@ Thumbs.db
 
 *.zip
 .release/
+build-info.json
 tu/
 图片/
 

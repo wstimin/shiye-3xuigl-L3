@@ -16,6 +16,7 @@ function openApiDocument(paths?: Record<string, unknown>) {
       '/panel/api/clients/add': {},
       '/panel/api/clients/update/{email}': {},
       '/panel/api/clients/{email}/detach': {},
+      '/panel/api/clients/traffic/{email}': {},
       '/panel/api/inbounds/{id}/resetTraffic': {}
     }
   };
@@ -31,7 +32,8 @@ test('3.6 capability detection requires the official OpenAPI fingerprint', async
     apiProfile: 'v3.6',
     detectedVersion: '3.6.0',
     source: 'openapi',
-    openApiVersion: '3.0.0'
+    openApiVersion: '3.0.0',
+    trafficEndpointVerified: true
   });
 });
 
@@ -47,6 +49,17 @@ test('missing official 3.6 OpenAPI rejects the panel with a Chinese version erro
 
   await assert.rejects(() => missingDocument.detectCapabilities(), /不支持 3x-ui 3\.6 官方 API/);
   await assert.rejects(() => incompleteDocument.detectCapabilities(), /不支持 3x-ui 3\.6 官方 API/);
+});
+
+test('3.6 capability detection rejects a panel without official client traffic reads', async () => {
+  const paths = { ...openApiDocument().paths } as Record<string, unknown>;
+  delete paths['/panel/api/clients/traffic/{email}'];
+  const client = new XuiClient({
+    baseUrl: 'https://incomplete.example.com',
+    fetchImpl: async () => jsonResponse(openApiDocument(paths))
+  });
+
+  await assert.rejects(() => client.detectCapabilities(), /不支持 3x-ui 3\.6 官方 API/);
 });
 
 test('official 3.6 client and inbound operations use only the documented paths', async () => {

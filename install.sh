@@ -641,18 +641,18 @@ WantedBy=multi-user.target
 SERVICE
 }
 
-installed_release_version() {
-  node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(String(pkg.version || ""));' "${APP_DIR}/package.json" 2>/dev/null
+installed_release_identity() {
+  node -e 'const fs = require("node:fs"); const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write([value.version, value.commit, value.buildTime].map((item) => String(item || "")).join("|"));' "${APP_DIR}/build-info.json" 2>/dev/null
 }
 
 api_health_matches_installed_release() {
   health_url="$1"
-  expected_version="$(installed_release_version)" || return 1
-  [ -n "${expected_version}" ] || return 1
+  expected_identity="$(installed_release_identity)" || return 1
+  case "${expected_identity}" in *'|'*'|'*) ;; *) return 1 ;; esac
 
   health_payload="$(curl -fsS "${health_url}" 2>/dev/null)" || return 1
-  actual_version="$(printf '%s' "${health_payload}" | node -e 'let data = ""; process.stdin.on("data", (chunk) => { data += chunk; }); process.stdin.on("end", () => { try { process.stdout.write(String(JSON.parse(data).version || "")); } catch {} });' 2>/dev/null)" || return 1
-  [ "${actual_version}" = "${expected_version}" ]
+  actual_identity="$(printf '%s' "${health_payload}" | node -e 'let data = ""; process.stdin.on("data", (chunk) => { data += chunk; }); process.stdin.on("end", () => { try { const value = JSON.parse(data); process.stdout.write([value.version, value.commit, value.buildTime].map((item) => String(item || "")).join("|")); } catch {} });' 2>/dev/null)" || return 1
+  [ "${actual_identity}" = "${expected_identity}" ]
 }
 
 wait_for_api_health_soft() {
@@ -675,7 +675,7 @@ wait_for_api_health() {
   attempt=1
   while [ "${attempt}" -le "${attempts}" ]; do
     if api_health_matches_installed_release "${health_url}"; then
-      log "API health check passed for release $(installed_release_version)"
+      log "API health check passed for release $(installed_release_identity)"
       return 0
     fi
 
@@ -697,15 +697,20 @@ wait_for_api_health() {
 
 verify_web_routes_soft() {
   admin_path="$(cd "${APP_DIR}" && resolve_admin_path)"
+  expected_identity="$(installed_release_identity)" || return 1
   for path in / "${admin_path}" "${admin_path}/"; do
     url="http://127.0.0.1:${PORT}${path}"
     content_type="$(curl -fsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
     case "${content_type}" in text/html*) ;; *) return 1 ;; esac
+    html="$(curl -fsS "${url}" 2>/dev/null)" || return 1
+    actual_identity="$(printf '%s' "${html}" | node -e 'let html = ""; process.stdin.on("data", (chunk) => { html += chunk; }); process.stdin.on("end", () => { const read = (name) => html.match(new RegExp(`<meta[^>]+name=["'\'']${name}["'\''][^>]+content=["'\'']([^"'\'']*)["'\'']`, "i"))?.[1] || ""; process.stdout.write([read("shiye-version"), read("shiye-commit"), read("shiye-build-time")].join("|")); });' 2>/dev/null)" || return 1
+    [ "${actual_identity}" = "${expected_identity}" ] || return 1
   done
   return 0
 }
 verify_web_routes() {
   admin_path="$(cd "${APP_DIR}" && resolve_admin_path)"
+  expected_identity="$(installed_release_identity)" || die "Installed build identity is missing or invalid"
   for path in / "${admin_path}" "${admin_path}/"; do
     url="http://127.0.0.1:${PORT}${path}"
     content_type="$(curl -fsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
@@ -713,6 +718,9 @@ verify_web_routes() {
       text/html*) ;;
       *) die "Web route ${url} did not return HTML. Got content-type: ${content_type:-none}" ;;
     esac
+    html="$(curl -fsS "${url}" 2>/dev/null)" || die "Web route ${url} could not be read for build identity verification"
+    actual_identity="$(printf '%s' "${html}" | node -e 'let html = ""; process.stdin.on("data", (chunk) => { html += chunk; }); process.stdin.on("end", () => { const read = (name) => html.match(new RegExp(`<meta[^>]+name=["'\'']${name}["'\''][^>]+content=["'\'']([^"'\'']*)["'\'']`, "i"))?.[1] || ""; process.stdout.write([read("shiye-version"), read("shiye-commit"), read("shiye-build-time")].join("|")); });' 2>/dev/null)" || die "Web route ${url} build identity could not be parsed"
+    [ "${actual_identity}" = "${expected_identity}" ] || die "Web route ${url} is not serving the installed build identity"
   done
   log "Web route checks passed"
 }

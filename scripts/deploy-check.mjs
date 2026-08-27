@@ -14,16 +14,19 @@ const syncTaskMigration = readRequiredFile('prisma/migrations/20260801010000_syn
 const installerScript = readRequiredFile('install.sh');
 const migrationCheckScript = readRequiredFile('scripts/check-update-migrations.mjs');
 const packageMetadata = JSON.parse(readRequiredFile('package.json') || '{}');
+const buildInfo = JSON.parse(readRequiredFile('build-info.json') || '{}');
 
 if (adminIndex) {
   requireMatch(adminIndex, /src="\.\/assets\//, 'Admin build must load JS from relative ./assets/ so ADMIN_PATH can change at runtime.');
   requireMatch(adminIndex, /href="\.\/assets\//, 'Admin build must load CSS from relative ./assets/ so ADMIN_PATH can change at runtime.');
   forbidMatch(adminIndex, /(?:src|href)="\/(?:admin\/)?assets\//, 'Admin build must not reference fixed /admin/assets/ or root /assets/.');
+  verifyFrontendBuildIdentity(adminIndex, 'Admin');
 }
 
 if (userIndex) {
   requireMatch(userIndex, /src="\/assets\//, 'User build must load JS from /assets/.');
   requireMatch(userIndex, /href="\/assets\//, 'User build must load CSS from /assets/.');
+  verifyFrontendBuildIdentity(userIndex, 'User');
 }
 
 if (prismaSchema) {
@@ -40,13 +43,19 @@ if (installerScript) {
   requireMatch(installerScript, /prepare_atomic_update()/, 'Installer must prepare updates before stopping the current service.');
   requireMatch(installerScript, /activate_atomic_update()/, 'Installer must activate prepared updates with a short directory switch.');
   requireMatch(installerScript, /rollback_atomic_update()/, 'Installer must restore the previous runtime after failed health checks.');
+  requireMatch(installerScript, /installed_release_identity()/, 'Installer must read the staged build identity.');
+  requireMatch(installerScript, /value\.version, value\.commit, value\.buildTime/, 'Installer must compare version, commit and build time.');
+  requireMatch(installerScript, /shiye-version/, 'Installer must verify the frontend build identity.');
   requireMatch(installerScript, /assert_migrations_are_rollback_compatible()/, 'Installer must reject destructive migrations before automatic switching.');
   requireMatch(installerScript, /node scripts\/check-update-migrations\.mjs/, 'Installer must check only pending database migrations before switching.');
 }
 
 if (migrationCheckScript) requireMatch(migrationCheckScript, /_prisma_migrations/, 'Migration safety check must read Prisma migration history.');
 
-if (packageMetadata.version !== '1.0.5') errors.push('Release package version must be 1.0.5.');
+if (packageMetadata.version !== '1.0.6') errors.push('Release package version must be 1.0.6.');
+if (buildInfo.version !== packageMetadata.version) errors.push('Build identity version must match package.json.');
+if (!String(buildInfo.commit || '').trim()) errors.push('Build identity must include a commit.');
+if (!Number.isFinite(Date.parse(String(buildInfo.buildTime || '')))) errors.push('Build identity must include a valid build time.');
 
 if (nginxConfig) {
   requireMatch(nginxConfig, /location\s+\/\s*{/, 'Nginx must proxy the whole site from /.');
@@ -78,4 +87,25 @@ function requireMatch(content, pattern, message) {
 
 function forbidMatch(content, pattern, message) {
   if (pattern.test(content)) errors.push(message);
+}
+
+function verifyFrontendBuildIdentity(content, label) {
+  const expected = {
+    version: String(buildInfo.version || ''),
+    commit: String(buildInfo.commit || ''),
+    buildTime: String(buildInfo.buildTime || '')
+  };
+  const actual = {
+    version: readMeta(content, 'shiye-version'),
+    commit: readMeta(content, 'shiye-commit'),
+    buildTime: readMeta(content, 'shiye-build-time')
+  };
+  for (const key of Object.keys(expected)) {
+    if (actual[key] !== expected[key]) errors.push(`${label} build identity ${key} must match build-info.json.`);
+  }
+}
+
+function readMeta(content, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return content.match(new RegExp(`<meta[^>]+name=["']${escaped}["'][^>]+content=["']([^"']*)["']`, 'i'))?.[1] || '';
 }

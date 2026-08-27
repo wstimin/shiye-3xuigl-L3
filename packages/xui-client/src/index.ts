@@ -9,6 +9,7 @@ export type XuiPanelCapabilities = {
   detectedVersion?: string;
   source: 'openapi';
   openApiVersion?: string;
+  trafficEndpointVerified: true;
 };
 
 export type XuiClientOptions = {
@@ -163,6 +164,7 @@ export class XuiClient {
         '/panel/api/clients/add',
         '/panel/api/clients/update/{email}',
         '/panel/api/clients/{email}/detach',
+        '/panel/api/clients/traffic/{email}',
         '/panel/api/inbounds/{id}/resetTraffic'
       ].every((path) => path in paths);
       const info = this.objectValue(document.info);
@@ -174,7 +176,8 @@ export class XuiClient {
         apiProfile: 'v3.6',
         detectedVersion: this.semanticVersion(rawVersion) || rawVersion || undefined,
         source: 'openapi',
-        openApiVersion: typeof document.openapi === 'string' ? document.openapi : undefined
+        openApiVersion: typeof document.openapi === 'string' ? document.openapi : undefined,
+        trafficEndpointVerified: true
       };
     } catch (error) {
       if (error instanceof XuiClientError && (error.status === 404 || error.status === 405)) {

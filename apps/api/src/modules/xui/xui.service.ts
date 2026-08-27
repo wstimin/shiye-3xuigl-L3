@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, randomBytes, randomUUID } from 'node:crypto';
-import { BadGatewayException, BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { networkRouteUpsertSchema, outboundImportPreviewSchema, outboundImportSchema, remoteClientCreateSchema, remoteClientPatchSchema, xuiServerUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
@@ -25,6 +25,7 @@ type PanelCompatibility = {
   detectedAt: string;
   source: 'openapi';
   openApiVersion?: string;
+  trafficEndpointVerified: true;
 };
 
 const PANEL_COMPATIBILITY_TTL_MS = 15 * 60 * 1000;
@@ -187,6 +188,8 @@ const REALITY_TARGET_CANDIDATES = [
 
 @Injectable()
 export class XuiService {
+  private readonly logger = new Logger(XuiService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
@@ -1156,6 +1159,14 @@ export class XuiService {
         client = await this.createAuthenticatedClient(first.server);
       } catch (error) {
         const message = this.trafficReadError(error);
+        for (const serviceNode of group) {
+          const config = this.xuiObject(serviceNode.config) as ServiceNodeConfig;
+          this.logTrafficReadFailure(error, {
+            serverId: serviceNode.serverId,
+            serviceNodeId: serviceNode.id,
+            xuiEmail: this.stringValue(config.remoteClientEmail)
+          });
+        }
         return group.map((serviceNode) => ({ serviceNodeId: serviceNode.id, status: 'error' as const, error: message }));
       }
       return Promise.all(group.map(async (serviceNode) => {
@@ -1165,7 +1176,10 @@ export class XuiService {
           return { serviceNodeId: serviceNode.id, status: 'error' as const, error: '路由节点缺少官方客户端标识，无法读取流量' };
         }
         try {
-          const traffic = await this.readOfficialClientTraffic(client, xuiEmail);
+          const traffic = await this.readOfficialClientTraffic(client, xuiEmail, {
+            serverId: serviceNode.serverId,
+            serviceNodeId: serviceNode.id
+          });
           return { serviceNodeId: serviceNode.id, status: 'live' as const, ...traffic };
         } catch (error) {
           return { serviceNodeId: serviceNode.id, status: 'error' as const, xuiEmail, error: this.trafficReadError(error) };
@@ -1192,8 +1206,23 @@ export class XuiService {
     if (serviceClientEmail !== customerNode.xuiEmail) {
       throw new BadGatewayException('绑定记录与路由节点的官方客户端标识不一致，请管理员重新同步绑定');
     }
-    const client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
-    const snapshot = await this.readOfficialClientTraffic(client, customerNode.xuiEmail);
+    let client: XuiClient;
+    try {
+      client = await this.createAuthenticatedClient(customerNode.serviceNode.server);
+    } catch (error) {
+      this.logTrafficReadFailure(error, {
+        serverId: customerNode.serviceNode.serverId,
+        serviceNodeId: customerNode.serviceNode.id,
+        customerNodeId: customerNode.id,
+        xuiEmail: customerNode.xuiEmail
+      });
+      throw error;
+    }
+    const snapshot = await this.readOfficialClientTraffic(client, customerNode.xuiEmail, {
+      serverId: customerNode.serviceNode.serverId,
+      serviceNodeId: customerNode.serviceNode.id,
+      customerNodeId: customerNode.id
+    });
     await this.prisma.customerNode.update({
       where: { id: customerNode.id },
       data: { usedTrafficGb: new Prisma.Decimal(snapshot.usedTrafficGb), lastSyncedAt: snapshot.syncedAt }
@@ -3130,12 +3159,14 @@ export class XuiService {
     const compatibility = this.xuiObject(this.xuiObject(value).panelCompatibility);
     const apiProfile = compatibility.apiProfile;
     if (apiProfile !== 'v3.6') return undefined;
+    if (compatibility.trafficEndpointVerified !== true) return undefined;
     return {
       apiProfile,
       detectedVersion: this.stringValue(compatibility.detectedVersion),
       detectedAt: String(compatibility.detectedAt || ''),
       source: 'openapi',
-      openApiVersion: this.stringValue(compatibility.openApiVersion)
+      openApiVersion: this.stringValue(compatibility.openApiVersion),
+      trafficEndpointVerified: true
     };
   }
 
@@ -4823,31 +4854,61 @@ export class XuiService {
     return Number.isInteger(number) && number > 0 ? number : undefined;
   }
 
-  private async readOfficialClientTraffic(client: XuiClient, xuiEmail: string): Promise<OfficialClientTraffic> {
-    const payload = await client.clientTraffic(xuiEmail);
-    this.assertXuiSuccess(payload);
-    const traffic = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
-    if (!Object.hasOwn(traffic, 'up') || !Object.hasOwn(traffic, 'down')) {
-      throw new BadGatewayException('官方客户端流量数据缺少 up/down 字段');
+  private async readOfficialClientTraffic(
+    client: XuiClient,
+    xuiEmail: string,
+    context: { serverId?: string; serviceNodeId?: string; customerNodeId?: string } = {}
+  ): Promise<OfficialClientTraffic> {
+    const path = `/panel/api/clients/traffic/${encodeURIComponent(xuiEmail)}`;
+    try {
+      const payload = await client.clientTraffic(xuiEmail);
+      this.assertXuiSuccess(payload);
+      const traffic = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
+      if (!Object.hasOwn(traffic, 'up') || !Object.hasOwn(traffic, 'down')) {
+        throw new BadGatewayException('官方客户端流量数据缺少 up/down 字段');
+      }
+      const upBytes = this.trafficBytes(traffic.up);
+      const downBytes = this.trafficBytes(traffic.down);
+      const usedBytes = upBytes + downBytes;
+      const hasTotal = Object.hasOwn(traffic, 'total') && Number.isFinite(Number(traffic.total));
+      const totalBytes = hasTotal ? this.trafficBytes(traffic.total) : null;
+      return {
+        xuiEmail,
+        upBytes,
+        downBytes,
+        usedBytes,
+        usedTrafficGb: usedBytes / 1024 / 1024 / 1024,
+        totalBytes,
+        unlimited: totalBytes === null ? null : totalBytes === 0,
+        enabled: Object.hasOwn(traffic, 'enable') ? this.booleanValue(traffic.enable, false) : null,
+        syncedAt: new Date(),
+        traffic,
+        raw: payload
+      };
+    } catch (error) {
+      this.logTrafficReadFailure(error, { ...context, xuiEmail, path });
+      throw error;
     }
-    const upBytes = this.trafficBytes(traffic.up);
-    const downBytes = this.trafficBytes(traffic.down);
-    const usedBytes = upBytes + downBytes;
-    const hasTotal = Object.hasOwn(traffic, 'total') && Number.isFinite(Number(traffic.total));
-    const totalBytes = hasTotal ? this.trafficBytes(traffic.total) : null;
-    return {
-      xuiEmail,
-      upBytes,
-      downBytes,
-      usedBytes,
-      usedTrafficGb: usedBytes / 1024 / 1024 / 1024,
-      totalBytes,
-      unlimited: totalBytes === null ? null : totalBytes === 0,
-      enabled: Object.hasOwn(traffic, 'enable') ? this.booleanValue(traffic.enable, false) : null,
-      syncedAt: new Date(),
-      traffic,
-      raw: payload
-    };
+  }
+
+  private logTrafficReadFailure(
+    error: unknown,
+    context: { serverId?: string; serviceNodeId?: string; customerNodeId?: string; xuiEmail?: string; path?: string }
+  ) {
+    const status = error instanceof XuiClientError
+      ? error.status
+      : error instanceof HttpException
+        ? error.getStatus()
+        : undefined;
+    const xuiEmail = context.xuiEmail || '';
+    this.logger.warn(JSON.stringify({
+      event: 'official-client-traffic-read-failed',
+      ...context,
+      xuiEmail: xuiEmail || null,
+      path: context.path || (xuiEmail ? `/panel/api/clients/traffic/${encodeURIComponent(xuiEmail)}` : '/panel/api/clients/traffic/{email}'),
+      status: status || null,
+      error: this.trafficReadError(error)
+    }));
   }
 
   private trafficReadError(error: unknown) {

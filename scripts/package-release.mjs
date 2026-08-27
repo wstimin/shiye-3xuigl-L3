@@ -9,6 +9,7 @@ const stageRoot = resolve(releaseRoot, 'package');
 const requiredPaths = [
   'package.json',
   'package-lock.json',
+  'build-info.json',
   '.env.example',
   'apps/api/package.json',
   'apps/api/dist',

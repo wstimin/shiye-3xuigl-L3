@@ -1,9 +1,25 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import buildInfo from '../../build-info.json';
+
+const buildInfoPlugin = {
+  name: 'shiye-build-info',
+  transformIndexHtml: {
+    order: 'pre' as const,
+    handler: () => ({
+      tags: [
+        { tag: 'meta', attrs: { name: 'shiye-version', content: buildInfo.version }, injectTo: 'head' as const },
+        { tag: 'meta', attrs: { name: 'shiye-commit', content: buildInfo.commit }, injectTo: 'head' as const },
+        { tag: 'meta', attrs: { name: 'shiye-build-time', content: buildInfo.buildTime }, injectTo: 'head' as const }
+      ]
+    })
+  }
+};
 
 export default defineConfig({
   base: './',
-  plugins: [vue()],
+  plugins: [vue(), buildInfoPlugin],
+  define: { __SHIYE_BUILD_INFO__: JSON.stringify(buildInfo) },
   server: {
     proxy: {
       '/api': 'http://127.0.0.1:3388'
