@@ -643,6 +643,7 @@ test('customer-node traffic sync stores the official up and down byte total', as
   assert.equal(result.usedBytes, 1610612736);
   assert.equal(result.usedTrafficGb, 1.5);
   assert.equal(result.totalBytes, null);
+  assert.equal(result.remainingBytes, null);
   assert.equal(result.unlimited, null);
   assert.equal(storedUpdate.where.id, 'customer-node-1');
   assert.equal(storedUpdate.data.usedTrafficGb.toString(), '1.5');
@@ -675,7 +676,38 @@ test('customer-node traffic sync treats official total zero as unlimited traffic
 
   assert.equal(result.usedBytes, 3072);
   assert.equal(result.totalBytes, 0);
+  assert.equal(result.remainingBytes, null);
   assert.equal(result.unlimited, true);
+});
+
+test('customer-node traffic sync calculates official remaining traffic', async () => {
+  const customerNode = {
+    id: 'customer-node-1',
+    customerId: 'customer-1',
+    xuiEmail: 'short-us',
+    serviceNodeId: 'service-node-1',
+    serviceNode: {
+      config: { remoteClientEmail: 'short-us' },
+      server: { id: 'server-1', baseUrl: 'https://panel.example.com', config: {} }
+    }
+  };
+  const prisma = {
+    customerNode: {
+      findFirst: async () => customerNode,
+      update: async () => customerNode
+    }
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.createAuthenticatedClient = async () => ({
+    clientTraffic: async () => ({ success: true, obj: { up: 10, down: 20, total: 100 } })
+  });
+
+  const result = await service.syncCustomerNodeTraffic('customer-1', 'customer-node-1');
+
+  assert.equal(result.usedBytes, 30);
+  assert.equal(result.totalBytes, 100);
+  assert.equal(result.remainingBytes, 70);
+  assert.equal(result.unlimited, false);
 });
 
 test('customer-node traffic sync rejects an official response without counters', async () => {

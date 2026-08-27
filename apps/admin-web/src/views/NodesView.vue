@@ -85,6 +85,7 @@ type ServiceNode = {
     xuiEmail?: string;
     usedBytes?: number;
     totalBytes?: number | null;
+    remainingBytes?: number | null;
     unlimited?: boolean | null;
     syncedAt?: string;
     error?: string;
@@ -623,22 +624,20 @@ function nodeSearchText(node: ServiceNode) {
 
 function nodeTrafficText(node: ServiceNode) {
   if (node.traffic?.status !== 'live') return '获取失败';
-  return `${formatBytes(node.traffic.usedBytes || 0)} / ${trafficQuotaLabel(node)}`;
+  return totalAndRemainingTrafficText(node.traffic);
 }
 
 function nodeTrafficTitle(node: ServiceNode) {
   if (node.traffic?.status !== 'live') return node.traffic?.error || '官方客户端流量获取失败';
-  const officialQuota = node.traffic.unlimited === true
-    ? '无限流量'
-    : node.traffic.totalBytes === null || node.traffic.totalBytes === undefined
-      ? '未返回'
-      : formatBytes(node.traffic.totalBytes);
-  return `已用 ${formatBytes(node.traffic.usedBytes || 0)}；本系统节点额度 ${trafficQuotaLabel(node)}；官方客户端额度 ${officialQuota}`;
+  return `官方客户端${totalAndRemainingTrafficText(node.traffic)}`;
 }
 
-function trafficQuotaLabel(node: ServiceNode) {
-  const limit = Number(node.trafficLimitGb);
-  return Number.isFinite(limit) && limit > 0 ? `${limit.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} GB` : '无限流量';
+function totalAndRemainingTrafficText(traffic: NonNullable<ServiceNode['traffic']>) {
+  if (traffic.unlimited === true) return '总流量 无限，剩余流量 无限';
+  if (traffic.totalBytes === null || traffic.totalBytes === undefined || traffic.remainingBytes === null || traffic.remainingBytes === undefined) {
+    return '总流量未返回';
+  }
+  return `总流量 ${formatBytes(traffic.totalBytes)}，剩余流量 ${formatBytes(traffic.remainingBytes)}`;
 }
 
 function formatBytes(value: number) {
@@ -760,7 +759,7 @@ watch(() => form.transport, () => {
         <div class="route-node-meta runtime-metric-grid">
           <div class="runtime-metric tone-cyan"><span>入站 ID</span><strong>{{ node.inboundId ?? '未绑定' }}</strong></div>
           <div class="runtime-metric tone-indigo"><span>月价格</span><strong>¥ {{ node.priceMonthly }}</strong></div>
-          <div class="runtime-metric" :class="node.traffic?.status === 'live' ? 'tone-emerald' : 'tone-danger'" :title="nodeTrafficTitle(node)"><span>流量使用</span><strong>{{ nodeTrafficText(node) }}</strong></div>
+          <div class="runtime-metric" :class="node.traffic?.status === 'live' ? 'tone-emerald' : 'tone-danger'" :title="nodeTrafficTitle(node)"><span>总流量 / 剩余流量</span><strong>{{ nodeTrafficText(node) }}</strong></div>
         </div>
 
         <div class="runtime-info-line runtime-endpoint-line route-node-runtime-info" :class="{ 'is-missing': !node.server?.baseUrl }">

@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router';
 import { Activity, CalendarDays, Network, RefreshCw, Settings, TicketCheck, WalletCards } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
-import { formatTraffic, trafficBytes } from '../traffic';
+import { formatTraffic } from '../traffic';
 
 type DashboardNode = { expireAt?: string | null };
 type UserDashboard = {
@@ -21,6 +21,9 @@ type UserNode = {
   usedTrafficBytes?: number;
   trafficStatus?: 'live' | 'cached' | 'error';
   trafficError?: string | null;
+  officialTrafficTotalBytes?: number | null;
+  officialTrafficRemainingBytes?: number | null;
+  officialTrafficUnlimited?: boolean | null;
   links?: string[];
   serviceNode: { name: string; protocol: string; priceMonthly: string; server: { name: string } };
 };
@@ -38,21 +41,25 @@ const nearestExpireValue = computed(() => {
     .sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
   return expires[0] || null;
 });
-const limitedNodes = computed(() => nodes.value.filter((node) => numericValue(node.trafficLimitGb) > 0));
-const hasUnlimitedTraffic = computed(() => nodes.value.some((node) => numericValue(node.trafficLimitGb) <= 0));
-const unavailableTrafficCount = computed(() => nodes.value.filter((node) => node.trafficStatus === 'error').length);
-const cachedTrafficCount = computed(() => nodes.value.filter((node) => node.trafficStatus === 'cached').length);
-const totalTraffic = computed(() => limitedNodes.value.reduce((total, node) => total + numericValue(node.trafficLimitGb), 0));
-const usedTraffic = computed(() => limitedNodes.value.reduce((total, node) => total + numericValue(node.usedTrafficGb), 0));
-const usedTrafficBytes = computed(() => nodes.value.reduce((total, node) => node.trafficStatus === 'error' ? total : total + trafficBytes(node.usedTrafficBytes, node.usedTrafficGb), 0));
-const remainingTraffic = computed(() => Math.max(totalTraffic.value - usedTraffic.value, 0));
-const trafficPercent = computed(() => totalTraffic.value > 0 ? Math.min((usedTraffic.value / totalTraffic.value) * 100, 100) : 0);
+const hasUnlimitedTraffic = computed(() => nodes.value.some((node) => node.trafficStatus === 'live' && node.officialTrafficUnlimited === true));
+const unavailableTrafficCount = computed(() => nodes.value.filter((node) => node.trafficStatus !== 'live').length);
+const unknownQuotaCount = computed(() => nodes.value.filter((node) => node.trafficStatus === 'live' && node.officialTrafficUnlimited !== true && !hasFiniteTrafficQuota(node)).length);
+const finiteTrafficNodes = computed(() => nodes.value.filter((node) => node.trafficStatus === 'live' && node.officialTrafficUnlimited !== true && hasFiniteTrafficQuota(node)));
+const remainingTrafficBytes = computed(() => finiteTrafficNodes.value.reduce((total, node) => total + Number(node.officialTrafficRemainingBytes), 0));
+const totalTrafficBytes = computed(() => finiteTrafficNodes.value.reduce((total, node) => total + Number(node.officialTrafficTotalBytes), 0));
+const trafficPercent = computed(() => totalTrafficBytes.value > 0 ? Math.min((remainingTrafficBytes.value / totalTrafficBytes.value) * 100, 100) : 0);
 const previewNodes = computed(() => nodes.value.slice(0, 3));
+const trafficHeadline = computed(() => {
+  if (unavailableTrafficCount.value) return '暂不可用';
+  if (unknownQuotaCount.value) return '额度未返回';
+  if (hasUnlimitedTraffic.value) return '无限流量 / 无限流量';
+  return `${formatTraffic(totalTrafficBytes.value)} / ${formatTraffic(remainingTrafficBytes.value)}`;
+});
 const trafficSummary = computed(() => {
   if (unavailableTrafficCount.value) return `${unavailableTrafficCount.value} 个节点流量暂不可用`;
-  if (cachedTrafficCount.value) return `${cachedTrafficCount.value} 个节点显示上次同步数据`;
-  if (hasUnlimitedTraffic.value) return `含无限流量节点，已用 ${formatTraffic(usedTrafficBytes.value)}`;
-  return `总计 ${formatNumber(totalTraffic.value)} GB，已用 ${formatTraffic(usedTrafficBytes.value)}`;
+  if (unknownQuotaCount.value) return `${unknownQuotaCount.value} 个节点未返回流量额度`;
+  if (hasUnlimitedTraffic.value) return '总流量无限，剩余流量无限';
+  return `总流量 ${formatTraffic(totalTrafficBytes.value)}，剩余流量 ${formatTraffic(remainingTrafficBytes.value)}`;
 });
 
 async function loadDashboard() {
@@ -77,6 +84,14 @@ function numericValue(value: string) {
   return Number.isFinite(result) && result > 0 ? result : 0;
 }
 
+function hasBytes(value?: number | null) {
+  return value !== null && value !== undefined && Number.isFinite(Number(value)) && Number(value) >= 0;
+}
+
+function hasFiniteTrafficQuota(node: UserNode) {
+  return hasBytes(node.officialTrafficTotalBytes) && hasBytes(node.officialTrafficRemainingBytes);
+}
+
 function isNodeAvailable(node: UserNode) {
   if (node.status !== 'active') return false;
   if (node.expireAt && new Date(node.expireAt).getTime() <= Date.now()) return false;
@@ -96,9 +111,10 @@ function formatDate(value?: string | null, compact = false) {
 }
 
 function nodeTrafficText(node: UserNode) {
-  if (node.trafficStatus === 'error') return '暂不可用';
-  const limit = numericValue(node.trafficLimitGb);
-  return `${formatTraffic(node.usedTrafficBytes, node.usedTrafficGb)} / ${limit > 0 ? `${formatNumber(limit)} GB` : '无限流量'}`;
+  if (node.trafficStatus !== 'live') return '获取失败';
+  if (node.officialTrafficUnlimited === true) return '总流量 无限，剩余流量 无限';
+  if (!hasFiniteTrafficQuota(node)) return '额度未返回';
+  return `总流量 ${formatTraffic(Number(node.officialTrafficTotalBytes))}，剩余流量 ${formatTraffic(Number(node.officialTrafficRemainingBytes))}`;
 }
 
 onMounted(loadDashboard);
@@ -132,10 +148,8 @@ onMounted(loadDashboard);
         <p>当前可连接的服务节点</p>
       </article>
       <article class="user-stat-card blue">
-        <div class="user-stat-head"><span>剩余流量</span><i><Activity :size="17" /></i></div>
-        <strong v-if="unavailableTrafficCount">暂不可用</strong>
-        <strong v-else-if="hasUnlimitedTraffic">无限流量</strong>
-        <strong v-else>{{ formatNumber(remainingTraffic) }}<small> GB</small></strong>
+        <div class="user-stat-head"><span>总流量 / 剩余流量</span><i><Activity :size="17" /></i></div>
+        <strong>{{ trafficHeadline }}</strong>
         <p>{{ trafficSummary }}</p>
         <span class="user-stat-progress"><i :style="{ width: `${trafficPercent}%` }"></i></span>
       </article>
@@ -160,7 +174,7 @@ onMounted(loadDashboard);
             </div>
             <div class="user-feedback warning">续费仅延长本系统访问授权，不修改路由节点共享的官方客户端。</div>
             <div class="service-preview-stats">
-              <div><span>流量</span><strong :title="node.trafficError || ''">{{ nodeTrafficText(node) }}</strong></div>
+              <div><span>总流量 / 剩余流量</span><strong :title="node.trafficError || ''">{{ nodeTrafficText(node) }}</strong></div>
               <div><span>到期</span><strong>{{ formatDate(node.expireAt, true) }}</strong></div>
               <div><span>线路</span><strong>{{ node.links?.length || 0 }} 条</strong></div>
             </div>

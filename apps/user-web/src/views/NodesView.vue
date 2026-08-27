@@ -20,6 +20,7 @@ type UserNode = {
   trafficStatus?: 'live' | 'cached' | 'error';
   trafficError?: string | null;
   officialTrafficTotalBytes?: number | null;
+  officialTrafficRemainingBytes?: number | null;
   officialTrafficUnlimited?: boolean | null;
   links?: string[];
   linkError?: string | null;
@@ -49,18 +50,25 @@ const expiringCount = computed(() => nodes.value.filter((node) => {
   return diff > 0 && diff <= 7 * 24 * 60 * 60 * 1000;
 }).length);
 const trafficPercent = (node: UserNode) => {
-  const limit = numericValue(node.trafficLimitGb);
-  return limit > 0 ? Math.min((numericValue(node.usedTrafficGb) / limit) * 100, 100) : 0;
+  return hasFiniteTrafficQuota(node) && Number(node.officialTrafficTotalBytes) > 0
+    ? Math.min((Number(node.officialTrafficRemainingBytes) / Number(node.officialTrafficTotalBytes)) * 100, 100)
+    : 0;
 };
 
-function trafficUsageText(node: UserNode) {
-  if (node.trafficStatus === 'error') return '暂不可用';
-  return formatTraffic(node.usedTrafficBytes, node.usedTrafficGb);
+function totalAndRemainingTrafficText(node: UserNode) {
+  if (node.trafficStatus !== 'live') return '获取失败';
+  if (node.officialTrafficUnlimited === true) return '总流量 无限，剩余流量 无限';
+  return hasFiniteTrafficQuota(node)
+    ? `总流量 ${formatTraffic(node.officialTrafficTotalBytes as number)}，剩余流量 ${formatTraffic(node.officialTrafficRemainingBytes as number)}`
+    : '额度未返回';
 }
 
-function trafficLimitText(node: UserNode) {
-  const limit = numericValue(node.trafficLimitGb);
-  return limit > 0 ? `${limit.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} GB` : '无限流量';
+function hasFiniteTrafficQuota(node: UserNode) {
+  return hasBytes(node.officialTrafficTotalBytes) && hasBytes(node.officialTrafficRemainingBytes);
+}
+
+function hasBytes(value?: number | null) {
+  return value !== null && value !== undefined && Number.isFinite(Number(value)) && Number(value) >= 0;
 }
 
 function trafficStateText(node: UserNode) {
@@ -256,7 +264,7 @@ onMounted(loadNodes);
       </div>
       <div class="node-status-hint" :class="nodeStatusHint(node).type">{{ nodeStatusHint(node).text }}</div>
       <div class="node-traffic-block">
-        <div><span>流量使用</span><strong>{{ trafficUsageText(node) }} / {{ trafficLimitText(node) }}</strong></div>
+        <div><span>总流量 / 剩余流量</span><strong>{{ totalAndRemainingTrafficText(node) }}</strong></div>
         <span class="node-traffic-track"><i :class="nodeStatusHint(node).type" :style="{ width: `${trafficPercent(node)}%` }"></i></span>
         <div v-if="trafficStateText(node)" class="empty-hint">{{ trafficStateText(node) }}</div>
       </div>

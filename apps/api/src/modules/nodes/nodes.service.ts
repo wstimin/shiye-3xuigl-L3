@@ -909,6 +909,7 @@ export class NodesService {
         trafficStatus: traffic ? 'live' : node.lastSyncedAt ? 'cached' : 'error',
         trafficError,
         officialTrafficTotalBytes: traffic?.totalBytes ?? null,
+        officialTrafficRemainingBytes: traffic?.remainingBytes ?? null,
         officialTrafficUnlimited: traffic?.unlimited ?? null,
         links,
         linkError,

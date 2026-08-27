@@ -124,6 +124,7 @@ type OfficialClientTraffic = {
   usedBytes: number;
   usedTrafficGb: number;
   totalBytes: number | null;
+  remainingBytes: number | null;
   unlimited: boolean | null;
   enabled: boolean | null;
   syncedAt: Date;
@@ -4872,6 +4873,9 @@ export class XuiService {
       const usedBytes = upBytes + downBytes;
       const hasTotal = Object.hasOwn(traffic, 'total') && Number.isFinite(Number(traffic.total));
       const totalBytes = hasTotal ? this.trafficBytes(traffic.total) : null;
+      const remainingBytes = totalBytes !== null && totalBytes > 0
+        ? Math.max(totalBytes - usedBytes, 0)
+        : null;
       return {
         xuiEmail,
         upBytes,
@@ -4879,6 +4883,7 @@ export class XuiService {
         usedBytes,
         usedTrafficGb: usedBytes / 1024 / 1024 / 1024,
         totalBytes,
+        remainingBytes,
         unlimited: totalBytes === null ? null : totalBytes === 0,
         enabled: Object.hasOwn(traffic, 'enable') ? this.booleanValue(traffic.enable, false) : null,
         syncedAt: new Date(),

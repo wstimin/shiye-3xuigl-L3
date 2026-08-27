@@ -468,7 +468,14 @@ test('user node listing returns freshly synchronized official traffic', async ()
   const prisma = { customerNode: { findMany: async () => [node] } } as any;
   const xui = {
     customerNodeLinks: async () => ['vless://example'],
-    syncCustomerNodeTraffic: async () => ({ usedTrafficGb: 1.5, usedBytes: 1.5 * 1024 ** 3, syncedAt })
+    syncCustomerNodeTraffic: async () => ({
+      usedTrafficGb: 1.5,
+      usedBytes: 1.5 * 1024 ** 3,
+      totalBytes: 10 * 1024 ** 3,
+      remainingBytes: 8.5 * 1024 ** 3,
+      unlimited: false,
+      syncedAt
+    })
   } as any;
   const service = new NodesService(prisma, encryption(), xui, testLocks());
 
@@ -479,6 +486,9 @@ test('user node listing returns freshly synchronized official traffic', async ()
   assert.equal(result[0].lastSyncedAt, syncedAt);
   assert.equal(result[0].trafficStatus, 'live');
   assert.equal(result[0].trafficError, null);
+  assert.equal(result[0].officialTrafficTotalBytes, 10 * 1024 ** 3);
+  assert.equal(result[0].officialTrafficRemainingBytes, 8.5 * 1024 ** 3);
+  assert.equal(result[0].officialTrafficUnlimited, false);
   assert.deepEqual(result[0].links, ['vless://example']);
 });
 

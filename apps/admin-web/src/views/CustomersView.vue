@@ -67,6 +67,7 @@ type ServiceNode = {
     status: 'live' | 'error';
     usedBytes?: number;
     totalBytes?: number | null;
+    remainingBytes?: number | null;
     unlimited?: boolean | null;
     error?: string;
   };
@@ -340,14 +341,20 @@ async function showNodeTraffic(customer: Customer, node: CustomerNode) {
   trafficIds.value = new Set(trafficIds.value).add(node.id);
   error.value = '';
   try {
-    const result = await api<{ traffic?: Record<string, unknown>; xuiEmail?: string }>(`/api/admin/customers/${customer.id}/nodes/${node.id}/traffic`);
+    const result = await api<{
+      traffic?: Record<string, unknown>;
+      xuiEmail?: string;
+      totalBytes?: number | null;
+      remainingBytes?: number | null;
+      unlimited?: boolean | null;
+      enabled?: boolean | null;
+    }>(`/api/admin/customers/${customer.id}/nodes/${node.id}/traffic`);
     const traffic = result.traffic || {};
     await ElMessageBox.alert([
       `客户端：${result.xuiEmail || node.xuiEmail}`,
-      `启用状态：${traffic.enable ?? '-'}`,
-      `上传流量：${formatBytes(Number(traffic.up || 0))}`,
-      `下载流量：${formatBytes(Number(traffic.down || 0))}`,
-      `总流量：${formatBytes(Number(traffic.total || 0))}`,
+      `启用状态：${result.enabled ?? traffic.enable ?? '-'}`,
+      `总流量：${totalTrafficText(result)}`,
+      `剩余流量：${remainingTrafficText(result)}`,
       `到期时间：${formatRemoteExpiry(traffic.expiryTime)}`,
       `最近在线：${formatRemoteLastOnline(traffic.lastOnline)}`
     ].join('\n'), '3x-ui 客户端流量', { type: 'info', customClass: 'customer-dark-message-box' });
@@ -371,15 +378,30 @@ function serviceNodeHasRemoteClient(node: CustomerNode) {
 function customerNodeTrafficText(node: CustomerNode) {
   const traffic = serviceNodeForBinding(node)?.traffic;
   if (traffic?.status === 'error') return '获取失败';
-  if (traffic?.status === 'live') return formatBytes(traffic.usedBytes || 0);
-  const cachedGb = Number(node.usedTrafficGb);
-  return Number.isFinite(cachedGb) && cachedGb >= 0 ? `${cachedGb.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} GB` : '未同步';
+  if (traffic?.status === 'live') return totalAndRemainingTrafficText(traffic);
+  return '未同步';
 }
 
 function customerNodeTrafficTitle(node: CustomerNode) {
   const traffic = serviceNodeForBinding(node)?.traffic;
   if (traffic?.status === 'error') return traffic.error || '官方客户端流量获取失败';
-  return traffic?.status === 'live' ? `官方实时已用 ${formatBytes(traffic.usedBytes || 0)}` : '当前显示本地缓存数据';
+  return traffic?.status === 'live' ? `官方实时${totalAndRemainingTrafficText(traffic)}` : '尚未读取官方流量额度';
+}
+
+function totalTrafficText(traffic: { totalBytes?: number | null; unlimited?: boolean | null }) {
+  if (traffic.unlimited === true) return '无限流量';
+  if (traffic.totalBytes === null || traffic.totalBytes === undefined) return '额度未返回';
+  return formatBytes(traffic.totalBytes);
+}
+
+function remainingTrafficText(traffic: { remainingBytes?: number | null; unlimited?: boolean | null }) {
+  if (traffic.unlimited === true) return '无限流量';
+  if (traffic.remainingBytes === null || traffic.remainingBytes === undefined) return '额度未返回';
+  return formatBytes(traffic.remainingBytes);
+}
+
+function totalAndRemainingTrafficText(traffic: { totalBytes?: number | null; remainingBytes?: number | null; unlimited?: boolean | null }) {
+  return `总流量 ${totalTrafficText(traffic)}，剩余流量 ${remainingTrafficText(traffic)}`;
 }
 
 function canManageRemoteClient(node: CustomerNode) {
@@ -955,7 +977,7 @@ onMounted(loadCustomers);
           </div>
           <div class="entity-card-stats">
             <div><span>到期</span><strong>{{ formatDate(node.expireAt) }}</strong></div>
-            <div><span>已用流量</span><strong :title="customerNodeTrafficTitle(node)">{{ customerNodeTrafficText(node) }}</strong></div>
+            <div><span>总流量 / 剩余流量</span><strong :title="customerNodeTrafficTitle(node)">{{ customerNodeTrafficText(node) }}</strong></div>
             <div><span>同步</span><strong>{{ formatDate(node.lastSyncedAt) }}</strong></div>
           </div>
           <div class="node-actions node-action-grid customer-node-dialog-actions">
