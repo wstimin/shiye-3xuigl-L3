@@ -91,6 +91,303 @@ test('official 3.6 client and inbound operations use only the documented paths',
   ]);
 });
 
+test('official Xray diagnostics and connectivity checks use documented form fields', async () => {
+  const requests: Array<{ path: string; method: string; body: string }> = [];
+  const client = new XuiClient({
+    baseUrl: 'https://panel.example.com',
+    apiProfile: 'v3.6',
+    fetchImpl: async (input, init) => {
+      requests.push({
+        path: new URL(String(input)).pathname,
+        method: init?.method || 'GET',
+        body: String(init?.body || '')
+      });
+      return jsonResponse({ success: true, obj: { outboundTag: 'proxy-us' } });
+    }
+  });
+
+  await client.getXrayResult();
+  await client.testOutbound({ tag: 'proxy-us', protocol: 'freedom' }, [{ tag: 'proxy-us', protocol: 'freedom' }], 'real');
+  await client.routeTest({ inboundTag: 'inbound-us', domain: 'example.com', port: 443, network: 'tcp' });
+
+  assert.equal(requests[0]?.path, '/panel/api/xray/getXrayResult');
+  assert.equal(requests[0]?.method, 'GET');
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(requests[1]?.body)), {
+    outbound: JSON.stringify({ tag: 'proxy-us', protocol: 'freedom' }),
+    allOutbounds: JSON.stringify([{ tag: 'proxy-us', protocol: 'freedom' }]),
+    mode: 'real'
+  });
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(requests[2]?.body)), {
+    inboundTag: 'inbound-us',
+    domain: 'example.com',
+    port: '443',
+    network: 'tcp'
+  });
+});
+
+test('specific network routes are inserted before broad rules but preserve existing order on edits', () => {
+  const service = new XuiService({} as never, {} as never, testLocks()) as any;
+  const rules = [
+    { type: 'field', inboundTag: ['inbound-eu'], outboundTag: 'eu' },
+    { type: 'field', domain: ['geosite:private'], outboundTag: 'block' },
+    { type: 'field', outboundTag: 'direct' }
+  ];
+
+  assert.equal(service.networkRouteInsertionIndex(rules, { type: 'field', inboundTag: ['inbound-us'], outboundTag: 'us' }), 1);
+  assert.equal(service.networkRouteInsertionIndex(rules, { type: 'field', outboundTag: 'direct-2' }), rules.length);
+});
+
+test('inbound-only route conflicts are detected while conditional rules are inserted before catch-all routes', () => {
+  const service = new XuiService({} as never, {} as never, testLocks()) as any;
+  const rules = [
+    { type: 'field', inboundTag: ['inbound-us'], outboundTag: 'old-proxy' },
+    { type: 'field', outboundTag: 'direct' }
+  ];
+
+  assert.deepEqual(service.conflictingInboundOnlyRouteIndexes(rules, {
+    type: 'field', inboundTag: ['inbound-us'], outboundTag: 'new-proxy'
+  }), [0]);
+  assert.deepEqual(service.conflictingInboundOnlyRouteIndexes(rules, {
+    type: 'field', inboundTag: ['inbound-us'], domain: ['domain:example.com'], outboundTag: 'new-proxy'
+  }), []);
+  assert.equal(service.networkRouteInsertionIndex(rules, {
+    type: 'field', inboundTag: ['inbound-us'], domain: ['domain:example.com'], outboundTag: 'new-proxy'
+  }), 0);
+});
+
+test('editing an inbound-only route still detects another rule that already owns the target inbound', async () => {
+  const oldRule = { type: 'field', inboundTag: ['inbound-old'], outboundTag: 'proxy-us' };
+  const occupiedRule = { type: 'field', inboundTag: ['inbound-new'], outboundTag: 'proxy-eu' };
+  const fingerprintService = new XuiService({} as never, {} as never, testLocks()) as any;
+  const oldFingerprint = fingerprintService.configFingerprint(oldRule);
+  const service = new XuiService({
+    xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true }) },
+    networkRoute: { findUnique: async () => ({
+      id: 'route-1', serverId: 'server-1', ownership: 'managed', remoteFingerprint: oldFingerprint, remoteOrder: 0,
+      normalizedConfig: oldRule, remoteKey: 'route-old', lastSyncedAt: new Date()
+    }) },
+    networkOutbound: { findUnique: async () => ({ id: 'outbound-1', serverId: 'server-1', tag: 'proxy-us' }) },
+    serviceNode: { findUnique: async () => null }
+  } as never, {} as never, testLocks()) as any;
+  service.loadXrayState = async () => ({
+    client: {}, xrayObj: {}, setting: { routing: { rules: [oldRule, occupiedRule] } },
+    originalSetting: { routing: { rules: [oldRule, occupiedRule] } }
+  });
+
+  await assert.rejects(() => service.upsertNetworkRouteUnlocked({
+    serverId: 'server-1',
+    name: 'move route',
+    outboundId: 'outbound-1',
+    ownership: 'managed',
+    rule: { type: 'field', inboundTag: ['inbound-new'] },
+    pushRemote: true,
+    conflict: 'reject'
+  }, 'route-1'), /同一入站不能同时指向多个出站/);
+});
+
+test('service-node route writes force the confirmed official inbound and selected outbound tags', async () => {
+  let writtenSetting: any;
+  let savedRoute: any;
+  const prisma = {
+    xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true, baseUrl: 'https://panel.example.com', config: {} }) },
+    networkRoute: {
+      findUnique: async () => null,
+      create: async ({ data }: any) => { savedRoute = data; return { id: 'route-1', ...data }; },
+      updateMany: async () => ({ count: 0 })
+    },
+    networkOutbound: { findUnique: async () => ({ id: 'outbound-1', serverId: 'server-1', tag: 'proxy-us' }) },
+    serviceNode: { findUnique: async () => ({ id: 'node-1', serverId: 'server-1', config: { remoteInboundTag: 'inbound-us' } }) },
+    $transaction: async (operation: (tx: any) => Promise<unknown>) => operation(prisma)
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.loadXrayState = async () => ({
+    client: {},
+    xrayObj: { outboundTestUrl: 'https://example.com/generate_204' },
+    setting: { routing: { rules: [{ type: 'field', outboundTag: 'direct' }] } },
+    originalSetting: { routing: { rules: [{ type: 'field', outboundTag: 'direct' }] } }
+  });
+  service.writeAndVerifyXrayState = async (_serverId: string, state: any) => { writtenSetting = state.setting; return {}; };
+
+  await service.upsertNetworkRouteUnlocked({
+    serverId: 'server-1',
+    name: 'US route',
+    serviceNodeId: 'node-1',
+    outboundId: 'outbound-1',
+    ownership: 'managed',
+    rule: { type: 'field', inboundTag: ['wrong'], outboundTag: 'wrong' },
+    pushRemote: true,
+    conflict: 'reject'
+  });
+
+  assert.deepEqual(writtenSetting.routing.rules[0], { type: 'field', inboundTag: ['inbound-us'], outboundTag: 'proxy-us' });
+  assert.deepEqual(savedRoute.normalizedConfig, { type: 'field', inboundTag: ['inbound-us'], outboundTag: 'proxy-us' });
+  assert.equal(savedRoute.remoteOrder, 0);
+});
+
+test('remote service-node routes reject missing confirmed inbound tags before writing', async () => {
+  let remoteReads = 0;
+  const service = new XuiService({
+    xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true }) },
+    networkRoute: { findUnique: async () => null },
+    networkOutbound: { findUnique: async () => ({ id: 'outbound-1', serverId: 'server-1', tag: 'proxy-us' }) },
+    serviceNode: { findUnique: async () => ({ id: 'node-1', serverId: 'server-1', config: {} }) }
+  } as never, {} as never, testLocks()) as any;
+  service.loadXrayState = async () => { remoteReads += 1; return {}; };
+
+  await assert.rejects(() => service.upsertNetworkRouteUnlocked({
+    serverId: 'server-1',
+    name: 'US route',
+    serviceNodeId: 'node-1',
+    outboundId: 'outbound-1',
+    ownership: 'managed',
+    rule: { type: 'field' },
+    pushRemote: true,
+    conflict: 'reject'
+  }), /缺少已确认的官方入站标签/);
+  assert.equal(remoteReads, 0);
+});
+
+test('automatic route replacement only permits a precisely matched managed local rule', async () => {
+  const existingRule = { type: 'field', inboundTag: ['inbound-us'], outboundTag: 'proxy-old' };
+  const fingerprintService = new XuiService({} as never, {} as never, testLocks()) as any;
+  const existingFingerprint = fingerprintService.configFingerprint(existingRule);
+  const service = new XuiService({
+    xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true }) },
+    networkOutbound: { findMany: async () => [] },
+    networkRoute: { findMany: async () => [{
+      id: 'route-1', serverId: 'server-1', ownership: 'referenced', remoteOrder: 0,
+      remoteFingerprint: existingFingerprint
+    }] }
+  } as never, {} as never, testLocks()) as any;
+  service.parseOutboundInput = () => [{
+    name: 'US proxy', format: 'xray_json', outbound: { tag: 'proxy-us', protocol: 'freedom' }
+  }];
+  service.loadXrayState = async () => ({
+    client: { listInbounds: async () => ({ success: true, obj: [{ tag: 'inbound-us' }] }) },
+    xrayObj: {},
+    setting: { outbounds: [], routing: { rules: [existingRule] } },
+    originalSetting: { outbounds: [], routing: { rules: [existingRule] } }
+  });
+
+  await assert.rejects(() => service.importNetworkOutboundsUnlocked({
+    serverId: 'server-1', input: '{}', format: 'xray_json', ownership: 'managed', strategy: 'target_panel',
+    conflict: 'replace_managed', createRoute: true, inboundTags: ['inbound-us']
+  }), /不是本系统精确确认的托管规则/);
+});
+
+test('route persistence failure after an official write restores the previous Xray config', async () => {
+  const oldRule = { type: 'field', inboundTag: ['inbound-eu'], outboundTag: 'direct' };
+  let restores = 0;
+  const prisma = {
+    xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true }) },
+    networkRoute: { findUnique: async () => null },
+    networkOutbound: { findUnique: async () => ({ id: 'outbound-1', serverId: 'server-1', tag: 'proxy-us' }) },
+    serviceNode: { findUnique: async () => null },
+    $transaction: async () => { throw new Error('database unavailable'); }
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.loadXrayState = async () => ({
+    client: {}, xrayObj: {}, setting: { routing: { rules: [oldRule] } }, originalSetting: { routing: { rules: [oldRule] } }
+  });
+  service.writeAndVerifyXrayState = async () => ({});
+  service.restoreXrayState = async () => { restores += 1; };
+  service.writeSyncLog = async () => undefined;
+
+  await assert.rejects(() => service.upsertNetworkRouteUnlocked({
+    serverId: 'server-1', name: 'US route', outboundId: 'outbound-1', ownership: 'managed',
+    rule: { type: 'field', inboundTag: ['inbound-us'] }, pushRemote: true, conflict: 'reject'
+  }), /已自动恢复到写入前状态/);
+  assert.equal(restores, 1);
+});
+
+test('explicit route takeover reuses the precisely matched local route record', async () => {
+  const oldRule = { type: 'field', inboundTag: ['inbound-us'], outboundTag: 'proxy-old' };
+  const fingerprintService = new XuiService({} as never, {} as never, testLocks()) as any;
+  const oldFingerprint = fingerprintService.configFingerprint(oldRule);
+  let updatedId = '';
+  let createCalls = 0;
+  const prisma = {
+    xuiServer: { findUnique: async () => ({ id: 'server-1', enabled: true }) },
+    networkRoute: {
+      findUnique: async () => null,
+      findFirst: async ({ where }: any) => where.remoteOrder === 0 && where.remoteFingerprint === oldFingerprint
+        ? { id: 'route-existing', serverId: 'server-1', ownership: 'referenced', remoteOrder: 0, remoteFingerprint: oldFingerprint, normalizedConfig: oldRule, lastSyncedAt: null }
+        : null,
+      update: async ({ where, data }: any) => { updatedId = where.id; return { id: where.id, ...data }; },
+      create: async () => { createCalls += 1; return { id: 'route-new' }; },
+      updateMany: async () => ({ count: 0 })
+    },
+    networkOutbound: { findUnique: async () => ({ id: 'outbound-1', serverId: 'server-1', tag: 'proxy-us' }) },
+    serviceNode: { findUnique: async () => null },
+    $transaction: async (operation: (tx: any) => Promise<unknown>) => operation(prisma)
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.loadXrayState = async () => ({
+    client: {}, xrayObj: {}, setting: { routing: { rules: [oldRule] } }, originalSetting: { routing: { rules: [oldRule] } }
+  });
+  service.writeAndVerifyXrayState = async () => ({});
+
+  const result = await service.upsertNetworkRouteUnlocked({
+    serverId: 'server-1', name: 'US route', outboundId: 'outbound-1', ownership: 'managed',
+    rule: { type: 'field', inboundTag: ['inbound-us'] }, pushRemote: true, conflict: 'takeover'
+  });
+
+  assert.equal(result.id, 'route-existing');
+  assert.equal(updatedId, 'route-existing');
+  assert.equal(createCalls, 0);
+});
+
+test('route deletion restores the official config when the local transaction fails', async () => {
+  const rule = { type: 'field', inboundTag: ['inbound-us'], outboundTag: 'proxy-us' };
+  const fingerprintService = new XuiService({} as never, {} as never, testLocks()) as any;
+  const fingerprint = fingerprintService.configFingerprint(rule);
+  let restores = 0;
+  const route = {
+    id: 'route-1', serverId: 'server-1', ownership: 'managed', remoteOrder: 0, remoteFingerprint: fingerprint,
+    normalizedConfig: rule, server: { id: 'server-1', enabled: true }
+  };
+  const prisma = {
+    networkRoute: { findUnique: async () => route },
+    $transaction: async () => { throw new Error('database unavailable'); }
+  };
+  const service = new XuiService(prisma as never, {} as never, testLocks()) as any;
+  service.loadXrayState = async () => ({
+    client: {}, xrayObj: {}, setting: { routing: { rules: [rule] } }, originalSetting: { routing: { rules: [rule] } }
+  });
+  service.writeAndVerifyXrayState = async () => ({});
+  service.restoreXrayState = async () => { restores += 1; };
+  service.writeSyncLog = async () => undefined;
+
+  await assert.rejects(() => service.deleteNetworkRouteUnlocked('route-1', true, false), /已自动恢复到删除前状态/);
+  assert.equal(restores, 1);
+});
+
+test('Xray state verification waits for running, tests outbound and restores the previous config on failure', async () => {
+  const updates: string[] = [];
+  let restartCalls = 0;
+  const service = new XuiService({} as never, {} as never, testLocks()) as any;
+  const client = {
+    updateXrayConfig: async ({ xraySetting }: any) => { updates.push(xraySetting); return { success: true }; },
+    restartXrayService: async () => { restartCalls += 1; return { success: true }; },
+    serverStatus: async () => ({ success: true, obj: { xray: { state: 'running', errorMsg: '' } } }),
+    getXrayConfig: async () => ({ success: true, obj: { xraySetting: { outbounds: [{ tag: 'proxy-us', protocol: 'freedom' }], routing: { rules: [] } } } }),
+    testOutbound: async () => ({ success: true, obj: { success: false, error: 'connection refused' } }),
+    getXrayResult: async () => ({ success: true, obj: '' })
+  };
+
+  await assert.rejects(() => service.writeAndVerifyXrayState('server-1', {
+    client,
+    xrayObj: {},
+    setting: { outbounds: [{ tag: 'proxy-us', protocol: 'freedom' }], routing: { rules: [] } },
+    originalSetting: { outbounds: [{ tag: 'direct', protocol: 'freedom' }], routing: { rules: [] } }
+  }, ['proxy-us']), /connection refused/);
+
+  assert.equal(updates.length, 2);
+  assert.match(updates[0]!, /proxy-us/);
+  assert.match(updates[1]!, /direct/);
+  assert.equal(restartCalls, 2);
+});
+
 test('official 3.6 client creation accepts universal fields and lets the panel generate protocol secrets', async () => {
   let requestBody: unknown;
   const client = new XuiClient({

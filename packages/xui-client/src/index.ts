@@ -297,6 +297,10 @@ export class XuiClient {
     return this.request('/panel/api/xray/', { method: 'POST' });
   }
 
+  getXrayResult() {
+    return this.request('/panel/api/xray/getXrayResult');
+  }
+
   listOutboundSubscriptions() {
     return this.request('/panel/api/xray/outbound-subs');
   }
@@ -307,6 +311,29 @@ export class XuiClient {
 
   updateXrayConfig(body: { xraySetting: string; outboundTestUrl?: string }) {
     return this.formRequest('/panel/api/xray/update', { method: 'POST', body });
+  }
+
+  testOutbound(outbound: unknown, allOutbounds?: unknown[], mode?: 'tcp' | 'real') {
+    return this.formRequest('/panel/api/xray/testOutbound', {
+      method: 'POST',
+      body: {
+        outbound: JSON.stringify(outbound),
+        allOutbounds: allOutbounds ? JSON.stringify(allOutbounds) : undefined,
+        mode
+      }
+    });
+  }
+
+  routeTest(body: {
+    inboundTag?: string;
+    domain?: string;
+    ip?: string;
+    port?: number;
+    network?: string;
+    protocol?: string;
+    email?: string;
+  }) {
+    return this.formRequest('/panel/api/xray/routeTest', { method: 'POST', body });
   }
 
   restartXrayService() {

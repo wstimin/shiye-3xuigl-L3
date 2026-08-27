@@ -11,7 +11,6 @@ import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/switch/style/css';
 import 'element-plus/es/components/tab-pane/style/css';
 import 'element-plus/es/components/tabs/style/css';
-import 'element-plus/es/components/tag/style/css';
 import 'element-plus/es/components/tooltip/style/css';
 import {
   ElAlert,
@@ -27,7 +26,6 @@ import {
   ElSwitch,
   ElTabPane,
   ElTabs,
-  ElTag,
   ElTooltip
 } from 'element-plus';
 import {
@@ -48,11 +46,12 @@ import {
 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { entityAvatarStyle, entityInitial } from '../entity-avatar';
 import { notifyError } from '../notify';
 
 type Ownership = 'managed' | 'referenced' | 'shared';
 type XuiServer = { id: string; name: string; enabled: boolean };
-type ServiceNode = { id: string; serverId: string; name: string; inboundId?: number | null };
+type ServiceNode = { id: string; serverId: string; name: string; inboundId?: number | null; config?: { remoteInboundTag?: string } };
 type NetworkOutbound = {
   id: string;
   serverId: string;
@@ -303,6 +302,19 @@ function handleRouteOutboundChange(outboundId: string) {
   }
 }
 
+function handleRouteServiceNodeChange(serviceNodeId: string) {
+  const serviceNode = serviceNodes.value.find((item) => item.id === serviceNodeId);
+  if (!serviceNode?.config?.remoteInboundTag) return;
+  try {
+    const rule = parseRule();
+    rule.type = 'field';
+    rule.inboundTag = [serviceNode.config.remoteInboundTag];
+    routeForm.ruleText = JSON.stringify(rule, null, 2);
+  } catch {
+    // Keep the user's invalid JSON untouched until they fix it.
+  }
+}
+
 async function saveRoute() {
   if (saving.value) return;
   let rule: Record<string, unknown>;
@@ -426,10 +438,6 @@ function ownershipLabel(value: Ownership) {
   return value === 'managed' ? '本系统托管' : value === 'shared' ? '共享管理' : '官方引用';
 }
 
-function ownershipTagType(value: Ownership) {
-  return value === 'managed' ? 'success' : value === 'shared' ? 'warning' : 'info';
-}
-
 function sourceFormatLabel(value?: string | null) {
   return formatOptions.find(([format]) => format === value)?.[1] || value || '远端同步';
 }
@@ -500,42 +508,56 @@ onMounted(loadResources);
 
       <div v-loading="loading" class="entity-card-grid network-resource-grid">
         <template v-if="activeTab === 'outbounds'">
-          <article v-for="outbound in filteredOutbounds" :key="outbound.id" class="entity-card network-resource-card">
-            <header class="entity-card-head">
-              <div><strong :title="outbound.name">{{ outbound.name }}</strong><span :title="outbound.tag">{{ outbound.tag }}</span></div>
-              <el-tag size="small" :type="ownershipTagType(outbound.ownership)">{{ ownershipLabel(outbound.ownership) }}</el-tag>
+          <article v-for="outbound in filteredOutbounds" :key="outbound.id" class="network-resource-card entity-runtime-card" :class="outbound.lastSyncedAt ? 'runtime-state-online' : 'runtime-state-unknown'">
+            <header class="network-resource-card-header">
+              <div class="network-resource-identity">
+                <span class="network-resource-icon entity-name-avatar" :style="entityAvatarStyle(outbound.name, outbound.id)">{{ entityInitial(outbound.name, '出') }}</span>
+                <div><strong :title="outbound.name">{{ outbound.name }}</strong><span :title="outbound.tag">{{ outbound.tag }}</span></div>
+              </div>
+              <span class="network-resource-status" :class="outbound.lastSyncedAt ? 'is-synced' : 'is-local'"><i></i>{{ outbound.lastSyncedAt ? '已同步' : '仅本地' }}</span>
             </header>
-            <div class="entity-card-stats">
-              <div><span>协议</span><strong>{{ outbound.protocol.toUpperCase() }}</strong></div>
-              <div><span>来源格式</span><strong>{{ sourceFormatLabel(outbound.sourceFormat) }}</strong></div>
-              <div><span>关联路由</span><strong>{{ outbound._count.routes }}</strong></div>
+            <div class="network-resource-metrics runtime-metric-grid">
+              <div class="runtime-metric tone-cyan"><span>协议</span><strong>{{ outbound.protocol.toUpperCase() }}</strong></div>
+              <div class="runtime-metric tone-indigo"><span>来源格式</span><strong>{{ sourceFormatLabel(outbound.sourceFormat) }}</strong></div>
+              <div class="runtime-metric tone-emerald"><span>关联路由</span><strong>{{ outbound._count.routes }}</strong></div>
             </div>
-            <div class="network-resource-meta"><Server :size="13" /><span>{{ outbound.server.name }}</span><span>同步：{{ formatDate(outbound.lastSyncedAt) }}</span></div>
-            <footer class="entity-card-actions network-card-actions">
-              <el-tooltip content="查看标准化配置" placement="top"><el-button class="runtime-icon-button" aria-label="查看标准化配置" @click="showOutboundConfig(outbound)"><Code2 :size="15" /></el-button></el-tooltip>
-              <el-tooltip content="仅删除本地记录" placement="top"><el-button class="runtime-icon-button" :loading="deletingIds.has(outbound.id)" aria-label="仅删除本地记录" @click="deleteOutbound(outbound, false)"><Trash2 :size="15" /></el-button></el-tooltip>
-              <el-tooltip :content="outbound.remoteFingerprint ? (outbound.ownership === 'managed' ? '删除远端出站与本地记录' : '接管并删除远端出站与本地记录') : '缺少已确认的远端状态，不能删除远端'" placement="top"><el-button class="runtime-icon-button danger" :disabled="!outbound.remoteFingerprint" :loading="deletingIds.has(outbound.id)" aria-label="删除远端出站" @click="deleteOutbound(outbound, true)"><CloudOff :size="15" /></el-button></el-tooltip>
+            <div class="network-resource-runtime-info runtime-endpoint-line"><span class="runtime-endpoint-value"><Server :size="13" /><strong :title="outbound.server.name">{{ outbound.server.name }}</strong></span></div>
+            <div class="network-resource-summary runtime-summary-line"><span class="network-resource-tag">{{ ownershipLabel(outbound.ownership) }}</span><span class="runtime-summary-note">同步：{{ formatDate(outbound.lastSyncedAt) }}</span></div>
+            <footer class="network-resource-actions runtime-card-footer">
+              <span class="runtime-footer-label"><Network :size="13" />{{ outbound.protocol.toUpperCase() }} · {{ outbound.tag }}</span>
+              <div class="runtime-action-group">
+                <el-tooltip content="查看标准化配置" placement="top"><el-button class="runtime-icon-button" aria-label="查看标准化配置" @click="showOutboundConfig(outbound)"><Code2 :size="15" /></el-button></el-tooltip>
+                <el-tooltip content="仅删除本地记录" placement="top"><el-button class="runtime-icon-button" :loading="deletingIds.has(outbound.id)" aria-label="仅删除本地记录" @click="deleteOutbound(outbound, false)"><Trash2 :size="15" /></el-button></el-tooltip>
+                <el-tooltip :content="outbound.remoteFingerprint ? (outbound.ownership === 'managed' ? '删除远端出站与本地记录' : '接管并删除远端出站与本地记录') : '缺少已确认的远端状态，不能删除远端'" placement="top"><el-button class="runtime-icon-button danger" :disabled="!outbound.remoteFingerprint" :loading="deletingIds.has(outbound.id)" aria-label="删除远端出站" @click="deleteOutbound(outbound, true)"><CloudOff :size="15" /></el-button></el-tooltip>
+              </div>
             </footer>
           </article>
           <div v-if="!loading && !filteredOutbounds.length" class="empty-panel network-empty"><Network :size="26" /><strong>暂无符合条件的出站</strong><span>从右上角按链接、订阅或 Xray JSON 导入。</span></div>
         </template>
 
         <template v-else>
-          <article v-for="route in filteredRoutes" :key="route.id" class="entity-card network-resource-card">
-            <header class="entity-card-head">
-              <div><strong :title="route.name">{{ route.name }}</strong><span :title="ruleSummary(route.normalizedConfig)">{{ ruleSummary(route.normalizedConfig) }}</span></div>
-              <el-tag size="small" :type="ownershipTagType(route.ownership)">{{ ownershipLabel(route.ownership) }}</el-tag>
+          <article v-for="route in filteredRoutes" :key="route.id" class="network-resource-card entity-runtime-card" :class="route.lastSyncedAt ? 'runtime-state-online' : 'runtime-state-unknown'">
+            <header class="network-resource-card-header">
+              <div class="network-resource-identity">
+                <span class="network-resource-icon entity-name-avatar" :style="entityAvatarStyle(route.name, route.id)">{{ entityInitial(route.name, '路') }}</span>
+                <div><strong :title="route.name">{{ route.name }}</strong><span :title="ruleSummary(route.normalizedConfig)">{{ ruleSummary(route.normalizedConfig) }}</span></div>
+              </div>
+              <span class="network-resource-status" :class="route.lastSyncedAt ? 'is-synced' : 'is-local'"><i></i>{{ route.lastSyncedAt ? '已同步' : '仅本地' }}</span>
             </header>
-            <div class="entity-card-stats">
-              <div><span>出站</span><strong>{{ route.outbound?.tag || String(route.normalizedConfig.outboundTag || '-') }}</strong></div>
-              <div><span>服务节点</span><strong>{{ route.serviceNode?.name || '未关联' }}</strong></div>
-              <div><span>远端顺序</span><strong>{{ route.remoteOrder ?? '本地' }}</strong></div>
+            <div class="network-resource-metrics runtime-metric-grid">
+              <div class="runtime-metric tone-cyan"><span>出站</span><strong>{{ route.outbound?.tag || String(route.normalizedConfig.outboundTag || '-') }}</strong></div>
+              <div class="runtime-metric tone-indigo"><span>服务节点</span><strong>{{ route.serviceNode?.name || '未关联' }}</strong></div>
+              <div class="runtime-metric tone-amber"><span>远端顺序</span><strong>{{ route.remoteOrder ?? '本地' }}</strong></div>
             </div>
-            <div class="network-resource-meta"><Server :size="13" /><span>{{ route.server.name }}</span><span>同步：{{ formatDate(route.lastSyncedAt) }}</span></div>
-            <footer class="entity-card-actions network-card-actions">
-              <el-tooltip content="编辑路由" placement="top"><el-button class="runtime-icon-button" aria-label="编辑路由" @click="editRoute(route)"><Edit3 :size="15" /></el-button></el-tooltip>
-              <el-tooltip content="仅删除本地记录" placement="top"><el-button class="runtime-icon-button" :loading="deletingIds.has(route.id)" aria-label="仅删除本地记录" @click="deleteRoute(route, false)"><Trash2 :size="15" /></el-button></el-tooltip>
-              <el-tooltip :content="route.remoteFingerprint ? (route.ownership === 'managed' ? '删除远端路由与本地记录' : '接管并删除远端路由与本地记录') : '缺少已确认的远端状态，不能删除远端'" placement="top"><el-button class="runtime-icon-button danger" :disabled="!route.remoteFingerprint" :loading="deletingIds.has(route.id)" aria-label="删除远端路由" @click="deleteRoute(route, true)"><CloudOff :size="15" /></el-button></el-tooltip>
+            <div class="network-resource-runtime-info runtime-endpoint-line"><span class="runtime-endpoint-value"><Server :size="13" /><strong :title="route.server.name">{{ route.server.name }}</strong></span></div>
+            <div class="network-resource-summary runtime-summary-line"><span class="network-resource-tag">{{ ownershipLabel(route.ownership) }}</span><span class="runtime-summary-note">同步：{{ formatDate(route.lastSyncedAt) }}</span></div>
+            <footer class="network-resource-actions runtime-card-footer">
+              <span class="runtime-footer-label"><Route :size="13" />{{ route.serviceNode?.name || '全部入站' }}</span>
+              <div class="runtime-action-group">
+                <el-tooltip content="编辑路由" placement="top"><el-button class="runtime-icon-button" aria-label="编辑路由" @click="editRoute(route)"><Edit3 :size="15" /></el-button></el-tooltip>
+                <el-tooltip content="仅删除本地记录" placement="top"><el-button class="runtime-icon-button" :loading="deletingIds.has(route.id)" aria-label="仅删除本地记录" @click="deleteRoute(route, false)"><Trash2 :size="15" /></el-button></el-tooltip>
+                <el-tooltip :content="route.remoteFingerprint ? (route.ownership === 'managed' ? '删除远端路由与本地记录' : '接管并删除远端路由与本地记录') : '缺少已确认的远端状态，不能删除远端'" placement="top"><el-button class="runtime-icon-button danger" :disabled="!route.remoteFingerprint" :loading="deletingIds.has(route.id)" aria-label="删除远端路由" @click="deleteRoute(route, true)"><CloudOff :size="15" /></el-button></el-tooltip>
+              </div>
             </footer>
           </article>
           <div v-if="!loading && !filteredRoutes.length" class="empty-panel network-empty"><GitBranch :size="26" /><strong>暂无符合条件的路由</strong><span>创建本地规则或直接写入目标官方面板。</span></div>
@@ -575,7 +597,7 @@ onMounted(loadResources);
         <el-form-item label="目标面板" required><el-select v-model="routeForm.serverId" :disabled="Boolean(editingRouteId)" style="width: 100%" @change="handleRouteServerChange"><el-option v-for="server in enabledServers" :key="server.id" :label="server.name" :value="server.id" /></el-select></el-form-item>
         <el-form-item label="规则名称" required><el-input v-model="routeForm.name" maxlength="120" placeholder="例如：香港入站转 SOCKS" /></el-form-item>
         <el-form-item label="关联出站"><el-select v-model="routeForm.outboundId" clearable style="width: 100%" @change="handleRouteOutboundChange"><el-option v-for="outbound in availableRouteOutbounds" :key="outbound.id" :label="`${outbound.name} (${outbound.tag})`" :value="outbound.id" /></el-select></el-form-item>
-        <el-form-item label="关联服务节点"><el-select v-model="routeForm.serviceNodeId" clearable style="width: 100%"><el-option v-for="node in availableServiceNodes" :key="node.id" :label="`${node.name}${node.inboundId ? ` (#${node.inboundId})` : ''}`" :value="node.id" /></el-select></el-form-item>
+        <el-form-item label="关联服务节点"><el-select v-model="routeForm.serviceNodeId" clearable style="width: 100%" @change="handleRouteServiceNodeChange"><el-option v-for="node in availableServiceNodes" :key="node.id" :label="`${node.name}${node.inboundId ? ` (#${node.inboundId})` : ''}`" :value="node.id" /></el-select></el-form-item>
         <el-form-item label="所有权"><el-select v-model="routeForm.ownership" :disabled="routeForm.pushRemote" style="width: 100%"><el-option label="本系统托管" value="managed" /><el-option label="官方引用" value="referenced" /><el-option label="共享管理" value="shared" /></el-select></el-form-item>
         <el-form-item label="冲突策略"><el-select v-model="routeForm.conflict" style="width: 100%"><el-option label="发现冲突时拒绝" value="reject" /><el-option label="替换本系统托管规则" value="replace_managed" /><el-option label="明确接管远端规则" value="takeover" /></el-select></el-form-item>
         <el-form-item label="写入官方面板" class="network-switch-item"><el-switch v-model="routeForm.pushRemote" @change="handleRoutePushRemoteChange" /><span>关闭时只保存本地规则；引用规则写回必须选择明确接管。</span></el-form-item>
@@ -601,12 +623,29 @@ onMounted(loadResources);
 .network-search-field { min-width: 0; display: flex; align-items: center; gap: 8px; }
 .network-search-field > svg { flex: 0 0 auto; color: var(--ui-muted); }
 .network-search-field .el-input { flex: 1; }
-.network-resource-grid { min-height: 230px; }
-.network-resource-card { min-height: 210px; }
-.network-resource-meta { min-width: 0; display: flex; align-items: center; gap: 7px; color: var(--ui-muted); font-size: 12px; }
-.network-resource-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.network-resource-meta span:last-child { margin-left: auto; }
-.network-card-actions { justify-content: flex-end; margin-top: auto; border-top: 1px solid var(--ui-border); padding-top: 10px; }
+.network-resource-grid { min-height: 230px; grid-template-columns: repeat(auto-fill, minmax(310px, 360px)); gap: 14px; justify-content: start; }
+.network-resource-card { height: 231px; min-height: 231px; max-height: 231px; display: grid; grid-template-rows: 38px 52px 16px 22px 39px; gap: 9px; align-content: start; padding: 14px; border: 1px solid rgb(255 255 255 / 8%); border-radius: 8px; }
+.network-resource-card-header { min-width: 0; height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 9px; position: relative; z-index: 1; }
+.network-resource-identity { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.network-resource-identity > div { min-width: 0; display: grid; gap: 3px; }
+.network-resource-identity strong, .network-resource-identity span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.network-resource-identity strong { color: #f4f7fb; font-size: 14px; font-weight: 750; line-height: 1.2; }
+.network-resource-identity span { color: #7d899c; font-size: 10.5px; line-height: 1.25; }
+.network-resource-icon.entity-name-avatar { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 9px; background: linear-gradient(145deg, var(--entity-avatar-start), var(--entity-avatar-end)); color: #fff; font-size: 23px; font-weight: 900; text-shadow: 0 1px 2px rgb(0 0 0 / 52%), 0 0 6px rgb(255 255 255 / 16%); }
+.network-resource-status { min-height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border: 1px solid rgb(255 255 255 / 4%); border-radius: 6px; font-size: 10px; white-space: nowrap; }
+.network-resource-status i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.network-resource-status.is-synced { color: #34d399; background: rgb(16 185 129 / 8%); }
+.network-resource-status.is-local { color: #94a3b8; background: rgb(100 116 139 / 9%); }
+.network-resource-metrics.runtime-metric-grid { height: 52px; gap: 6px; }
+.network-resource-metrics.runtime-metric-grid > .runtime-metric { height: 52px; min-height: 52px; gap: 4px; padding: 7px 8px; }
+.network-resource-metrics.runtime-metric-grid > .runtime-metric::after { inset: auto 8px 6px; }
+.network-resource-metrics.runtime-metric-grid > .runtime-metric span { font-size: 9.5px; }
+.network-resource-metrics.runtime-metric-grid > .runtime-metric strong { padding-bottom: 5px; font-size: 11.5px; }
+.network-resource-runtime-info { min-height: 16px; height: 16px; font-size: 9.5px; }
+.network-resource-summary { min-height: 22px; height: 22px; }
+.network-resource-tag { flex: 0 0 auto; padding: 1px 5px; border: 1px solid rgb(var(--runtime-accent) / 18%); border-radius: 4px; background: rgb(var(--runtime-accent) / 8%); color: rgb(var(--runtime-accent)); font-size: 9px; line-height: 1.45; }
+.network-resource-actions.runtime-card-footer { min-height: 39px; height: 39px; margin-top: 0; padding-top: 9px; }
+.network-resource-actions .runtime-footer-label { max-width: 58%; font-size: 9px; }
 .runtime-icon-button.danger { color: #fca5a5 !important; }
 .network-empty { grid-column: 1 / -1; display: grid; place-items: center; align-content: center; gap: 7px; }
 .network-empty strong { color: var(--ui-text); }
@@ -626,6 +665,8 @@ onMounted(loadResources);
 }
 @media (max-width: 720px) {
   .network-filter-bar, .network-dialog-grid { grid-template-columns: 1fr; }
+  .network-resource-grid { grid-template-columns: minmax(0, 1fr); }
+  .network-resource-card { width: 100%; }
   .network-dialog-full { grid-column: auto; }
   .network-tabs { padding-inline: 12px; }
 }

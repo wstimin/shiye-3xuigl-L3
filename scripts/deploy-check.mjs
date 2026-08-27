@@ -52,7 +52,7 @@ if (installerScript) {
 
 if (migrationCheckScript) requireMatch(migrationCheckScript, /_prisma_migrations/, 'Migration safety check must read Prisma migration history.');
 
-if (packageMetadata.version !== '1.0.7') errors.push('Release package version must be 1.0.7.');
+if (packageMetadata.version !== '1.0.8') errors.push('Release package version must be 1.0.8.');
 if (buildInfo.version !== packageMetadata.version) errors.push('Build identity version must match package.json.');
 if (!String(buildInfo.commit || '').trim()) errors.push('Build identity must include a commit.');
 if (!Number.isFinite(Date.parse(String(buildInfo.buildTime || '')))) errors.push('Build identity must include a valid build time.');

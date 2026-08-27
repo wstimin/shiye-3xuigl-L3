@@ -28,6 +28,13 @@ type PanelCompatibility = {
   trafficEndpointVerified: true;
 };
 
+type XrayState = {
+  client: XuiClient;
+  xrayObj: Record<string, unknown>;
+  setting: Record<string, unknown>;
+  originalSetting: Record<string, unknown>;
+};
+
 const PANEL_COMPATIBILITY_TTL_MS = 15 * 60 * 1000;
 
 type SyncLogQuery = {
@@ -1786,8 +1793,11 @@ export class XuiService {
     }
     const parsed = this.applySingleOutboundName(this.parseOutboundInput(input.input, input.format), input.name);
     if (!parsed.length) throw new BadRequestException('没有识别到可导入的出站');
+    if (input.createRoute && parsed.length !== 1) {
+      throw new BadRequestException('自动创建路由时一次只能导入一个出站；多个出站共用同一入站条件时只有第一条规则能够生效');
+    }
 
-    let remoteState: { client: XuiClient; xrayObj: Record<string, unknown>; setting: Record<string, unknown> } | null = null;
+    let remoteState: XrayState | null = null;
     if (input.strategy === 'target_panel') remoteState = await this.loadXrayState(server);
     const existingOutbounds = await this.prisma.networkOutbound.findMany({ where: { serverId: server.id } });
     const existingByTag = new Map(existingOutbounds.map((item) => [item.tag, item]));
@@ -1806,6 +1816,15 @@ export class XuiService {
       fingerprint: string;
       action: 'created' | 'updated';
       existing: (typeof existingOutbounds)[number] | undefined;
+    }> = [];
+    const pendingRemoteRoutes: Array<{
+      outboundTag: string;
+      name: string;
+      rule: Record<string, unknown>;
+      fingerprint: string;
+      remoteOrder: number;
+      insertionIndex?: number;
+      previousFingerprint?: string;
     }> = [];
 
     for (let index = 0; index < parsed.length; index += 1) {
@@ -1859,52 +1878,192 @@ export class XuiService {
       });
     }
 
+    if (remoteState && input.createRoute) {
+      if (!input.inboundTags.length) throw new BadRequestException('自动创建路由时必须填写入站标签');
+      const inboundPayload = await remoteState.client.listInbounds();
+      this.assertXuiSuccess(inboundPayload);
+      const officialInboundTags = new Set(this.xuiArray(inboundPayload)
+        .map((item) => this.stringValue(this.xuiObject(item).tag))
+        .filter((tag): tag is string => Boolean(tag)));
+      const missingTags = input.inboundTags.filter((tag) => !officialInboundTags.has(tag));
+      if (missingTags.length) throw new BadRequestException(`官方面板中不存在入站标签：${missingTags.join('、')}`);
+
+      const routing = this.ensureRouting(remoteState.setting);
+      const rules = Array.isArray(routing.rules) ? routing.rules : [];
+      const existingRoutes = await this.prisma.networkRoute.findMany({ where: { serverId: server.id } });
+      const assertManagedRouteReplacement = (remoteOrder: number, remoteFingerprint: string) => {
+        const matches = existingRoutes.filter((route) =>
+          route.remoteOrder === remoteOrder && route.remoteFingerprint === remoteFingerprint
+        );
+        if (matches.length !== 1 || matches[0]!.ownership !== 'managed') {
+          throw new BadRequestException('目标远端路由不是本系统精确确认的托管规则，不能直接替换；请先同步核对或使用明确接管');
+        }
+      };
+      for (const item of pending) {
+        const rule = { type: 'field', inboundTag: input.inboundTags, outboundTag: item.tag };
+        const fingerprint = this.configFingerprint(rule);
+        const duplicate = this.findRemoteRouteIndex(rules, fingerprint, undefined);
+        let remoteOrder = duplicate;
+        let insertionIndex: number | undefined;
+        let previousFingerprint: string | undefined;
+        if (duplicate >= 0) {
+          if (input.conflict === 'reject' || input.conflict === 'rename') {
+            throw new BadRequestException(`出站 ${item.tag} 的相同远端路由规则已存在`);
+          }
+          previousFingerprint = this.configFingerprint(this.xuiObject(rules[duplicate]));
+          if (input.conflict === 'replace_managed') {
+            assertManagedRouteReplacement(duplicate, previousFingerprint);
+          }
+          rules.splice(duplicate, 1, rule);
+        } else {
+          const conflictingIndexes = this.conflictingInboundOnlyRouteIndexes(rules, rule);
+          if (conflictingIndexes.length) {
+            if (input.conflict === 'reject' || input.conflict === 'rename') {
+              throw new BadRequestException(`入站 ${input.inboundTags.join('、')} 已存在全流量路由；同一入站不能同时指向多个出站，请明确接管原规则或先删除原规则`);
+            }
+            if (conflictingIndexes.length !== 1) {
+              throw new BadRequestException(`入站 ${input.inboundTags.join('、')} 命中了多条已有全流量路由，无法安全接管；请先在官方面板整理重复规则`);
+            }
+            remoteOrder = conflictingIndexes[0]!;
+            previousFingerprint = this.configFingerprint(this.xuiObject(rules[remoteOrder]));
+            if (input.conflict === 'replace_managed') {
+              assertManagedRouteReplacement(remoteOrder, previousFingerprint);
+            }
+            rules.splice(remoteOrder, 1, rule);
+          } else {
+            remoteOrder = this.networkRouteInsertionIndex(rules, rule);
+            insertionIndex = remoteOrder;
+            rules.splice(remoteOrder, 0, rule);
+          }
+        }
+        pendingRemoteRoutes.push({
+          outboundTag: item.tag,
+          name: `${item.name} route`,
+          rule,
+          fingerprint,
+          remoteOrder,
+          insertionIndex,
+          previousFingerprint
+        });
+      }
+      for (const item of pendingRemoteRoutes) {
+        item.remoteOrder = rules.findIndex((rule) => this.configFingerprint(this.xuiObject(rule)) === item.fingerprint);
+      }
+      routing.rules = rules;
+      remoteState.setting.routing = routing;
+    }
+
     let remoteWritten = false;
     if (remoteState) {
-      await this.writeAndVerifyXrayState(server.id, remoteState, pending.map((item) => item.tag));
+      await this.writeAndVerifyXrayState(server.id, remoteState, pending.map((item) => item.tag), [], undefined, undefined, {
+        expectedRoutes: pendingRemoteRoutes.map((item) => ({ fingerprint: item.fingerprint, index: item.remoteOrder })),
+        routeProbes: pendingRemoteRoutes.map((item) => this.networkRouteProbe(item.rule, remoteState!.xrayObj)).filter((item): item is NonNullable<typeof item> => Boolean(item))
+      });
       remoteWritten = true;
     }
 
     const syncedAt = remoteState ? new Date() : null;
     const savedOwnership = remoteState ? 'managed' : input.ownership;
     let savedOutbounds: Array<(typeof existingOutbounds)[number]>;
+    const routeResults: Array<{ outboundId: string; outboundTag: string; created: boolean; routeId?: string; message?: string }> = [];
     try {
-      savedOutbounds = await this.prisma.$transaction(pending.map((item) => this.prisma.networkOutbound.upsert({
-        where: { serverId_tag: { serverId: server.id, tag: item.tag } },
-        create: {
-          serverId: server.id,
-          name: item.name,
-          tag: item.tag,
-          protocol: item.protocol,
-          ownership: savedOwnership,
-          sourceFormat: item.format,
-          rawInput: this.toJsonValue(input.input),
-          normalizedConfig: this.toJsonValue(item.outbound),
-          remoteFingerprint: remoteState ? item.fingerprint : null,
-          lastSyncedAt: syncedAt
-        },
-        update: {
-          name: item.name,
-          protocol: item.protocol,
-          ownership: savedOwnership,
-          sourceFormat: item.format,
-          rawInput: this.toJsonValue(input.input),
-          normalizedConfig: this.toJsonValue(item.outbound),
-          remoteFingerprint: remoteState ? item.fingerprint : item.existing?.remoteFingerprint,
-          lastSyncedAt: remoteState
-            ? syncedAt
-            : item.existing && this.configFingerprint(item.existing.normalizedConfig) === item.fingerprint
-              ? item.existing.lastSyncedAt
-              : null
+      const saved = await this.prisma.$transaction(async (tx) => {
+        const outbounds = [];
+        for (const item of pending) {
+          outbounds.push(await tx.networkOutbound.upsert({
+            where: { serverId_tag: { serverId: server.id, tag: item.tag } },
+            create: {
+              serverId: server.id,
+              name: item.name,
+              tag: item.tag,
+              protocol: item.protocol,
+              ownership: savedOwnership,
+              sourceFormat: item.format,
+              rawInput: this.toJsonValue(input.input),
+              normalizedConfig: this.toJsonValue(item.outbound),
+              remoteFingerprint: remoteState ? item.fingerprint : null,
+              lastSyncedAt: syncedAt
+            },
+            update: {
+              name: item.name,
+              protocol: item.protocol,
+              ownership: savedOwnership,
+              sourceFormat: item.format,
+              rawInput: this.toJsonValue(input.input),
+              normalizedConfig: this.toJsonValue(item.outbound),
+              remoteFingerprint: remoteState ? item.fingerprint : item.existing?.remoteFingerprint,
+              lastSyncedAt: remoteState
+                ? syncedAt
+                : item.existing && this.configFingerprint(item.existing.normalizedConfig) === item.fingerprint
+                  ? item.existing.lastSyncedAt
+                  : null
+            }
+          }));
         }
-      })));
+
+        if (remoteState && pendingRemoteRoutes.length) {
+          for (const insertionIndex of pendingRemoteRoutes.map((item) => item.insertionIndex).filter((item): item is number => item !== undefined)) {
+            await tx.networkRoute.updateMany({
+              where: { serverId: server.id, remoteOrder: { gte: insertionIndex } },
+              data: { remoteOrder: { increment: 1 } }
+            });
+          }
+          for (const outbound of outbounds) {
+            const pendingRoute = pendingRemoteRoutes.find((item) => item.outboundTag === outbound.tag);
+            if (!pendingRoute) continue;
+            const replacedRoute = pendingRoute.previousFingerprint
+              ? await tx.networkRoute.findFirst({
+                where: {
+                  serverId: server.id,
+                  remoteOrder: pendingRoute.remoteOrder,
+                  remoteFingerprint: pendingRoute.previousFingerprint
+                }
+              })
+              : null;
+            const routeData = {
+              name: pendingRoute.name,
+              outboundId: outbound.id,
+              ownership: 'managed' as const,
+              remoteOrder: pendingRoute.remoteOrder,
+              matchConfig: this.toJsonValue(pendingRoute.rule),
+              normalizedConfig: this.toJsonValue(pendingRoute.rule),
+              remoteFingerprint: pendingRoute.fingerprint,
+              lastSyncedAt: syncedAt
+            };
+            const route = replacedRoute
+              ? await tx.networkRoute.update({ where: { id: replacedRoute.id }, data: routeData })
+              : await tx.networkRoute.upsert({
+                where: { serverId_remoteKey: { serverId: server.id, remoteKey: `route-${pendingRoute.fingerprint.slice(0, 20)}` } },
+                create: {
+                serverId: server.id,
+                remoteKey: `route-${pendingRoute.fingerprint.slice(0, 20)}`,
+                  ...routeData
+                },
+                update: routeData
+              });
+            routeResults.push({ outboundId: outbound.id, outboundTag: outbound.tag, created: true, routeId: route.id });
+          }
+        }
+        return outbounds;
+      });
+      savedOutbounds = saved;
     } catch (error) {
-      if (remoteWritten) {
-        await this.writeSyncLog(server.id, 'network-outbound-import-local-save', 'failed', '官方出站已写入，但本地记录保存失败，请立即执行面板同步并核对', {
+      if (remoteWritten && remoteState) {
+        try {
+          await this.restoreXrayState(remoteState);
+        } catch (rollbackError) {
+          await this.writeSyncLog(server.id, 'network-outbound-import-local-save', 'failed', '本地记录保存失败，且官方配置自动恢复失败，请立即核对官方面板', {
+            tags: pending.map((item) => item.tag),
+            message: this.errorMessage(error),
+            rollbackMessage: this.errorMessage(rollbackError)
+          });
+          throw new BadGatewayException(`本地记录保存失败，且官方配置自动恢复失败：${this.errorMessage(rollbackError)}`);
+        }
+        await this.writeSyncLog(server.id, 'network-outbound-import-local-save', 'failed', '本地记录保存失败，已自动恢复写入前的官方配置', {
           tags: pending.map((item) => item.tag),
           message: this.errorMessage(error)
         });
-        throw new BadGatewayException('官方出站已写入，但本地记录保存失败。请立即执行面板同步并核对，避免重复导入');
+        throw new BadGatewayException('本地记录保存失败，官方出站与路由已自动恢复到写入前状态');
       }
       throw error;
     }
@@ -1915,8 +2074,7 @@ export class XuiService {
       action: pending[index]!.action
     }));
 
-    const routeResults: Array<{ outboundId: string; outboundTag: string; created: boolean; routeId?: string; message?: string }> = [];
-    if (input.createRoute && input.inboundTags.length) {
+    if (!remoteState && input.createRoute && input.inboundTags.length) {
       for (const result of results) {
         const outbound = await this.prisma.networkOutbound.findUnique({ where: { id: result.id } });
         if (!outbound) continue;
@@ -1974,9 +2132,10 @@ export class XuiService {
     }
     if (deleteRemote && !outbound.remoteFingerprint) throw new BadRequestException('该出站尚未由本系统写入或确认远端状态，不能删除官方面板配置');
     let remote = { deleted: false, skipped: true } as Record<string, unknown>;
+    let remoteState: XrayState | null = null;
     if (deleteRemote) {
-      const state = await this.loadXrayState(outbound.server);
-      const outbounds = Array.isArray(state.setting.outbounds) ? state.setting.outbounds : [];
+      remoteState = await this.loadXrayState(outbound.server);
+      const outbounds = Array.isArray(remoteState.setting.outbounds) ? remoteState.setting.outbounds : [];
       const index = outbounds.findIndex((item) => this.stringValue(this.xuiObject(item).tag) === outbound.tag);
       if (index >= 0) {
         const current = this.xuiObject(outbounds[index]);
@@ -1985,21 +2144,32 @@ export class XuiService {
           throw new BadRequestException('远端出站已被其他来源修改，拒绝覆盖删除');
         }
         outbounds.splice(index, 1);
-        state.setting.outbounds = outbounds;
-        await this.writeAndVerifyXrayState(outbound.serverId, state, [], [outbound.tag]);
+        remoteState.setting.outbounds = outbounds;
+        await this.writeAndVerifyXrayState(outbound.serverId, remoteState, [], [outbound.tag]);
         remote = { deleted: true, tag: outbound.tag };
       }
     }
     try {
       await this.prisma.networkOutbound.delete({ where: { id } });
     } catch (error) {
-      if (Boolean(remote.deleted)) {
-        await this.writeSyncLog(outbound.serverId, 'network-outbound-delete-local-save', 'failed', '官方出站已删除，但本地记录删除失败，请执行面板同步并核对', {
+      if (Boolean(remote.deleted) && remoteState) {
+        try {
+          await this.restoreXrayState(remoteState);
+        } catch (rollbackError) {
+          await this.writeSyncLog(outbound.serverId, 'network-outbound-delete-local-save', 'failed', '本地出站删除失败，且官方配置自动恢复失败，请立即核对官方面板', {
+            outboundId: id,
+            tag: outbound.tag,
+            message: this.errorMessage(error),
+            rollbackMessage: this.errorMessage(rollbackError)
+          });
+          throw new BadGatewayException(`本地出站删除失败，且官方配置自动恢复失败：${this.errorMessage(rollbackError)}`);
+        }
+        await this.writeSyncLog(outbound.serverId, 'network-outbound-delete-local-save', 'failed', '本地出站删除失败，已自动恢复写入前的官方配置', {
           outboundId: id,
           tag: outbound.tag,
           message: this.errorMessage(error)
         });
-        throw new BadGatewayException('官方出站已删除，但本地记录删除失败。请执行面板同步并核对后再操作');
+        throw new BadGatewayException('本地出站删除失败，官方出站已自动恢复到删除前状态');
       }
       throw error;
     }
@@ -2037,19 +2207,34 @@ export class XuiService {
     }
     const outbound = input.outboundId ? await this.prisma.networkOutbound.findUnique({ where: { id: input.outboundId } }) : null;
     if (input.outboundId && (!outbound || outbound.serverId !== server.id)) throw new BadRequestException('出站不存在或不属于目标面板');
-    const serviceNode = input.serviceNodeId ? await this.prisma.serviceNode.findUnique({ where: { id: input.serviceNodeId }, select: { id: true, serverId: true } }) : null;
+    const serviceNode = input.serviceNodeId ? await this.prisma.serviceNode.findUnique({
+      where: { id: input.serviceNodeId },
+      select: { id: true, serverId: true, config: true }
+    }) : null;
     if (input.serviceNodeId && (!serviceNode || serviceNode.serverId !== server.id)) throw new BadRequestException('服务节点不存在或不属于目标面板');
     const rule = { ...input.rule } as Record<string, unknown>;
-    if (outbound && !rule.outboundTag) rule.outboundTag = outbound.tag;
+    rule.type = 'field';
+    if (outbound) rule.outboundTag = outbound.tag;
+    if (serviceNode) {
+      const inboundTag = this.stringValue(this.xuiObject(serviceNode.config).remoteInboundTag);
+      if (!inboundTag && input.pushRemote) throw new BadRequestException('所选服务节点缺少已确认的官方入站标签，请先同步该节点后再创建路由');
+      if (inboundTag) {
+        rule.type = 'field';
+        rule.inboundTag = [inboundTag];
+      }
+    }
     if (!this.stringValue(rule.outboundTag)) throw new BadRequestException('路由规则缺少 outboundTag');
     const fingerprint = this.configFingerprint(rule);
     const localConfigChanged = current ? this.configFingerprint(current.normalizedConfig) !== fingerprint : false;
     const remoteKey = current?.remoteKey || `route-${fingerprint.slice(0, 20)}`;
     let remoteOrder = current?.remoteOrder ?? null;
+    let remoteState: XrayState | null = null;
+    let remoteInserted = false;
+    let takeoverLocalRoute: Awaited<ReturnType<typeof this.prisma.networkRoute.findFirst>> = null;
 
     if (input.pushRemote) {
-      const state = await this.loadXrayState(server);
-      const routing = this.ensureRouting(state.setting);
+      remoteState = await this.loadXrayState(server);
+      const routing = this.ensureRouting(remoteState.setting);
       const rules = Array.isArray(routing.rules) ? routing.rules : [];
       let index = current?.remoteFingerprint
         ? this.findRemoteRouteIndex(rules, current.remoteFingerprint, current.remoteOrder)
@@ -2070,30 +2255,66 @@ export class XuiService {
         }
         index = duplicate;
       }
+      if (this.isInboundOnlyRoute(rule)) {
+        const conflictingIndexes = this.conflictingInboundOnlyRouteIndexes(rules, rule)
+          .filter((candidateIndex) => candidateIndex !== index);
+        if (conflictingIndexes.length) {
+          if (input.conflict !== 'takeover') {
+            throw new BadRequestException(`所选入站已存在全流量路由；同一入站不能同时指向多个出站，请明确接管原规则或先删除原规则`);
+          }
+          if (conflictingIndexes.length !== 1) {
+            throw new BadRequestException('所选入站命中了多条已有全流量路由，无法安全接管；请先在官方面板整理重复规则');
+          }
+          index = conflictingIndexes[0]!;
+        }
+      }
+      if (!current && index >= 0 && input.conflict === 'takeover') {
+        const previousFingerprint = this.configFingerprint(this.xuiObject(rules[index]));
+        takeoverLocalRoute = await this.prisma.networkRoute.findFirst({
+          where: { serverId: server.id, remoteOrder: index, remoteFingerprint: previousFingerprint }
+        });
+      }
       if (index >= 0) rules.splice(index, 1, rule);
-      else rules.push(rule);
+      else {
+        index = this.networkRouteInsertionIndex(rules, rule);
+        rules.splice(index, 0, rule);
+        remoteInserted = true;
+      }
       routing.rules = rules;
-      state.setting.routing = routing;
-      remoteOrder = index >= 0 ? index : rules.length - 1;
-      await this.writeAndVerifyXrayState(server.id, state, [], [], fingerprint, undefined, {
-        expectedRoute: { fingerprint, index: remoteOrder }
+      remoteState.setting.routing = routing;
+      remoteOrder = index;
+      await this.writeAndVerifyXrayState(server.id, remoteState, [], [], fingerprint, undefined, {
+        expectedRoute: { fingerprint, index: remoteOrder },
+        routeProbe: this.networkRouteProbe(rule, remoteState.xrayObj)
       });
     }
 
     try {
-      return current
-        ? await this.prisma.networkRoute.update({ where: { id: current.id }, data: {
+      return await this.prisma.$transaction(async (tx) => {
+        if (remoteInserted) {
+          await tx.networkRoute.updateMany({
+            where: {
+              serverId: server.id,
+              remoteOrder: { gte: remoteOrder ?? 0 },
+              id: current ? { not: current.id } : undefined
+            },
+            data: { remoteOrder: { increment: 1 } }
+          });
+        }
+        const localTarget = current || takeoverLocalRoute;
+        return localTarget
+        ? await tx.networkRoute.update({ where: { id: localTarget.id }, data: {
           name: input.name,
           serviceNodeId: input.serviceNodeId,
           outboundId: input.outboundId,
           ownership: input.pushRemote ? 'managed' : input.ownership,
           matchConfig: this.toJsonValue(rule),
           normalizedConfig: this.toJsonValue(rule),
-          remoteFingerprint: input.pushRemote ? fingerprint : current.remoteFingerprint,
+          remoteFingerprint: input.pushRemote ? fingerprint : localTarget.remoteFingerprint,
           remoteOrder,
-          lastSyncedAt: input.pushRemote ? new Date() : localConfigChanged ? null : current.lastSyncedAt
+          lastSyncedAt: input.pushRemote ? new Date() : localConfigChanged ? null : localTarget.lastSyncedAt
         } })
-        : await this.prisma.networkRoute.create({ data: {
+        : await tx.networkRoute.create({ data: {
           serverId: server.id,
           name: input.name,
           serviceNodeId: input.serviceNodeId,
@@ -2106,15 +2327,28 @@ export class XuiService {
           remoteFingerprint: input.pushRemote ? fingerprint : null,
           lastSyncedAt: input.pushRemote ? new Date() : null
         } });
+      });
     } catch (error) {
-      if (input.pushRemote) {
-        await this.writeSyncLog(server.id, 'network-route-local-save', 'failed', '官方路由已写入，但本地记录保存失败，请立即执行面板同步并核对', {
+      if (remoteState) {
+        try {
+          await this.restoreXrayState(remoteState);
+        } catch (rollbackError) {
+          await this.writeSyncLog(server.id, 'network-route-local-save', 'failed', '本地路由保存失败，且官方配置自动恢复失败，请立即核对官方面板', {
+            routeId: current?.id,
+            remoteOrder,
+            fingerprint,
+            message: this.errorMessage(error),
+            rollbackMessage: this.errorMessage(rollbackError)
+          });
+          throw new BadGatewayException(`本地路由保存失败，且官方配置自动恢复失败：${this.errorMessage(rollbackError)}`);
+        }
+        await this.writeSyncLog(server.id, 'network-route-local-save', 'failed', '本地路由保存失败，已自动恢复写入前的官方配置', {
           routeId: current?.id,
           remoteOrder,
           fingerprint,
           message: this.errorMessage(error)
         });
-        throw new BadGatewayException('官方路由已写入，但本地记录保存失败。请立即执行面板同步并核对，避免重复添加');
+        throw new BadGatewayException('本地路由保存失败，官方路由已自动恢复到写入前状态');
       }
       throw error;
     }
@@ -2133,31 +2367,53 @@ export class XuiService {
       throw new BadRequestException('该路由来自官方面板或由其他来源共享，删除远端配置前必须明确确认接管删除');
     }
     if (deleteRemote && !route.remoteFingerprint) throw new BadRequestException('该路由尚未由本系统写入或确认远端状态，不能删除官方面板配置');
+    let remoteState: XrayState | null = null;
+    let deletedRemoteOrder: number | null = null;
     if (deleteRemote) {
-      const state = await this.loadXrayState(route.server);
-      const routing = this.ensureRouting(state.setting);
+      remoteState = await this.loadXrayState(route.server);
+      const routing = this.ensureRouting(remoteState.setting);
       const rules = Array.isArray(routing.rules) ? routing.rules : [];
       const expectedFingerprint = route.remoteFingerprint || this.configFingerprint(route.normalizedConfig);
       const index = this.findRemoteRouteIndex(rules, expectedFingerprint, route.remoteOrder);
       if (index < 0) throw new BadRequestException('远端路由已变化或不存在，拒绝误删');
       const remainingFingerprintCount = rules.filter((item) => this.configFingerprint(this.xuiObject(item)) === expectedFingerprint).length - 1;
       rules.splice(index, 1);
+      deletedRemoteOrder = index;
       routing.rules = rules;
-      state.setting.routing = routing;
-      await this.writeAndVerifyXrayState(route.serverId, state, [], [], undefined, undefined, {
+      remoteState.setting.routing = routing;
+      await this.writeAndVerifyXrayState(route.serverId, remoteState, [], [], undefined, undefined, {
         expectedRouteFingerprintCount: { fingerprint: expectedFingerprint, count: remainingFingerprintCount }
       });
     }
     try {
-      await this.prisma.networkRoute.delete({ where: { id } });
+      await this.prisma.$transaction(async (tx) => {
+        await tx.networkRoute.delete({ where: { id } });
+        if (deletedRemoteOrder !== null) {
+          await tx.networkRoute.updateMany({
+            where: { serverId: route.serverId, remoteOrder: { gt: deletedRemoteOrder } },
+            data: { remoteOrder: { decrement: 1 } }
+          });
+        }
+      });
     } catch (error) {
-      if (deleteRemote) {
-        await this.writeSyncLog(route.serverId, 'network-route-delete-local-save', 'failed', '官方路由已删除，但本地记录删除失败，请执行面板同步并核对', {
+      if (remoteState) {
+        try {
+          await this.restoreXrayState(remoteState);
+        } catch (rollbackError) {
+          await this.writeSyncLog(route.serverId, 'network-route-delete-local-save', 'failed', '本地路由删除失败，且官方配置自动恢复失败，请立即核对官方面板', {
+            routeId: id,
+            remoteOrder: route.remoteOrder,
+            message: this.errorMessage(error),
+            rollbackMessage: this.errorMessage(rollbackError)
+          });
+          throw new BadGatewayException(`本地路由删除失败，且官方配置自动恢复失败：${this.errorMessage(rollbackError)}`);
+        }
+        await this.writeSyncLog(route.serverId, 'network-route-delete-local-save', 'failed', '本地路由删除失败，已自动恢复删除前的官方配置', {
           routeId: id,
           remoteOrder: route.remoteOrder,
           message: this.errorMessage(error)
         });
-        throw new BadGatewayException('官方路由已删除，但本地记录删除失败。请执行面板同步并核对后再操作');
+        throw new BadGatewayException('本地路由删除失败，官方路由已自动恢复到删除前状态');
       }
       throw error;
     }
@@ -3026,6 +3282,71 @@ export class XuiService {
     return sorted[0]!.index;
   }
 
+  private networkRouteInsertionIndex(rules: unknown[], rule: Record<string, unknown>) {
+    const inboundTags = new Set(this.stringList(rule.inboundTag));
+    if (!inboundTags.size) return rules.length;
+    const index = rules.findIndex((item) => {
+      const candidate = this.xuiObject(item);
+      const candidateInboundTags = this.stringList(candidate.inboundTag);
+      return !candidateInboundTags.length || (this.isInboundOnlyRoute(candidate) && candidateInboundTags.some((tag) => inboundTags.has(tag)));
+    });
+    return index >= 0 ? index : rules.length;
+  }
+
+  private isInboundOnlyRoute(rule: Record<string, unknown>) {
+    const matchKeys = ['domain', 'ip', 'port', 'sourcePort', 'network', 'source', 'user', 'protocol', 'attrs'];
+    return this.stringList(rule.inboundTag).length > 0 && !matchKeys.some((key) => {
+      const value = rule[key];
+      return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== null && String(value).trim() !== '';
+    });
+  }
+
+  private conflictingInboundOnlyRouteIndexes(rules: unknown[], rule: Record<string, unknown>) {
+    if (!this.isInboundOnlyRoute(rule)) return [];
+    const inboundTags = new Set(this.stringList(rule.inboundTag));
+    return rules.flatMap((item, index) => {
+      const candidate = this.xuiObject(item);
+      if (!this.isInboundOnlyRoute(candidate)) return [];
+      return this.stringList(candidate.inboundTag).some((tag) => inboundTags.has(tag)) ? [index] : [];
+    });
+  }
+
+  private networkRouteProbe(rule: Record<string, unknown>, xrayObj: Record<string, unknown>) {
+    const inboundTag = this.stringList(rule.inboundTag)[0];
+    const outboundTag = this.stringValue(rule.outboundTag);
+    if (!inboundTag || !outboundTag) return undefined;
+    if (this.stringList(rule.source).length || this.stringList(rule.sourcePort).length || this.stringList(rule.user).length) return undefined;
+
+    const probe: { inboundTag: string; outboundTag: string; domain?: string; ip?: string; port?: number; network?: string; protocol?: string; email?: string } = {
+      inboundTag,
+      outboundTag
+    };
+    const domainRule = this.stringList(rule.domain).find((item) => /^(?:full:|domain:)?[A-Za-z0-9.-]+$/.test(item));
+    const ipRule = this.stringList(rule.ip).find((item) => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(item));
+    if (domainRule) probe.domain = domainRule.replace(/^(?:full:|domain:)/, '');
+    else if (ipRule) probe.ip = ipRule;
+    else if (!this.stringList(rule.domain).length && !this.stringList(rule.ip).length) {
+      const testUrl = this.stringValue(xrayObj.outboundTestUrl);
+      const hostname = testUrl ? this.hostFromUrl(testUrl) : '';
+      probe.domain = hostname || 'www.cloudflare.com';
+    } else return undefined;
+
+    const port = this.routeProbePort(rule.port);
+    if (port) probe.port = port;
+    const network = this.stringList(rule.network)[0];
+    if (network) probe.network = network;
+    const protocol = this.stringList(rule.protocol)[0];
+    if (protocol) probe.protocol = protocol;
+    return probe;
+  }
+
+  private routeProbePort(value: unknown) {
+    const candidate = Array.isArray(value) ? value[0] : value;
+    const match = String(candidate ?? '').match(/\d+/);
+    const port = Number(match?.[0]);
+    return Number.isInteger(port) && port > 0 && port <= 65535 ? port : undefined;
+  }
+
   private stableJson(value: unknown): string {
     if (Array.isArray(value)) return `[${value.map((item) => this.stableJson(item)).join(',')}]`;
     if (value && typeof value === 'object') {
@@ -3043,56 +3364,169 @@ export class XuiService {
     const xrayObj = this.xuiObject(this.xuiObject(payload).obj || this.xuiObject(payload).data || payload);
     const setting = this.xuiObject(xrayObj.xraySetting ?? xrayObj);
     if (!Object.keys(setting).length) throw new BadGatewayException('3x-ui 返回了空 Xray 配置');
-    return { client, xrayObj, setting };
+    return { client, xrayObj, setting, originalSetting: structuredClone(setting) };
   }
 
   private async writeAndVerifyXrayState(
     serverId: string,
-    state: { client: XuiClient; xrayObj: Record<string, unknown>; setting: Record<string, unknown> },
+    state: XrayState,
     expectedTags: string[] = [],
     absentTags: string[] = [],
     expectedRouteFingerprint?: string,
     absentRouteFingerprint?: string,
     routeVerification: {
       expectedRoute?: { fingerprint: string; index: number | null };
+      expectedRoutes?: Array<{ fingerprint: string; index: number }>;
       expectedRouteFingerprintCount?: { fingerprint: string; count: number };
       absentRouteOutboundTags?: string[];
+      routeProbe?: {
+        inboundTag: string;
+        outboundTag: string;
+        domain?: string;
+        ip?: string;
+        port?: number;
+        network?: string;
+        protocol?: string;
+        email?: string;
+      };
+      routeProbes?: Array<{
+        inboundTag: string;
+        outboundTag: string;
+        domain?: string;
+        ip?: string;
+        port?: number;
+        network?: string;
+        protocol?: string;
+        email?: string;
+      }>;
     } = {}
   ) {
     const outboundTestUrl = typeof state.xrayObj.outboundTestUrl === 'string' ? state.xrayObj.outboundTestUrl : undefined;
-    const response = await state.client.updateXrayConfig({ xraySetting: JSON.stringify(state.setting, null, 2), outboundTestUrl });
-    this.assertXuiSuccess(response);
-    const reloadResponse = await state.client.restartXrayService();
-    this.assertXuiSuccess(reloadResponse);
-    const verifiedPayload = await state.client.getXrayConfig();
-    this.assertXuiSuccess(verifiedPayload);
-    const verifiedRoot = this.xuiObject(this.xuiObject(verifiedPayload).obj || this.xuiObject(verifiedPayload).data || verifiedPayload);
-    const verified = this.xuiObject(verifiedRoot.xraySetting ?? verifiedRoot);
-    const tags = new Set((Array.isArray(verified.outbounds) ? verified.outbounds : []).map((item) => this.stringValue(this.xuiObject(item).tag)).filter(Boolean));
-    for (const tag of expectedTags) if (!tags.has(tag)) throw new BadGatewayException(`远端出站 ${tag} 写后回读失败`);
-    for (const tag of absentTags) if (tags.has(tag)) throw new BadGatewayException(`远端出站 ${tag} 删除后仍然存在`);
-    const rules = Array.isArray(this.xuiObject(verified.routing).rules) ? this.xuiObject(verified.routing).rules as unknown[] : [];
-    const fingerprints = rules.map((item) => this.configFingerprint(this.xuiObject(item)));
-    const routeFingerprints = new Set(fingerprints);
-    if (expectedRouteFingerprint && !routeFingerprints.has(expectedRouteFingerprint)) throw new BadGatewayException('远端路由写后回读失败');
-    if (absentRouteFingerprint && routeFingerprints.has(absentRouteFingerprint)) throw new BadGatewayException('远端路由删除后仍然存在');
-    if (routeVerification.expectedRoute) {
-      const expectedIndex = routeVerification.expectedRoute.index;
-      if (expectedIndex === null || expectedIndex < 0 || fingerprints[expectedIndex] !== routeVerification.expectedRoute.fingerprint) {
-        throw new BadGatewayException('远端路由顺序或内容写后回读不一致');
+    let response: unknown;
+    let reloadResponse: unknown;
+    let remoteWritten = false;
+    try {
+      response = await state.client.updateXrayConfig({ xraySetting: JSON.stringify(state.setting, null, 2), outboundTestUrl });
+      this.assertXuiSuccess(response);
+      remoteWritten = true;
+      reloadResponse = await state.client.restartXrayService();
+      this.assertXuiSuccess(reloadResponse);
+      try {
+        await this.waitForXrayRunning(state.client);
+      } catch (error) {
+        const diagnostic = await this.readXrayDiagnostic(state.client);
+        throw new BadGatewayException(diagnostic
+          ? `${this.errorMessage(error)}；官方 Xray 输出：${diagnostic}`
+          : this.errorMessage(error));
       }
-    }
-    if (routeVerification.expectedRouteFingerprintCount) {
-      const expected = routeVerification.expectedRouteFingerprintCount;
-      const actualCount = fingerprints.filter((fingerprint) => fingerprint === expected.fingerprint).length;
-      if (actualCount !== expected.count) throw new BadGatewayException('远端重复路由删除后回读数量不一致');
-    }
-    for (const outboundTag of routeVerification.absentRouteOutboundTags || []) {
-      if (rules.some((item) => this.stringList(this.xuiObject(item).outboundTag).includes(outboundTag))) {
-        throw new BadGatewayException(`远端出站 ${outboundTag} 删除后仍被路由引用`);
+      const verifiedPayload = await state.client.getXrayConfig();
+      this.assertXuiSuccess(verifiedPayload);
+      const verifiedRoot = this.xuiObject(this.xuiObject(verifiedPayload).obj || this.xuiObject(verifiedPayload).data || verifiedPayload);
+      const verified = this.xuiObject(verifiedRoot.xraySetting ?? verifiedRoot);
+      const tags = new Set((Array.isArray(verified.outbounds) ? verified.outbounds : []).map((item) => this.stringValue(this.xuiObject(item).tag)).filter(Boolean));
+      for (const tag of expectedTags) if (!tags.has(tag)) throw new BadGatewayException(`远端出站 ${tag} 写后回读失败`);
+      for (const tag of absentTags) if (tags.has(tag)) throw new BadGatewayException(`远端出站 ${tag} 删除后仍然存在`);
+      const rules = Array.isArray(this.xuiObject(verified.routing).rules) ? this.xuiObject(verified.routing).rules as unknown[] : [];
+      const fingerprints = rules.map((item) => this.configFingerprint(this.xuiObject(item)));
+      const routeFingerprints = new Set(fingerprints);
+      if (expectedRouteFingerprint && !routeFingerprints.has(expectedRouteFingerprint)) throw new BadGatewayException('远端路由写后回读失败');
+      if (absentRouteFingerprint && routeFingerprints.has(absentRouteFingerprint)) throw new BadGatewayException('远端路由删除后仍然存在');
+      if (routeVerification.expectedRoute) {
+        const expectedIndex = routeVerification.expectedRoute.index;
+        if (expectedIndex === null || expectedIndex < 0 || fingerprints[expectedIndex] !== routeVerification.expectedRoute.fingerprint) {
+          throw new BadGatewayException('远端路由顺序或内容写后回读不一致');
+        }
       }
+      for (const expected of routeVerification.expectedRoutes || []) {
+        if (expected.index < 0 || fingerprints[expected.index] !== expected.fingerprint) {
+          throw new BadGatewayException('远端路由顺序或内容写后回读不一致');
+        }
+      }
+      if (routeVerification.expectedRouteFingerprintCount) {
+        const expected = routeVerification.expectedRouteFingerprintCount;
+        const actualCount = fingerprints.filter((fingerprint) => fingerprint === expected.fingerprint).length;
+        if (actualCount !== expected.count) throw new BadGatewayException('远端重复路由删除后回读数量不一致');
+      }
+      for (const outboundTag of routeVerification.absentRouteOutboundTags || []) {
+        if (rules.some((item) => this.stringList(this.xuiObject(item).outboundTag).includes(outboundTag))) {
+          throw new BadGatewayException(`远端出站 ${outboundTag} 删除后仍被路由引用`);
+        }
+      }
+      const verifiedOutbounds = Array.isArray(verified.outbounds) ? verified.outbounds.map((item) => this.xuiObject(item)) : [];
+      for (const tag of expectedTags) {
+        const outbound = verifiedOutbounds.find((item) => this.stringValue(item.tag) === tag);
+        if (!outbound) continue;
+        const testPayload = await state.client.testOutbound(outbound, verifiedOutbounds, 'real');
+        this.assertXuiSuccess(testPayload);
+        const result = this.xuiObject(this.xuiObject(testPayload).obj ?? this.xuiObject(testPayload).data ?? testPayload);
+        if (result.success === false || this.stringValue(result.error)) {
+          throw new BadGatewayException(`远端出站 ${tag} 连通性测试失败：${this.stringValue(result.error) || this.stringValue(result.msg) || '官方面板未返回具体原因'}`);
+        }
+      }
+      const routeProbes = [routeVerification.routeProbe, ...(routeVerification.routeProbes || [])].filter((item): item is NonNullable<typeof item> => Boolean(item));
+      for (const probe of routeProbes) {
+        const { outboundTag, ...request } = probe;
+        const routePayload = await state.client.routeTest(request);
+        this.assertXuiSuccess(routePayload);
+        const selectedTag = this.routeTestOutboundTag(routePayload);
+        if (!selectedTag) throw new BadGatewayException('官方路由测试未返回选中的出站标签');
+        if (selectedTag !== outboundTag) throw new BadGatewayException(`官方路由测试命中了 ${selectedTag}，未命中预期出站 ${outboundTag}`);
+      }
+      return { response, reloadResponse };
+    } catch (error) {
+      if (remoteWritten) {
+        try {
+          await this.restoreXrayState(state);
+        } catch (rollbackError) {
+          throw new BadGatewayException(`${this.errorMessage(error)}；自动恢复写入前配置失败：${this.errorMessage(rollbackError)}`);
+        }
+      }
+      throw error;
     }
-    return { response, reloadResponse };
+  }
+
+  private async restoreXrayState(state: XrayState) {
+    const outboundTestUrl = typeof state.xrayObj.outboundTestUrl === 'string' ? state.xrayObj.outboundTestUrl : undefined;
+    const rollback = await state.client.updateXrayConfig({ xraySetting: JSON.stringify(state.originalSetting, null, 2), outboundTestUrl });
+    this.assertXuiSuccess(rollback);
+    const rollbackRestart = await state.client.restartXrayService();
+    this.assertXuiSuccess(rollbackRestart);
+    await this.waitForXrayRunning(state.client);
+  }
+
+  private async readXrayDiagnostic(client: XuiClient) {
+    try {
+      const payload = await client.getXrayResult();
+      this.assertXuiSuccess(payload);
+      const object = this.xuiObject(payload);
+      const value = object.obj ?? object.data ?? object.result;
+      const text = typeof value === 'string' ? value : value ? JSON.stringify(value) : '';
+      return this.truncateText(text.replace(/\s+/g, ' ').trim(), 1500);
+    } catch {
+      return '';
+    }
+  }
+
+  private routeTestOutboundTag(payload: unknown) {
+    const find = (value: unknown, depth = 0): string | undefined => {
+      if (depth > 5) return undefined;
+      if (typeof value === 'string') {
+        const parsed = this.parseMaybeJson(value);
+        return parsed === value ? value.trim() || undefined : find(parsed, depth + 1);
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+      const object = value as Record<string, unknown>;
+      for (const key of ['outboundTag', 'outbound', 'tag']) {
+        const tag = this.stringValue(object[key]);
+        if (tag) return tag;
+      }
+      for (const key of ['obj', 'data', 'result']) {
+        const tag = find(object[key], depth + 1);
+        if (tag) return tag;
+      }
+      return undefined;
+    };
+    return find(payload);
   }
 
   private async withPanelXrayLock<T>(serverId: string, operation: () => Promise<T>) {

@@ -8,7 +8,7 @@ const root = process.cwd();
 const envPath = resolve(root, '.env');
 const installedMarkerPath = resolve(root, '.panel-installed');
 const criticalSecrets = ['SESSION_SECRET', 'JWT_SECRET', 'ENCRYPTION_KEY', 'CARD_HASH_SECRET'];
-const installerVersion = '1.0.7';
+const installerVersion = '1.0.8';
 const requiredFiles = [
   'apps/api/dist/main.js',
   'dist/user-web/index.html',
