@@ -64,6 +64,16 @@ export const cardTemplateUpsertSchema = z.object({
   remark: z.string().trim().max(500).optional().or(z.literal(''))
 });
 
+export const cardIntegrationSchema = z.object({
+  enabled: z.boolean().default(false),
+  baseUrl: z.string().trim().max(300).optional().or(z.literal('')),
+  appKey: z.string().trim().max(80).optional().or(z.literal('')),
+  appSecret: z.string().trim().max(512).optional().or(z.literal(''))
+}).refine((value) => !value.baseUrl || /^https?:\/\/\S+$/i.test(value.baseUrl), {
+  message: '服务器地址需以 http:// 或 https:// 开头',
+  path: ['baseUrl']
+});
+
 export const clearHistorySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date(),

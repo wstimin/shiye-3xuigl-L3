@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { cardGenerateSchema, cardListQuerySchema, cardRedeemSchema, cardTemplateUpsertSchema } from '@shiye/shared';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { cardGenerateSchema, cardIntegrationSchema, cardListQuerySchema, cardRedeemSchema, cardTemplateUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { AuthGuard } from '../../shared/auth.guard.js';
 import { CurrentUser } from '../../shared/current-user.decorator.js';
@@ -66,6 +66,23 @@ export class CardsController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   deleteBatch(@Param('id') id: string) { return this.cards.deleteBatch(id); }
+
+  @Get('admin/card-integration')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  cardIntegration() { return this.cards.getIntegration(); }
+
+  @Put('admin/card-integration')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  updateCardIntegration(@Body(new ZodValidationPipe(cardIntegrationSchema)) body: z.infer<typeof cardIntegrationSchema>) {
+    return this.cards.updateIntegration(body);
+  }
+
+  @Post('admin/card-integration/test')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  testCardIntegration() { return this.cards.testIntegration(); }
 
   @Post('user/cards/redeem')
   @UseGuards(AuthGuard)

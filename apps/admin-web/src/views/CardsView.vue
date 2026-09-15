@@ -19,7 +19,7 @@ import 'element-plus/es/components/tag/style/css';
 import { ElAlert, ElButton, ElDialog, ElEmpty, ElForm, ElFormItem, ElInput, ElInputNumber, ElMessage, ElMessageBox, ElOption, ElPagination, ElSegmented, ElSelect, ElSwitch, ElTable as ElTableComponent, ElTableColumn as ElTableColumnComponent, ElTag } from 'element-plus';
 const ElTable = ElTableComponent as any;
 const ElTableColumn = ElTableColumnComponent as any;
-import { Copy, CreditCard, Download, Edit3, Layers, LayoutTemplate, Plus, RefreshCw, RotateCcw, Search, TicketCheck, TicketX, Trash2 } from 'lucide-vue-next';
+import { Copy, CreditCard, Download, Edit3, KeyRound, Layers, LayoutTemplate, Plus, RefreshCw, RotateCcw, Search, TicketCheck, TicketX, Trash2 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { notifyError } from '../notify';
@@ -55,6 +55,12 @@ const cardPage = reactive({ page: 1, pageSize: 20 });
 const editingTemplateId = ref('');
 const deletingUnusedTemplateIds = ref<Set<string>>(new Set());
 const clearingUsedBatchIds = ref<Set<string>>(new Set());
+const integrationVisible = ref(false);
+const integrationSaving = ref(false);
+const integrationTesting = ref(false);
+const integrationAppSecretSet = ref(false);
+const integrationTestResult = ref<{ ok: boolean; message: string } | null>(null);
+const integrationForm = reactive({ enabled: false, baseUrl: '', appKey: '', appSecret: '' });
 const templateManagementVisible = ref(false);
 const batchManagementVisible = ref(false);
 const templateDialogVisible = ref(false);
@@ -286,6 +292,63 @@ function exportCodes(codes: string[], filename: string) {
   ElMessage.success('导出成功');
 }
 
+function openIntegrationDialog() {
+  integrationTestResult.value = null;
+  integrationForm.appSecret = '';
+  integrationVisible.value = true;
+  void loadIntegration();
+}
+
+async function loadIntegration() {
+  try {
+    const result = await api<{ enabled: boolean; baseUrl: string; appKey: string; appSecretSet: boolean }>('/api/admin/card-integration');
+    integrationForm.enabled = result.enabled;
+    integrationForm.baseUrl = result.baseUrl;
+    integrationForm.appKey = result.appKey;
+    integrationAppSecretSet.value = result.appSecretSet;
+  } catch (caught) {
+    notifyError(caught, '读取对接设置失败');
+  }
+}
+
+async function saveIntegration() {
+  integrationSaving.value = true;
+  integrationTestResult.value = null;
+  try {
+    await api('/api/admin/card-integration', {
+      method: 'PUT',
+      body: {
+        enabled: integrationForm.enabled,
+        baseUrl: integrationForm.baseUrl.trim(),
+        appKey: integrationForm.appKey.trim(),
+        appSecret: integrationForm.appSecret.trim()
+      }
+    });
+    ElMessage.success('对接设置已保存');
+    integrationAppSecretSet.value = Boolean(integrationForm.appSecret.trim()) || integrationAppSecretSet.value;
+    integrationForm.appSecret = '';
+    await loadIntegration();
+  } catch (caught) {
+    notifyError(caught, '保存失败');
+  } finally {
+    integrationSaving.value = false;
+  }
+}
+
+async function testIntegration() {
+  integrationTesting.value = true;
+  integrationTestResult.value = null;
+  try {
+    const result = await api<{ ok: boolean; message: string }>('/api/admin/card-integration/test', { method: 'POST' });
+    integrationTestResult.value = result;
+    if (result.ok) ElMessage.success('连接测试成功');
+  } catch (caught) {
+    integrationTestResult.value = { ok: false, message: readableError(caught, '测试失败') };
+  } finally {
+    integrationTesting.value = false;
+  }
+}
+
 function downloadText(filename: string, content: string) {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -402,7 +465,7 @@ function statusLabel(status: string) {
   return status;
 }
 
-onMounted(loadCards);
+onMounted(() => { loadCards(); void loadIntegration(); });
 </script>
 
 <template>
@@ -416,6 +479,7 @@ onMounted(loadCards);
       <el-button type="primary" @click="templateManagementVisible = true"><LayoutTemplate :size="16" />模板管理</el-button>
       <el-button @click="batchManagementVisible = true"><Layers :size="16" />批次管理</el-button>
       <el-button @click="openGenerateDialog()"><CreditCard :size="16" />生成卡密</el-button>
+      <el-button @click="openIntegrationDialog"><KeyRound :size="16" />十夜卡密对接</el-button>
       <el-button :loading="loading" @click="loadCards()"><RefreshCw :size="16" />刷新</el-button>
     </div>
   </div>
@@ -611,6 +675,39 @@ onMounted(loadCards);
     <template #footer>
       <el-button @click="generateDialogVisible = false">取消</el-button>
       <el-button type="primary" :loading="generating" :disabled="!generateForm.name" @click="generateCards">生成</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="integrationVisible" title="十夜卡密对接设置" width="620px" class="operations-dark-dialog" destroy-on-close>
+    <el-alert type="info" :closable="false" show-icon title="对接后用户兑换卡密时，将同时支持本项目生成的本地卡密与十夜卡密系统的金额卡。" style="margin-bottom:16px" />
+    <el-form :model="integrationForm" label-width="100px" class="sectioned-dialog-form">
+      <section class="dialog-form-section">
+        <div class="dialog-section-head"><strong>对接配置</strong><span>凭证在十夜卡密后台「项目管理」中申请，app_secret 仅保存于服务端，不会返回到浏览器。</span></div>
+        <div class="dialog-form-grid">
+          <el-form-item class="form-item-full" label="启用对接">
+            <el-switch v-model="integrationForm.enabled" />
+            <span class="muted-text" style="margin-left:8px">{{ integrationForm.enabled ? '已启用（同时支持本地卡密与十夜卡）' : '已停用（仅支持本地卡密）' }}</span>
+          </el-form-item>
+          <el-form-item class="form-item-full" label="服务器地址">
+            <el-input v-model="integrationForm.baseUrl" placeholder="https://card-api.example.com 或 http://服务器IP:1111" maxlength="300" />
+          </el-form-item>
+          <el-form-item class="form-item-full" label="App Key">
+            <el-input v-model="integrationForm.appKey" placeholder="十夜后台领取的 app_key" maxlength="80" />
+          </el-form-item>
+          <el-form-item class="form-item-full" label="App Secret">
+            <el-input v-model="integrationForm.appSecret" type="password" show-password placeholder="留空保存将保留原值" maxlength="512" />
+            <span class="muted-text" style="margin-top:4px;display:block">状态：<el-tag :type="integrationAppSecretSet ? 'success' : 'info'" size="small">{{ integrationAppSecretSet ? '已设置' : '未设置' }}</el-tag></span>
+          </el-form-item>
+        </div>
+      </section>
+    </el-form>
+    <div v-if="integrationTestResult" style="margin-top:12px">
+      <el-alert :type="integrationTestResult.ok ? 'success' : 'error'" :title="integrationTestResult.message" :closable="false" show-icon />
+    </div>
+    <template #footer>
+      <el-button :loading="integrationTesting" @click="testIntegration">测试连接</el-button>
+      <el-button @click="integrationVisible = false">取消</el-button>
+      <el-button type="primary" :loading="integrationSaving" :disabled="!integrationForm.baseUrl || !integrationForm.appKey" @click="saveIntegration">保存</el-button>
     </template>
   </el-dialog>
   </div>
