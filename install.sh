@@ -483,7 +483,7 @@ install_dependencies_and_build() {
   install_dependencies_and_build_in "${APP_DIR}"
   cd "${APP_DIR}"
   npm run prisma:migrate
-  npm run admin:sync
+  npm run admin:sync -- --create-only
   npm prune --omit=dev
 }
 
@@ -554,7 +554,7 @@ prepare_atomic_update() {
   cd "${ATOMIC_STAGE}"
   log "Applying rollback-compatible database migrations before the short switch"
   npm run prisma:migrate
-  npm run admin:sync
+  npm run admin:sync -- --create-only
   npm prune --omit=dev
   cleanup_runtime_files_in "${ATOMIC_STAGE}"
   verify_runtime_files_in "${ATOMIC_STAGE}"
@@ -1085,7 +1085,7 @@ run_migration() {
   log "执行数据库迁移"
   npm run prisma:generate
   npm run prisma:migrate
-  npm run admin:sync
+  npm run admin:sync -- --create-only
   npm prune --omit=dev
   chown -R shiye:shiye "\${APP_DIR}" 2>/dev/null || true
   systemctl restart "\${APP_NAME}"

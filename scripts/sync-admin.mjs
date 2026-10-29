@@ -6,6 +6,7 @@ loadEnv();
 
 const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
 const password = process.env.DEFAULT_ADMIN_PASSWORD || 'admin123';
+const createOnly = process.argv.includes('--create-only');
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is required to sync the admin account.');
@@ -19,7 +20,7 @@ try {
   await prisma.adminUser.upsert({
     where: { username },
     create: { username, passwordHash, status: 'active' },
-    update: { passwordHash, status: 'active' }
+    update: createOnly ? {} : { passwordHash, status: 'active' }
   });
 
   await prisma.systemSetting.upsert({
@@ -28,7 +29,7 @@ try {
     update: {}
   });
 
-  console.log(`Admin account synced. Username: ${username}. Password was synced from DEFAULT_ADMIN_PASSWORD.`);
+  console.log(createOnly ? `Admin account initialized if missing. Existing credentials and status preserved.` : `Admin account synced. Username: ${username}. Password was synced from DEFAULT_ADMIN_PASSWORD.`);
 } finally {
   await prisma.$disconnect();
 }

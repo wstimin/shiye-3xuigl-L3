@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { Plus, Trash2 } from "lucide-vue-next";
+import { ArrowUp, ArrowDown, Plus, Trash2 } from "lucide-vue-next";
 import {
   fieldLabel,
   emptyPanelItem,
@@ -203,6 +203,11 @@ function changeItem(index: number, value: unknown) {
   copy[index] = value;
   emit("update:modelValue", copy);
 }
+function moveItem(index: number, offset: number) {
+  const copy = [...items.value];
+  [copy[index], copy[index + offset]] = [copy[index + offset], copy[index]];
+  emit("update:modelValue", copy);
+}
 function addItem() {
   const itemSchema = schema.value.items;
   const sample = items.value[0];
@@ -295,9 +300,13 @@ async function readConfig(event: Event) {
   </div>
   <div v-else-if="isArray" class="panel-field-array">
     <div v-for="(item, index) in items" :key="index" class="panel-array-item">
-      <span v-if="item && typeof item === 'object'" class="panel-array-index"
-        >第 {{ index + 1 }} 项</span
-      >
+      <div v-if="item && typeof item === 'object'" class="panel-array-heading">
+      <span class="panel-array-index">第 {{ index + 1 }} 项</span>
+      <div v-if="!readonly" class="panel-array-order">
+        <button type="button" class="icon-button" :disabled="disabled || index === 0" :aria-label="`上移${fieldLabel(field)}第 ${index + 1} 项`" @click="moveItem(index, -1)"><ArrowUp :size="14" /></button>
+        <button type="button" class="icon-button" :disabled="disabled || index === items.length - 1" :aria-label="`下移${fieldLabel(field)}第 ${index + 1} 项`" @click="moveItem(index, 1)"><ArrowDown :size="14" /></button>
+      </div>
+      </div>
       <PanelFields
         :model-value="item"
         :schema="schema.items"

@@ -6,7 +6,7 @@ const steps = [
   ['install:check', ['run', 'install:check']],
   ['prisma:generate', ['run', 'prisma:generate']],
   ['prisma:migrate', ['run', 'prisma:migrate']],
-  ['db:seed', ['run', 'db:seed']],
+  ['db:seed', ['run', 'db:seed', '--', '--create-only']],
   ...(usingPrebuilt ? [] : [
     ['build', ['run', 'build']],
     ['typecheck', ['run', 'typecheck']]

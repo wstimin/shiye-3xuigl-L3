@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import SuiBusinessLink from "../components/SuiBusinessLink.vue";
 import PanelFields from "../components/PanelFields.vue";
+import { suiRouteRule, suiRouteSchema, suiTagChoices } from "../sui-panel";
 import {
   clonePanelValue,
   decodePanelValue,
@@ -82,6 +83,26 @@ const clientFields = ref({
 const clientConfig = ref<unknown>({});
 const inboundChoices = ref<Row[]>([]);
 const certificateChoices = ref<{ value: number; label: string }[]>([]);
+const networkOutbounds = ref<Row[]>([]);
+const networkInbounds = ref<Row[]>([]);
+const routingChoices = computed(() => ({
+  inbound: suiTagChoices(networkInbounds.value),
+  outbound: [{ value: '', label: '请选择目标出站' }, ...suiTagChoices(networkOutbounds.value)],
+  final: [{ value: '', label: '自动选择默认出站' }, ...suiTagChoices(networkOutbounds.value)],
+}));
+const outboundChoices = computed(() => ({
+  detour: [{ value: '', label: '不使用其他出站' }, ...suiTagChoices(networkOutbounds.value)],
+  outbounds: suiTagChoices(networkOutbounds.value),
+  default: [{ value: '', label: '自动选择' }, ...suiTagChoices(networkOutbounds.value)],
+}));
+const routeDraft = computed({
+  get: () => (editorRecord.value as Row)?.route || {},
+  set: (route: unknown) => { editorRecord.value = { ...(editorRecord.value as Row), route }; },
+});
+const otherConfig = computed({
+  get: () => Object.fromEntries(Object.entries((editorRecord.value || {}) as Row).filter(([key]) => key !== 'route')),
+  set: (rest: unknown) => { editorRecord.value = { ...(rest as Row), ...('route' in (editorRecord.value as Row) ? { route: (editorRecord.value as Row).route } : {}) }; },
+});
 const editorSchema = computed((): FieldSchema => {
   if (resource.value === "inbounds")
     return {
@@ -532,6 +553,23 @@ async function editResource(row?: Row) {
     } catch (cause) {
       ElMessage.error(message(cause));
       return;
+    }
+  }
+  if (["config", "outbounds", "endpoints"].includes(resource.value)) {
+    busy.value = true;
+    try {
+      const root = `/api/admin/sui-servers/${selected.value!.id}/resources/`;
+      const [inbounds, outbounds, endpoints] = await Promise.all([
+        api<Row>(root + 'inbounds'), api<Row>(root + 'outbounds'), api<Row>(root + 'endpoints'),
+      ]);
+      networkInbounds.value = (inbounds.inbounds || []) as Row[];
+      networkOutbounds.value = [...((outbounds.outbounds || []) as Row[]), ...((endpoints.endpoints || []) as Row[])];
+      if (resource.value !== 'config') networkOutbounds.value = networkOutbounds.value.filter(item => item.tag !== (editorRecord.value as Row).tag);
+    } catch (cause) {
+      ElMessage.error(message(cause));
+      return;
+    } finally {
+      busy.value = false;
     }
   }
   editorError.value = "";
@@ -1247,12 +1285,23 @@ onMounted(loadServers);
               <PanelFields v-model="clientConfig" :disabled="busy" />
             </section>
           </template>
+          <template v-else-if="resource === 'config'">
+            <section class="panel-credential-section">
+              <h3>入站与出站关联</h3>
+              <p class="muted-text">按名称选择入站和目标出站。规则按列表顺序匹配；默认出站用于未匹配规则的流量。已有规则会完整保留。</p>
+              <PanelFields v-model="routeDraft" :schema="suiRouteSchema" :choices="routingChoices" :presets="{ rules: suiRouteRule }" :disabled="busy" />
+            </section>
+            <details class="panel-credential-section">
+              <summary>DNS 与其他核心设置</summary>
+              <PanelFields v-model="otherConfig" :disabled="busy" />
+            </details>
+          </template>
           <PanelFields
             v-else
             v-model="editorRecord"
             :schema="editorSchema"
             :disabled="busy"
-            :choices="{ tls_id: certificateChoices }"
+            :choices="{ tls_id: certificateChoices, ...outboundChoices }"
             :presets="{
               rules: {
                 domain_suffix: [],

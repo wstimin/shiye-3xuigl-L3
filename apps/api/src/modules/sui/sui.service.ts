@@ -17,6 +17,8 @@ import { EncryptionService } from '../security/encryption.service.js';
 import { DatabaseLockService } from '../../shared/database-lock.service.js';
 import { Prisma } from '@prisma/client';
 import { suiAuthorization } from './sui-state.js';
+import { assertSuiNetwork, assertSuiResourceUnused, suiConfig } from './sui-network.js';
+import { isDeepStrictEqual } from 'node:util';
 
 const publicFields = {
   id: true,
@@ -204,9 +206,17 @@ export class SuiService {
               );
           }
           const client = await this.client(id);
+          if (input.object === 'config' || ['inbounds', 'outbounds', 'endpoints'].includes(input.object)) {
+            await this.checkNetworkWrite(client, input);
+          }
           const result = await this.remote(() =>
             client.save(input.object, input.action, input.data)
           );
+          if (input.object === 'config') {
+            const saved = suiConfig(await this.remote(() => client.read('config')));
+            if (!isDeepStrictEqual(saved.route, input.data.route))
+              throw new BadGatewayException('S-UI 路由写入后回读不一致，请刷新核对');
+          }
           if (linked.length && input.object === 'clients') {
             const payload = await this.remote(() =>
               client.request(`clients?id=${Number(input.data.id)}`)
@@ -261,6 +271,30 @@ export class SuiService {
       await this.log(id, 'core', action);
       return result;
     });
+  }
+
+  private async checkNetworkWrite(client: SuiClient, input: z.infer<typeof suiSaveSchema>) {
+    const [base, inboundData, outboundData, endpointData] = await this.remote(() => Promise.all([
+      client.read('config'), client.read('inbounds'), client.read('outbounds'), client.read('endpoints')
+    ]));
+    const config = suiConfig(base);
+    const rows = (data: Record<string, unknown>, key: string) =>
+      Array.isArray(data[key]) ? data[key] as Record<string, unknown>[] : [];
+    const inbounds = rows(inboundData, 'inbounds');
+    const outbounds = rows(outboundData, 'outbounds');
+    const endpoints = rows(endpointData, 'endpoints');
+    if (input.object === 'config') {
+      assertSuiNetwork(input.data, inbounds, outbounds, endpoints);
+      return;
+    }
+    const list = input.object === 'inbounds' ? inbounds : input.object === 'outbounds' ? outbounds : endpoints;
+    const previous = list.find(row => Number(row.id) === Number(input.data.id));
+    if (previous && (input.action === 'del' || previous.tag !== input.data.tag))
+      assertSuiResourceUnused(input.object, String(previous.tag), config, outbounds, endpoints);
+    if (input.action !== 'del' && input.object !== 'inbounds') {
+      const next = [...list.filter(row => row !== previous), input.data];
+      assertSuiNetwork(config, inbounds, input.object === 'outbounds' ? next : outbounds, input.object === 'endpoints' ? next : endpoints);
+    }
   }
 
   private async stored(id: string) {
