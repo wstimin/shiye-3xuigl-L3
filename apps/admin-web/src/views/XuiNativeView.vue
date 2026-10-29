@@ -782,7 +782,7 @@ onMounted(async () => {
           </div>
         </template>
         <div
-          v-else-if="data !== null && (!operation?.mutates || completed)"
+          v-else-if="completed || (data !== null && !operation?.mutates)"
           class="panel-result"
         >
           <div class="panel-task-heading">
@@ -795,7 +795,8 @@ onMounted(async () => {
               返回列表
             </button>
           </div>
-          <PanelFields :model-value="data" readonly />
+          <p v-if="completed && data == null">操作已完成，可返回列表查看最新数据。</p>
+          <PanelFields v-else :model-value="data" readonly />
         </div>
         <div v-else-if="!editing" class="hub-empty">
           <h3>{{ section === "backup" ? "备份与恢复" : "暂无记录" }}</h3>
