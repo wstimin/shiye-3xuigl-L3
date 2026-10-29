@@ -156,6 +156,12 @@ export const networkRouteUpsertSchema = z.object({
   conflict: z.enum(['reject', 'replace_managed', 'takeover']).default('reject')
 });
 
+export const networkOutboundNameSchema = z.object({ name: z.string().trim().min(1).max(120) });
+export const xrayVersionSchema = z.object({
+  version: z.string().trim().regex(/^v?\d+\.\d+\.\d+(?:[-.][A-Za-z0-9]+)*$/, '请选择有效的内核版本'),
+  confirmed: z.literal(true)
+});
+
 export const remoteClientCreateSchema = z.object({
   email: z.string().trim().min(1).max(160),
   clientName: z.string().trim().min(1).max(120).optional(),

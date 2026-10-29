@@ -191,6 +191,19 @@ async function loadResources() {
   }
 }
 
+async function renameOutbound(outbound: NetworkOutbound) {
+  let name: string;
+  try {
+    const result = await ElMessageBox.prompt('填写便于识别的出站名称。路由关联会保留。', '修改出站名称', { inputValue: outbound.name, confirmButtonText: '保存名称', cancelButtonText: '取消', inputValidator: value => Boolean(value.trim() && value.trim().length <= 120) || '请输入 1–120 个字符' });
+    name = result.value.trim();
+  } catch { return; }
+  try {
+    await api(`/api/admin/network-outbounds/${outbound.id}/name`, { method: 'PATCH', body: { name } });
+    ElMessage.success('出站名称已更新');
+    await loadResources();
+  } catch (cause) { notifyError(cause, '修改出站名称失败'); }
+}
+
 function openImportDialog() {
   Object.assign(importForm, {
     serverId: selectedServerId.value || enabledServers.value[0]?.id || '',
@@ -546,6 +559,7 @@ onMounted(loadResources);
             <footer class="network-resource-actions runtime-card-footer">
               <span class="runtime-footer-label"><Network :size="13" />{{ outbound.protocol.toUpperCase() }} · {{ outbound.tag }}</span>
               <div class="runtime-action-group">
+                <el-tooltip content="修改出站名称" placement="top"><el-button class="runtime-icon-button" aria-label="修改出站名称" @click="renameOutbound(outbound)"><Edit3 :size="15" /></el-button></el-tooltip>
                 <el-tooltip content="查看出站详情" placement="top"><el-button class="runtime-icon-button" aria-label="查看出站详情" @click="showOutboundConfig(outbound)"><Code2 :size="15" /></el-button></el-tooltip>
                 <el-tooltip content="仅删除本地记录" placement="top"><el-button class="runtime-icon-button" :loading="deletingIds.has(outbound.id)" aria-label="仅删除本地记录" @click="deleteOutbound(outbound, false)"><Trash2 :size="15" /></el-button></el-tooltip>
                 <el-tooltip :content="outbound.remoteFingerprint ? (outbound.ownership === 'managed' ? '删除远端出站与本地记录' : '接管并删除远端出站与本地记录') : '缺少已确认的远端状态，不能删除远端'" placement="top"><el-button class="runtime-icon-button danger" :disabled="!outbound.remoteFingerprint" :loading="deletingIds.has(outbound.id)" aria-label="删除远端出站" @click="deleteOutbound(outbound, true)"><CloudOff :size="15" /></el-button></el-tooltip>

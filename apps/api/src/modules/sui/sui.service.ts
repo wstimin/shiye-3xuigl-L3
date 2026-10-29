@@ -180,14 +180,12 @@ export class SuiService {
             }
             if (
               input.object === 'clients' &&
-              (input.data.name !==
-                (node.config as Record<string, unknown>)?.remoteClientEmail ||
-                !Array.isArray(input.data.inbounds) ||
+              (!Array.isArray(input.data.inbounds) ||
                 input.data.inbounds.length !== 1 ||
                 Number(input.data.inbounds[0]) !== node.inboundId)
             ) {
               throw new BadRequestException(
-                '业务客户端的标识和授权入站不能直接更换，请先解绑'
+                '业务客户端的授权入站不能直接更换，请先解绑'
               );
             }
             if (
@@ -209,6 +207,11 @@ export class SuiService {
           if (input.object === 'config' || ['inbounds', 'outbounds', 'endpoints'].includes(input.object)) {
             await this.checkNetworkWrite(client, input);
           }
+          const renaming = input.object === 'clients' && linked.some(node => (node.config as Prisma.JsonObject)?.remoteClientEmail !== input.data.name);
+          const snapshot = renaming ? await this.remote(() => client.request(`clients?id=${Number(input.data.id)}`)) : null;
+          const previous = Array.isArray(snapshot?.clients) ? (snapshot.clients as Record<string, unknown>[]).find(row => Number(row.id) === Number(input.data.id)) : undefined;
+          if (renaming && !previous) throw new BadGatewayException('改名前无法读取原客户端，本次未修改');
+          try {
           const result = await this.remote(() =>
             client.save(input.object, input.action, input.data)
           );
@@ -230,34 +233,57 @@ export class SuiService {
               throw new BadGatewayException(
                 'S-UI 写入后客户端回读失败，请刷新核对'
               );
+            if (remote.name !== input.data.name)
+              throw new BadGatewayException('S-UI 客户端用户名回读不一致，请刷新核对');
             for (const node of linked) {
               const authorization = suiAuthorization(remote);
-              await this.prisma.$transaction([
-                this.prisma.serviceNode.update({
+              await this.prisma.$transaction(async tx => {
+                await tx.serviceNode.update({
                   where: { id: node.id },
                   data: {
                     trafficLimitGb: Number(remote.volume || 0) / 1024 ** 3,
                     config: {
                       ...(node.config as Prisma.JsonObject),
+                      remoteClientEmail: String(remote.name),
+                      remoteClientSubId: String(remote.name),
                       remoteClientName: String(remote.remark || remote.name),
                       remoteClientEnabled: remote.enable === true,
                       remoteClientExpireAt:
                         authorization.expireAt?.toISOString() || null
                     }
                   }
-                }),
-                this.prisma.customerNode.updateMany({
-                  where: { serviceNodeId: node.id },
+                });
+                const bindings = await tx.customerNode.findMany({ where: { serviceNodeId: node.id }, select: { id: true, config: true } });
+                for (const binding of bindings) await tx.customerNode.update({
+                  where: { id: binding.id },
                   data: {
+                    xuiEmail: String(remote.name),
+                    clientName: String(remote.remark || remote.name),
                     ...authorization,
+                    config: { ...((binding.config || {}) as Prisma.JsonObject), subId: String(remote.name), links: [] },
                     lastSyncedAt: new Date()
                   }
-                })
-              ]);
+                });
+              });
             }
           }
           await this.log(id, input.object, input.action);
           return result;
+          } catch (error) {
+            if (previous) {
+              try {
+                const now = await client.request(`clients?id=${Number(input.data.id)}`);
+                const current = (now.clients as Record<string, unknown>[] | undefined)?.find(row => Number(row.id) === Number(input.data.id));
+                if (!current || ![previous.name, input.data.name].includes(current.name)) throw new Error('客户端已被其他操作修改');
+                if (current.name !== previous.name) await client.save('clients', 'edit', { ...previous, up: current.up, down: current.down });
+                const restored = await client.request(`clients?id=${Number(input.data.id)}`);
+                if (!(restored.clients as Record<string, unknown>[] | undefined)?.some(row => Number(row.id) === Number(input.data.id) && row.name === previous.name)) throw new Error('原用户名未恢复');
+              } catch {
+                throw new BadGatewayException('客户端改名未完成，原用户名恢复失败，请立即核对远端与业务绑定');
+              }
+            }
+            throw error;
+          }
         }
       );
     });

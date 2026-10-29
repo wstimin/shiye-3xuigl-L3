@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { networkRouteUpsertSchema, outboundImportPreviewSchema, outboundImportSchema, remoteClientCreateSchema, remoteClientPatchSchema, xuiServerUpsertSchema } from '@shiye/shared';
+import { networkOutboundNameSchema, xrayVersionSchema, networkRouteUpsertSchema, outboundImportPreviewSchema, outboundImportSchema, remoteClientCreateSchema, remoteClientPatchSchema, xuiServerUpsertSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import { AuthGuard } from '../../shared/auth.guard.js';
 import { Roles } from '../../shared/roles.decorator.js';
@@ -69,6 +69,20 @@ export class XuiController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   storedServerStatus(@Param('id') id: string) { return this.xui.storedServerStatus(id); }
+
+  @Post('admin/xui-servers/:id/xray-version')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  changeXrayVersion(@Param('id') id: string, @Body(new ZodValidationPipe(xrayVersionSchema)) body: z.infer<typeof xrayVersionSchema>) {
+    return this.xui.changeXrayVersion(id, body.version);
+  }
+
+  @Patch('admin/network-outbounds/:id/name')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  renameOutbound(@Param('id') id: string, @Body(new ZodValidationPipe(networkOutboundNameSchema)) body: z.infer<typeof networkOutboundNameSchema>) {
+    return this.xui.renameNetworkOutbound(id, body.name);
+  }
 
   @Get('admin/xui-servers/:id/client-presence')
   @UseGuards(AuthGuard)

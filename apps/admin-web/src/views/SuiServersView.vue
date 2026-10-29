@@ -1228,13 +1228,12 @@ onMounted(loadServers);
           <template v-if="resource === 'clients'">
             <div class="hub-form-grid">
               <label
-                >客户端标识<input
+                >客户端用户名<input
                   v-model="clientFields.name"
                   required
                   maxlength="160"
-                  :readonly="editorAction === 'edit'"
                   placeholder="唯一的订阅标识，例如 alice"
-                /><small>创建后保持不变，避免已有订阅失效。</small></label
+                /><small>可以自定义用户名；修改后系统会同步用户绑定，订阅地址也会更新，请重新复制。</small></label
               ><label
                 >显示名称<input
                   v-model="clientFields.remark"

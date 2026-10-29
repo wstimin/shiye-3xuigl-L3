@@ -24,8 +24,6 @@ export function assertNativeBusinessMutation<T extends Node>(
     if (!affected.length) return [];
     if (/\/clients\/update\//.test(path)) {
       const data = (body.client && typeof body.client === 'object' ? body.client : body) as Record<string, unknown>;
-      if (data.email !== undefined && data.email !== input.parameters.email)
-        throw new BadRequestException('已关联客户端的标识请在服务节点中修改，以同步所有用户绑定');
       if (Number(data.expiryTime) < 0)
         throw new BadRequestException('业务客户端使用固定到期时间，不支持首次使用计时');
       const inboundIds = body.inboundIds;

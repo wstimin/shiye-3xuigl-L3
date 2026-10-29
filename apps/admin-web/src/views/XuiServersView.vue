@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import XrayCoreDialog from '../components/XrayCoreDialog.vue';
 import { computed, onMounted, reactive, ref } from 'vue';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
@@ -74,6 +75,7 @@ type ServerSyncResult = { created: number; updated: number; skipped: number };
 type SocksSyncResult = { remoteSocksFound: number; remoteSocksImported: number };
 
 const servers = ref<XuiServer[]>([]);
+const coreServer = ref<XuiServer | null>(null);
 const loading = ref(false);
 const saving = ref(false);
 const testingForm = ref(false);
@@ -453,6 +455,7 @@ async function toggleServerEnabled(server: XuiServer, enabled = !server.enabled)
 }
 
 function handleServerCommand(server: XuiServer, command: string) {
+  if (command === 'core-version') coreServer.value = server;
   if (command === 'test') void testSaved(server);
   if (command === 'status') void showServerStatus(server);
   if (command === 'version') void detectServerVersion(server);
@@ -788,6 +791,7 @@ onMounted(loadServers);
                 <el-dropdown-item command="test" :disabled="testingIds.has(server.id)"><Wifi :size="14" />测试连接</el-dropdown-item>
                 <el-dropdown-item command="version" :disabled="versionIds.has(server.id)"><Search :size="14" />检测版本</el-dropdown-item>
                 <el-dropdown-item command="status" :disabled="statusIds.has(server.id)"><Activity :size="14" />查看面板状态</el-dropdown-item>
+                <el-dropdown-item command="core-version" :disabled="!server.enabled"><RefreshCw :size="14" />更换 Xray 内核版本</el-dropdown-item>
                 <el-dropdown-item command="presence" :disabled="presenceIds.has(server.id)"><Users :size="14" />查看在线客户端</el-dropdown-item>
                 <el-dropdown-item command="certs" :disabled="certIds.has(server.id)"><FileKey2 :size="14" />读取证书状态</el-dropdown-item>
                 <el-dropdown-item command="sync-socks" :disabled="!server.enabled || syncingSocksIds.has(server.id)"><RefreshCw :size="14" />导入 SOCKS 出站</el-dropdown-item>
@@ -900,4 +904,5 @@ onMounted(loadServers);
       <el-button type="primary" :loading="saving" :disabled="!baseConnectionReady" @click="saveServer">{{ editingId ? '保存修改' : '添加面板' }}</el-button>
     </template>
   </el-dialog>
+  <XrayCoreDialog v-if="coreServer" :server="coreServer" @close="coreServer = null" />
 </template>

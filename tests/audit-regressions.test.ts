@@ -114,12 +114,12 @@ test('linked native client updates are identified for business reconciliation', 
   assert.deepEqual(mutation('/panel/api/clients/update/{email}', { email: 'linked', totalGB: 50 * 1024 ** 3 }, { email: 'linked' })(), linked);
   assert.deepEqual(mutation('/panel/api/clients/update/{email}', { email: 'other' }, { email: 'other' })(), []);
 });
-test('native operations cannot delete, detach or rename resources behind active bindings', () => {
+test('native operations protect deletion and retain renamed clients for reconciliation', () => {
   for (const path of ['/panel/api/clients/del/{email}', '/panel/api/clients/{email}/detach', '/panel/api/clients/bulkDel']) {
     assert.throws(mutation(path, { emails: ['linked'] }, { email: 'linked' }), /业务/);
   }
   assert.throws(mutation('/panel/api/inbounds/bulkDel', { ids: [11] }), /业务/);
-  assert.throws(mutation('/panel/api/clients/update/{email}', { email: 'renamed' }, { email: 'linked' }), /标识/);
+  assert.deepEqual(mutation('/panel/api/clients/update/{email}', { email: 'renamed' }, { email: 'linked' })(), linked);
 });
 test('the hosts bulk delete action remains visible', () => {
   assert.equal(visibleOperation({ method: 'POST', path: '/panel/api/hosts/bulk/del' } as any), true);
@@ -154,6 +154,10 @@ test('native quota changes are read back into the service and every user binding
   await assert.rejects(() => service.nativeExecute('server', nativeExecuteSchema.parse({ operation: `POST ${path}`, parameters: { email: 'linked' }, confirmed: true, body: { totalGB: 60 * 1024 ** 3 } })), /simulated local write failure/);
   assert.equal(remote.totalGB, 50 * 1024 ** 3, 'failed local write must restore the previous remote quota');
   assert.equal(binding.trafficLimitGb, 50);
+  await service.nativeExecute('server', nativeExecuteSchema.parse({ operation: `POST ${path}`, parameters: { email: 'linked' }, confirmed: true, body: { email: 'renamed' } }));
+  assert.equal(node.config.remoteClientEmail, 'renamed');
+  assert.equal(binding.xuiEmail, 'renamed');
+  assert.equal(remote.email, 'renamed');
 });
 test('twenty S-UI bindings share a single subscription metadata read', async () => {
   const service = new SuiBusinessService({} as any, {} as any, testLocks()) as any;

@@ -39,7 +39,7 @@ const labels: Record<string, string> = {
   password: "密码",
   username: "账号",
   uuid: "用户标识",
-  email: "用户标识",
+  email: "客户端用户名",
   subId: "订阅标识",
   client: "客户端",
   clients: "客户端",

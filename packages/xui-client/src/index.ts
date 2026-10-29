@@ -380,6 +380,10 @@ export class XuiClient {
     return this.request('/panel/api/server/getXrayVersion');
   }
 
+  installXray(version: string) {
+    return this.request(`/panel/api/server/installXray/${encodeURIComponent(version)}`, { method: 'POST' });
+  }
+
   private url(endpoint: string) {
     const baseUrl = this.options.baseUrl.replace(/\/+$/, '');
     const basePath = this.options.basePath ? `/${this.options.basePath.replace(/^\/+|\/+$/g, '')}` : '';

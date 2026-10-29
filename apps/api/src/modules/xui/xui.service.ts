@@ -227,6 +227,9 @@ export class XuiService {
         for (const node of nodes) await this.assertNoPendingRenewalsForServiceNode(node.id, '执行原生面板操作');
         const linked = assertNativeBusinessMutation(operation!, input, nodes);
         const previous: Array<{ node: typeof nodes[number]; record: Record<string, unknown> }> = [];
+        const body = xuiObject(input.body);
+        const renamedEmail = /\/clients\/update\//.test(operation?.path || '')
+          ? stringValue(xuiObject(body.client || body).email) : undefined;
         let result: unknown;
         let requested = false;
         try {
@@ -239,11 +242,14 @@ export class XuiService {
             requested = true;
           });
           if (result && typeof result === 'object' && 'success' in result) this.assertXuiSuccess(result);
-          for (const node of linked) await this.reconcileNativeClient(client, node);
+          for (const node of linked) await this.reconcileNativeClient(client, node, renamedEmail);
         } catch (error) {
           for (const { node, record } of requested ? previous : []) {
             try {
-              this.assertXuiSuccess(await client.updateClient(node.inboundId!, String(record.email), record));
+              const renamed = renamedEmail ? await this.optionalV36ClientRecord(client, renamedEmail) : null;
+              const oldIdentity = this.v36ClientIdentity(record);
+              const sameIdentity = renamed && ((record.id !== undefined && renamed.id === record.id) || (oldIdentity.uuid && this.v36ClientIdentity(renamed).uuid === oldIdentity.uuid));
+              this.assertXuiSuccess(await client.updateClient(node.inboundId!, sameIdentity ? renamedEmail! : String(record.email), record));
               await this.reconcileNativeClient(client, node);
             } catch {
               await this.writeSyncLog(serverId, 'xui-native-restore', 'partial', '客户端恢复未完成，请核对远端和用户额度', { serviceNodeId: node.id });
@@ -258,9 +264,9 @@ export class XuiService {
     });
   }
 
-  private async reconcileNativeClient(client: XuiClient, node: ServiceNode & { server: XuiServer }) {
+  private async reconcileNativeClient(client: XuiClient, node: ServiceNode & { server: XuiServer }, renamedEmail?: string) {
     const config = xuiObject(node.config);
-    const email = String(config.remoteClientEmail);
+    const email = renamedEmail || String(config.remoteClientEmail);
     const record = await this.optionalV36ClientRecord(client, email);
     if (!record) throw new BadGatewayException('远端已修改，但业务客户端回读失败，请刷新后重新保存以完成同步');
     const identity = this.v36ClientIdentity(record);
@@ -366,6 +372,65 @@ export class XuiService {
       versions: this.xuiArray(versionPayload),
       raw: { status: statusPayload, versions: versionPayload }
     };
+  }
+
+  async changeXrayVersion(serverId: string, version: string) {
+    return this.locks.withLock(this.locks.panelOperationKey(serverId), async () => {
+      const client = await this.nativeClient(serverId);
+      const nodes = await this.prisma.serviceNode.findMany({ where: { serverId }, select: { id: true } });
+      return this.locks.withLocks(nodes.map(node => this.locks.serviceNodeKey(node.id)), async () => {
+        for (const node of nodes) await this.assertNoPendingRenewalsForServiceNode(node.id, '更换 Xray 内核');
+        const [statusPayload, versionsPayload] = await Promise.all([client.serverStatus(), client.getXrayVersion()]);
+        this.assertXuiSuccess(statusPayload); this.assertXuiSuccess(versionsPayload);
+        const normalize = (value: string) => value.replace(/^v/, '');
+        const allowed = this.xuiArray(versionsPayload).map(value => typeof value === 'string' ? value : String(xuiObject(value).tag_name || xuiObject(value).version || xuiObject(value).name || ''));
+        const target = allowed.find(value => normalize(value) === normalize(version));
+        if (!target) throw new BadRequestException('该版本不在当前面板提供的版本列表中，请刷新后重新选择');
+        const previous = xuiObject(xuiObject(statusPayload).obj || xuiObject(statusPayload).data || statusPayload);
+        const oldCore = xuiObject(previous.xray);
+        const oldVersion = String(oldCore.version || '');
+        const previousTag = allowed.find(value => normalize(value) === normalize(oldVersion)) || `v${normalize(oldVersion)}`;
+        if (normalize(oldVersion) === normalize(target) && oldCore.state === 'running') return { changed: false, version: oldVersion, state: 'running' };
+        let installError: unknown;
+        try { this.assertXuiSuccess(await client.installXray(target)); } catch (error) { installError = error; }
+        const current = await this.waitXrayVersion(client, target);
+        if (current) {
+          await this.writeSyncLog(serverId, 'xray-version', 'success', `Xray 内核已更换为 ${target}`, { before: oldVersion, version: target });
+          return { changed: true, version: String(xuiObject(current.xray).version), state: 'running' };
+        }
+        let restored = false;
+        if (/^v?\d+\.\d+\.\d+(?:[-.][A-Za-z0-9]+)*$/.test(oldVersion) && oldCore.state === 'running') {
+          try {
+            if (!await this.waitXrayVersion(client, oldVersion, 1)) this.assertXuiSuccess(await client.installXray(previousTag));
+            restored = Boolean(await this.waitXrayVersion(client, oldVersion));
+          } catch { /* The failure is reported below with recovery status. */ }
+        }
+        await this.writeSyncLog(serverId, 'xray-version', 'failed', 'Xray 内核更换未通过运行状态核对', { before: oldVersion, version: target, restored });
+        throw new BadGatewayException(`内核更换未通过验证，${restored ? '原版本已恢复运行' : '请立即在面板核对内核运行状态'}${installError ? `：${this.officialPanelError(installError)}` : ''}`);
+      });
+    });
+  }
+
+  private async waitXrayVersion(client: XuiClient, version: string, attempts = 15) {
+    const deadline = Date.now() + 20_000;
+    for (let attempt = 0; attempt < attempts && Date.now() < deadline; attempt++) {
+      try {
+        const payload = await client.serverStatus(); this.assertXuiSuccess(payload);
+        const status = xuiObject(xuiObject(payload).obj || xuiObject(payload).data || payload);
+        const core = xuiObject(status.xray);
+        if (core.state === 'running' && String(core.version || '').replace(/^v/, '') === version.replace(/^v/, '')) return status;
+      } catch { /* A core restart can temporarily make status unavailable. */ }
+      if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    return null;
+  }
+
+  async renameNetworkOutbound(id: string, name: string) {
+    const outbound = await this.prisma.networkOutbound.findUnique({ where: { id }, select: { serverId: true } });
+    if (!outbound) throw new NotFoundException('出站不存在');
+    return this.locks.withLock(this.locks.panelOperationKey(outbound.serverId), () =>
+      this.prisma.networkOutbound.update({ where: { id }, data: { name } })
+    );
   }
 
   async storedServerClientPresence(id: string) {
@@ -1089,7 +1154,11 @@ export class XuiService {
   }
 
   async patchServiceNodeRemoteClient(serviceNodeId: string, input: z.infer<typeof remoteClientPatchSchema>) {
-    return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.patchServiceNodeRemoteClientUnlocked(serviceNodeId, input));
+    const node = await this.prisma.serviceNode.findUnique({ where: { id: serviceNodeId }, select: { serverId: true } });
+    if (!node) throw new NotFoundException('服务节点不存在');
+    return this.locks.withLock(this.locks.panelOperationKey(node.serverId), () =>
+      this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), () => this.patchServiceNodeRemoteClientUnlocked(serviceNodeId, input))
+    );
   }
 
   private async patchServiceNodeRemoteClientUnlocked(serviceNodeId: string, input: z.infer<typeof remoteClientPatchSchema>) {

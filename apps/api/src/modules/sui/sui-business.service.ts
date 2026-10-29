@@ -307,25 +307,15 @@ export class SuiBusinessService {
   ) {
     await this.pending(node.id);
     const email = String(obj(node.config).remoteClientEmail);
-    if (input.email && input.email !== email)
-      throw new BadRequestException(
-        'S-UI 客户端标识是订阅 ID，业务接入后不能直接更名'
-      );
-    const patch: Row = {};
-    if (input.clientName !== undefined) patch.remark = input.clientName;
-    if (input.expireAt !== undefined)
-      patch.expiryTime = input.expireAt?.getTime() || 0;
-    if (input.trafficLimitGb !== undefined)
-      patch.totalGB = Math.round(input.trafficLimitGb * 1024 ** 3);
-    if (input.enabled !== undefined) patch.enable = input.enabled;
-    const response = await this.patch(node, { email }, patch, 'account');
     const { client } = await this.remote(node);
-    await this.prisma.customerNode.updateMany({
-      where: { serviceNodeId: node.id },
-      data: {
-        clientName: String(client.remark || client.name),
-        ...suiAuthorization(client),
-        lastSyncedAt: new Date()
+    await this.sui.save(node.serverId, {
+      object: 'clients', action: 'edit', data: {
+        ...client,
+        name: input.email || email,
+        ...(input.clientName === undefined ? {} : { remark: input.clientName }),
+        ...(input.expireAt === undefined ? {} : { expiry: Math.floor((input.expireAt?.getTime() || 0) / 1000) }),
+        ...(input.trafficLimitGb === undefined ? {} : { volume: Math.round(input.trafficLimitGb * 1024 ** 3) }),
+        ...(input.enabled === undefined ? {} : { enable: input.enabled })
       }
     });
     return {
@@ -334,8 +324,8 @@ export class SuiBusinessService {
       serviceNodeId: node.id,
       inboundId: node.inboundId!,
       previousEmail: email,
-      xuiEmail: email,
-      response
+      xuiEmail: input.email || email,
+      response: { success: true, clientId: Number(client.id) }
     };
   }
 
