@@ -1,11 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import postcss from 'postcss';
 import { readFileSync } from 'node:fs';
 
 const adminStyles = readFileSync('apps/admin-web/src/styles.css', 'utf8');
 const userStyles = readFileSync('apps/user-web/src/styles.css', 'utf8');
 const financeView = readFileSync('apps/admin-web/src/views/FinanceView.vue', 'utf8');
 const adminMain = readFileSync('apps/admin-web/src/main.ts', 'utf8');
+const adminHtml = readFileSync('apps/admin-web/index.html', 'utf8');
+
+test('admin bootstrap canvas matches the light workspace background', () => {
+  const workspaceBackground = adminStyles.match(/--bg:\s*(#[\da-f]{6})/i)?.[1];
+  assert.ok(workspaceBackground);
+  const canvasBackground = adminHtml.match(/html, body, #app\s*\{[^}]*background:\s*(#[\da-f]{6})/i)?.[1];
+  assert.equal(canvasBackground, workspaceBackground);
+  assert.ok(adminHtml.includes(`name="theme-color" content="${workspaceBackground}"`));
+  assert.ok(adminHtml.includes('name="color-scheme" content="light"'));
+});
 
 test('runtime-generated UI classes keep their visual rules', () => {
   for (const selector of [
@@ -21,7 +32,7 @@ test('runtime-generated UI classes keep their visual rules', () => {
     '.diagnostics-resource-card.tone-cyan',
     '.diagnostics-resource-card.tone-emerald',
     '.diagnostics-resource-card.tone-amber',
-    '.node-dialog-section, .xui-dialog-section, .socks-dialog-section, .operations-dark-dialog .dialog-form-section'
+    '.node-dialog-section, .xui-dialog-section, .socks-dialog-section, .operations-dialog .dialog-form-section'
   ]) {
     assert.equal(adminStyles.includes(selector), true, 'Missing runtime selector: ' + selector);
   }
@@ -58,33 +69,33 @@ test('user pages remove decorative overlays while retaining functional modal bac
   }
 
   assert.equal(userStyles.includes('.qr-modal'), true);
-  assert.equal(userStyles.includes('.user-nav-backdrop'), true);
-  assert.equal(userStyles.includes('background: #1c2027;'), true);
+  assert.equal(userStyles.includes('.user-nav-backdrop'), false);
+  assert.equal(userStyles.includes('.user-sidebar'), false);
+  assert.equal(userStyles.includes('.user-stat-grid'), false);
+  assert.equal(userStyles.includes('--panel-bg: #ffffff;'), true);
 });
 
-test('user shell base styles do not depend on later overrides to hide light surfaces', () => {
-  for (const lightRule of [
-    'background: rgba(255, 255, 255, 0.94)',
-    '.secondary-button { height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;',
-    '.payment-method-button { min-width: 0; min-height: 96px; display: grid; grid-template-rows: 30px minmax(20px, auto) 18px; justify-items: center; align-content: center; gap: 5px; border: 1px solid #d7dde8; border-radius: 8px; background: #fff;',
-    '.finance-form input, .finance-form select { min-width: 0; height: 42px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 12px; background: #fff;',
-    '.toast-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; border: 1px solid #dbe3ef; border-left-width: 4px; border-radius: 8px; background: #fff;'
-  ]) {
-    assert.equal(userStyles.includes(lightRule), false, 'Light base surface returned: ' + lightRule);
+test('user and admin workspaces share the Professional color tokens', () => {
+  for (const token of ['--primary', '--text']) {
+    const pattern = new RegExp(token + ':\\s*(#[0-9a-f]{6})', 'i');
+    assert.equal(userStyles.match(pattern)?.[1], adminStyles.match(pattern)?.[1], token);
   }
-
-  assert.equal(userStyles.includes('.user-sidebar { min-height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px; background: #1c2027;'), true);
-  assert.equal(userStyles.includes('.qr-box img { width: 220px; height: 220px; max-width: 100%; background: #fff; }'), true);
+  const html = readFileSync('apps/user-web/index.html', 'utf8');
+  assert.ok(html.includes('background: #f5f6f8'));
+  assert.ok(html.includes('name="color-scheme" content="light"'));
 });
 
-test('user console uses the same surface palette as the admin console', () => {
-  for (const color of ['#171a20', '#1c2027', '#20252d', '#252b34', '#2a313b', '#272e38']) {
-    assert.equal(userStyles.includes(color), true, 'Missing shared console color: ' + color);
-  }
-
-  for (const retiredColor of ['#242a32', '#303946', '#35404e', '#2c3440', '#29323d']) {
-    assert.equal(userStyles.includes(retiredColor), false, 'Retired user surface color returned: ' + retiredColor);
-  }
+test('user stylesheet has no repeated selectors in the same media context', () => {
+  const seen = new Set<string>();
+  postcss.parse(userStyles).walkRules(rule => {
+    const parents: string[] = [];
+    for (let parent: any = rule.parent; parent; parent = parent.parent) {
+      if (parent.type === 'atrule') parents.unshift(parent.name + ' ' + parent.params);
+    }
+    const key = parents.join('|') + '|' + rule.selector;
+    assert.equal(seen.has(key), false, 'Repeated rule: ' + key);
+    seen.add(key);
+  });
 });
 
 test('lazy Element Plus styles cannot expand desktop management filters', () => {
@@ -111,6 +122,6 @@ test('message boxes load their base layout and stay viewport-centered', () => {
   assert.equal(adminStyles.includes('.is-message-box .el-overlay-message-box {'), true);
   assert.equal(adminStyles.includes('align-items: center;'), true);
   assert.equal(adminStyles.includes('justify-content: center;'), true);
-  assert.equal(adminStyles.includes('.is-message-box .el-overlay-message-box::after'), true);
+  assert.match(adminStyles, /\.is-message-box \.el-overlay-message-box::?after/);
   assert.equal(adminStyles.includes('max-height: calc(100vh - 48px);'), true);
 });

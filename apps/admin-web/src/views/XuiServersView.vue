@@ -38,7 +38,7 @@ import {
 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
-import { entityAvatarStyle, entityInitial } from '../entity-avatar';
+import { entityInitial } from '../entity-avatar';
 import { notifyError } from '../notify';
 
 type XuiServer = {
@@ -251,7 +251,7 @@ async function showCertResult(result: CertResult, allowFill: boolean) {
         type: 'success',
         confirmButtonText: '回填',
         cancelButtonText: '取消',
-        customClass: 'xui-dark-message-box'
+        customClass: 'xui-message-box'
       });
       form.tlsCertFile = result.certFile;
       form.tlsKeyFile = result.keyFile;
@@ -271,7 +271,7 @@ async function syncServer(server: XuiServer) {
     await ElMessageBox.confirm(
       `确认从“${server.name}”读取远端入站，并同步为本地路由节点？此操作不会同步远端用户。`,
       '同步远端节点',
-      { type: 'warning', customClass: 'xui-dark-message-box' }
+      { type: 'warning', customClass: 'xui-message-box' }
     );
   } catch {
     return;
@@ -295,7 +295,7 @@ async function syncServerSocks(server: XuiServer) {
     await ElMessageBox.confirm(
       `确认从“${server.name}”读取远端 Xray 配置并导入 SOCKS 出站？只会写入本地出站节点列表。`,
       '导入远端 SOCKS',
-      { type: 'warning', customClass: 'xui-dark-message-box' }
+      { type: 'warning', customClass: 'xui-message-box' }
     );
   } catch {
     return;
@@ -328,7 +328,7 @@ async function showServerStatus(server: XuiServer) {
       `内存：${formatBytes(Number(mem.current || 0))} / ${formatBytes(Number(mem.total || 0))}`,
       `磁盘：${formatBytes(Number(disk.current || 0))} / ${formatBytes(Number(disk.total || 0))}`,
       `可用版本：${versions.join(', ') || '-'}`
-    ].join('\n'), `${server.name} 运行状态`, { type: 'info', customClass: 'xui-dark-message-box' });
+    ].join('\n'), `${server.name} 运行状态`, { type: 'info', customClass: 'xui-message-box' });
   } catch (err) {
     showError(err, '读取面板连接状态失败');
   } finally {
@@ -349,7 +349,7 @@ async function showClientPresence(server: XuiServer) {
       '',
       '最近在线：',
       lastOnline.length ? lastOnline.join('\n') : '-'
-    ].join('\n'), `${server.name} 客户端状态`, { type: 'info', customClass: 'xui-dark-message-box' });
+    ].join('\n'), `${server.name} 客户端状态`, { type: 'info', customClass: 'xui-message-box' });
   } catch (err) {
     showError(err, '读取客户端在线状态失败');
   } finally {
@@ -362,7 +362,7 @@ function openDialog() {
   dialogVisible.value = true;
 }
 
-function editServer(server: XuiServer) {
+async function editServer(server: XuiServer) {
   const connection = splitServerBaseUrl(server.baseUrl);
   editingId.value = server.id;
   clearPassword.value = false;
@@ -387,20 +387,23 @@ function editServer(server: XuiServer) {
     enabled: server.enabled,
     remark: server.remark || ''
   });
+  await revealServerSecrets();
+  if (editingId.value !== server.id) return;
   dialogVisible.value = true;
 }
 
 async function revealServerSecrets() {
   if (!editingId.value) return;
+  const requestedId = editingId.value;
   revealingSecrets.value = true;
   error.value = '';
   try {
     const secrets = await api<{ password: string; token: string }>(`/api/admin/xui-servers/${editingId.value}/secrets`);
+    if (editingId.value !== requestedId) return;
     form.password = secrets.password || '';
     form.token = secrets.token || '';
     clearPassword.value = false;
     clearToken.value = false;
-    ElMessage.success('已读取保存的密码和 Token');
   } catch (err) {
     showError(err, '读取保存凭据失败');
   } finally {
@@ -414,7 +417,7 @@ async function removeServer(server: XuiServer) {
     await ElMessageBox.confirm(
       `确认删除面板连接“${server.name}”？存在关联路由节点时后端会拒绝删除，请先处理关联节点。`,
       '删除面板连接',
-      { type: 'warning', customClass: 'xui-dark-message-box' }
+      { type: 'warning', customClass: 'xui-message-box' }
     );
   } catch {
     return;
@@ -571,7 +574,7 @@ function connectionStatus(server: XuiServer) {
 
 function credentialLabel(server: XuiServer) {
   if (server.hasToken && server.hasPassword) return 'Token + 账号密码';
-  if (server.hasToken) return 'API Token';
+  if (server.hasToken) return '访问令牌';
   if (server.hasPassword) return '账号密码';
   return '未保存凭据';
 }
@@ -592,7 +595,7 @@ function compatibilityLabel(server: XuiServer) {
   const compatibility = server.config?.panelCompatibility;
   if (!compatibility) return '版本未检测';
   if (compatibility.detectedVersion) return compatibility.detectedVersion;
-  return compatibility.apiProfile === 'v3.6' ? '3.6 官方 API' : '未检测';
+  return compatibility.apiProfile === 'v3.6' ? '3.6+ 官方 API' : '未检测';
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
@@ -662,10 +665,11 @@ onMounted(loadServers);
   <section class="xui-management-page" :class="{ loading }">
     <header class="xui-page-header">
       <div>
-        <h1>面板连接</h1>
-        <p>维护真实 3x-ui 面板地址、访问凭据、分享地址、TLS 证书和 Reality 探测配置。</p>
+        <h1>3x-ui 面板</h1>
+        <p>统一维护面板连接与访问凭据，按需进入管理面板管理完整功能。</p>
       </div>
       <div class="xui-page-actions">
+          <router-link class="hub-button" to="/xui-native">管理面板</router-link>
         <el-button class="xui-secondary-button" :loading="loading" @click="loadServers"><RefreshCw :size="15" />刷新</el-button>
         <el-button type="primary" @click="openDialog"><Plus :size="15" />添加面板</el-button>
       </div>
@@ -688,7 +692,7 @@ onMounted(loadServers);
       </article>
       <article class="xui-stat-card">
         <span class="xui-stat-icon tone-amber"><ShieldCheck :size="18" /></span>
-        <div><small>已保存 Token</small><strong>{{ tokenServerCount }}</strong><span>可直接用于 API 认证</span></div>
+        <div><small>已保存 Token</small><strong>{{ tokenServerCount }}</strong><span>可直接用于 面板认证</span></div>
       </article>
     </div>
 
@@ -712,10 +716,11 @@ onMounted(loadServers);
     </div>
 
     <div v-loading="loading" class="xui-panel-grid">
+      <div class="xui-directory-head" aria-hidden="true"><span>面板 / 连接状态</span><span>访问地址</span><span>连接配置</span><span>管理操作</span></div>
       <article v-for="server in filteredServers" :key="server.id" class="xui-panel-card entity-runtime-card" :class="connectionStatus(server).className === 'is-online' ? 'runtime-state-online' : connectionStatus(server).className === 'is-error' ? 'runtime-state-error' : server.enabled ? 'runtime-state-unknown' : 'runtime-state-disabled'">
         <header class="xui-panel-card-header">
           <div class="xui-panel-identity">
-            <span class="xui-panel-icon entity-name-avatar" :style="entityAvatarStyle(server.name, server.id)">{{ entityInitial(server.name, '面') }}</span>
+            <span class="xui-panel-icon entity-name-avatar">{{ entityInitial(server.name, '面') }}</span>
             <div>
               <strong :title="server.name">{{ server.name }}</strong>
               <span>3x-ui · {{ credentialLabel(server) }}</span>
@@ -732,8 +737,8 @@ onMounted(loadServers);
 
         <div class="runtime-info-line runtime-endpoint-line xui-runtime-info">
           <span class="runtime-endpoint-value"><Network :size="13" /><strong :title="serverEndpoint(server)">{{ serverEndpoint(server) }}</strong></span>
-          <el-tooltip content="复制面板接口地址" placement="top">
-            <button type="button" class="runtime-inline-copy xui-copy-button" aria-label="复制面板接口地址" @click="copyServerAddress(server)"><Clipboard :size="12" /></button>
+          <el-tooltip content="复制面板地址" placement="top">
+            <button type="button" class="runtime-inline-copy xui-copy-button" aria-label="复制面板地址" @click="copyServerAddress(server)"><Clipboard :size="12" /></button>
           </el-tooltip>
         </div>
 
@@ -750,19 +755,19 @@ onMounted(loadServers);
         </div>
 
         <footer class="xui-panel-actions runtime-card-footer">
-          <span class="runtime-footer-label"><Network :size="13" />路径 {{ server.basePath || '/' }}</span>
+          <router-link class="hub-link" :to="{ path: '/xui-native', query: { serverId: server.id } }">管理此面板</router-link>
           <div class="runtime-action-group">
           <el-tooltip content="测试连接" placement="top">
-            <el-button class="runtime-icon-button" :loading="testingIds.has(server.id)" aria-label="测试连接" @click="testSaved(server)"><Wifi :size="15" /></el-button>
+            <el-button class="runtime-icon-button runtime-labelled-button" :loading="testingIds.has(server.id)" aria-label="测试连接" @click="testSaved(server)"><Wifi :size="15" /><span>测试</span></el-button>
           </el-tooltip>
           <el-tooltip content="同步节点" placement="top">
           <el-button
-            class="xui-sync-button runtime-icon-button"
+            class="xui-sync-button runtime-icon-button runtime-labelled-button"
             :loading="syncingIds.has(server.id)"
             :disabled="!server.enabled"
             aria-label="同步节点"
             @click="syncServer(server)"
-          ><RefreshCw :size="15" /></el-button>
+          ><RefreshCw :size="15" /><span>同步</span></el-button>
           </el-tooltip>
           <el-tooltip content="编辑连接" placement="top">
             <el-button class="runtime-icon-button" aria-label="编辑连接" @click="editServer(server)"><Edit3 :size="15" /></el-button>
@@ -808,7 +813,7 @@ onMounted(loadServers);
     v-model="dialogVisible"
     :title="editingId ? '编辑面板连接' : '添加面板连接'"
     width="min(940px, 94vw)"
-    class="xui-dark-dialog"
+    class="xui-dialog"
     destroy-on-close
   >
     <div class="xui-dialog-intro">
@@ -821,7 +826,7 @@ onMounted(loadServers);
 
     <el-form :model="form" label-position="top" class="xui-dialog-form">
       <section class="xui-dialog-section">
-        <header><strong>连接设置</strong><span>填写远程面板地址与 API 令牌，现有接口字段保持不变</span></header>
+        <header><strong>连接设置</strong><span>填写远程面板地址与访问令牌，保存后即可使用可视化管理</span></header>
         <div class="xui-dialog-grid xui-connection-grid">
           <el-form-item label="名称" class="xui-connection-name" required><el-input v-model="form.name" maxlength="100" placeholder="例如：de-frankfurt-1" /></el-form-item>
           <el-form-item label="备注" class="xui-connection-remark"><el-input v-model="form.remark" maxlength="500" placeholder="可选" /></el-form-item>
@@ -841,15 +846,15 @@ onMounted(loadServers);
       </section>
 
       <section class="xui-dialog-section">
-        <header><strong>访问凭据</strong><span>可保存用户名和密码，也可保存 API Token；编辑时留空会保留原值</span></header>
+        <header><strong>访问凭据</strong><span>可保存用户名和密码，也可保存 访问令牌；编辑时留空会保留原值</span></header>
         <div class="xui-dialog-grid">
           <el-form-item label="用户名"><el-input v-model="form.username" maxlength="100" placeholder="3x-ui 登录账号" /></el-form-item>
           <el-form-item label="密码">
-            <el-input v-model="form.password" type="password" show-password maxlength="256" :disabled="clearPassword" placeholder="编辑时留空不修改" />
+            <el-input v-model="form.password" type="text" maxlength="256" :disabled="clearPassword" placeholder="编辑时留空不修改" />
             <el-checkbox v-if="editingId" v-model="clearPassword" class="xui-clear-secret">清除已保存密码</el-checkbox>
           </el-form-item>
-          <el-form-item label="API Token" class="xui-dialog-full">
-            <el-input v-model="form.token" type="password" show-password maxlength="2048" :disabled="clearToken" placeholder="编辑时留空不修改" />
+          <el-form-item label="访问令牌" class="xui-dialog-full">
+            <el-input v-model="form.token" type="text" maxlength="2048" :disabled="clearToken" placeholder="编辑时留空不修改" />
             <el-checkbox v-if="editingId" v-model="clearToken" class="xui-clear-secret">清除已保存 Token</el-checkbox>
           </el-form-item>
           <el-form-item v-if="editingId" label="已保存凭据" class="xui-dialog-full">

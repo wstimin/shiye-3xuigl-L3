@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EncryptionService } from '../security/encryption.service.js';
 import { ShiyeCardClient } from './shiye-client.js';
+import { ExternalCardsService } from './external-cards.service.js';
 
 const CARD_INTEGRATION_KEY = 'card:integration';
 
@@ -18,7 +19,7 @@ type CardIntegrationStore = {
 
 @Injectable()
 export class CardsService {
-  constructor(private readonly prisma: PrismaService, private readonly encryption: EncryptionService) {}
+  constructor(private readonly prisma: PrismaService, private readonly encryption: EncryptionService, private readonly external: ExternalCardsService) {}
 
   // —— 十夜卡密对接：admin 读写对接配置 / 连通性测试 ——
 
@@ -28,7 +29,8 @@ export class CardsService {
       enabled: Boolean(stored.enabled),
       baseUrl: String(stored.baseUrl || ''),
       appKey: String(stored.appKey || ''),
-      appSecretSet: Boolean(stored.appSecretEnc)
+      appSecretSet: Boolean(stored.appSecretEnc),
+      appSecret: stored.appSecretEnc ? this.encryption.decrypt(stored.appSecretEnc) : ''
     };
   }
 
@@ -299,66 +301,10 @@ export class CardsService {
     });
   }
 
-  /** 十夜卡密兑换：调 API activate → 取金额卡面额 → 加本地余额（核销由本平台落地） */
   private async redeemExternalCard(customerId: string, rawCode: string) {
-    const code = rawCode.trim().toUpperCase();
     const client = await this.loadCardsClient();
     if (!client) throw new NotFoundException('卡密不存在');
-
-    const result = await client.activate(code);
-    if (result.code !== 0) {
-      const message = result.code === -1
-        ? '卡密服务暂不可用，请稍后重试'
-        : result.code === 1001
-          ? '卡密服务鉴权失败，请联系管理员'
-          : result.message || '兑换失败，请稍后重试';
-      throw new BadRequestException(message);
-    }
-    // 按对接文档：activate 返回 type 为 money 时报告面额，余额由对方平台核销
-    const data = result.data as { type?: string; amount?: number | string; card?: string } | null | undefined;
-    if (data?.type && data.type !== 'money') {
-      throw new BadRequestException('该卡类型不适用于本项目，请使用金额卡');
-    }
-    const amount = new Prisma.Decimal(data?.amount ?? 0);
-    if (amount.lte(0)) throw new BadRequestException('卡面额异常，请联系客服');
-
-    const displayCard = data?.card || code;
-    return this.prisma.$transaction(async (tx) => {
-      const customers = await tx.$queryRaw<Array<{ id: string; loginUsername: string; status: string; balance: Prisma.Decimal }>>`
-        SELECT id, loginUsername, status, balance FROM customers WHERE id = ${customerId} FOR UPDATE
-      `;
-      const customer = customers[0];
-      if (!customer || customer.status !== 'active') throw new NotFoundException('用户不存在或已禁用');
-
-      const beforeBalance = new Prisma.Decimal(customer.balance);
-      const updatedCustomer = await tx.customer.update({
-        where: { id: customerId },
-        data: { balance: { increment: amount } },
-        select: {
-          id: true,
-          name: true,
-          loginUsername: true,
-          balance: true,
-          status: true
-        }
-      });
-      const afterBalance = new Prisma.Decimal(updatedCustomer.balance);
-
-      await tx.balanceLog.create({
-        data: {
-          customerId,
-          type: 'card_redeem',
-          amount,
-          beforeBalance,
-          afterBalance,
-          operator: customer.loginUsername,
-          remark: `兑换十夜卡密 ${previewCode(displayCard)}`,
-          detail: { source: 'shiye', code: displayCard }
-        }
-      });
-
-      return { customer: updatedCustomer, amount };
-    });
+    return this.external.redeem(customerId, rawCode, client);
   }
 
   async deleteCard(id: string) {

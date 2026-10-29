@@ -5,6 +5,7 @@ export type SessionUser = {
   userId?: string;
   customerId?: string;
   username: string;
+  credentialVersion?: string;
 };
 
 declare module 'express-serve-static-core' {

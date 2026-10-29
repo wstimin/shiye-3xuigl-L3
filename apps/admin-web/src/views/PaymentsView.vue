@@ -233,7 +233,7 @@ async function toggleChannel(channel: PaymentChannel, enabled: boolean | string 
         type: 'warning',
         confirmButtonText: '确认停用',
         cancelButtonText: '取消',
-        customClass: 'operations-dark-message-box'
+        customClass: 'operations-message-box'
       });
     } catch {
       channel.enabled = true;
@@ -288,7 +288,7 @@ function openChannelDialog(provider: PaymentProvider) {
   channelDialogVisible.value = true;
 }
 
-function editChannel(channel: PaymentChannel) {
+async function editChannel(channel: PaymentChannel) {
   editingChannelId.value = channel.id;
   advancedSections.value = [];
   Object.assign(channelForm, {
@@ -311,15 +311,19 @@ function editChannel(channel: PaymentChannel) {
     notifyUrl: channel.config.notifyUrl || '',
     returnUrl: channel.config.returnUrl || ''
   });
+  await revealChannelSecrets();
+  if (editingChannelId.value !== channel.id) return;
   channelDialogVisible.value = true;
 }
 
 async function revealChannelSecrets() {
   if (!editingChannelId.value) return;
+  const requestedId = editingChannelId.value;
   revealingChannelSecrets.value = true;
   error.value = '';
   try {
     const secrets = await api<PaymentChannelSecrets>(`/api/admin/payment-channels/${editingChannelId.value}/secrets`);
+    if (editingChannelId.value !== requestedId) return;
     if (channelForm.provider === 'epay') channelForm.key = secrets.key || '';
     if (channelForm.provider === 'bepusdt') channelForm.token = secrets.token || '';
     if (channelForm.provider === 'alipay') {
@@ -327,7 +331,6 @@ async function revealChannelSecrets() {
       channelForm.publicKey = secrets.publicKey || '';
     }
     if (channelForm.provider === 'wechat') channelForm.apiKey = secrets.apiKey || '';
-    ElMessage.success(hasAnySecret(secrets) ? '已读取保存的支付凭据' : '该通道没有保存凭据');
   } catch (caught) {
     notifyError(caught, '读取失败');
   } finally {
@@ -341,7 +344,7 @@ async function removeChannel(channel: PaymentChannel) {
       type: 'warning',
       confirmButtonText: '确认删除',
       cancelButtonText: '取消',
-      customClass: 'operations-dark-message-box'
+      customClass: 'operations-message-box'
     });
     await api(`/api/admin/payment-channels/${channel.id}`, { method: 'DELETE' });
     ElMessage.success('支付通道已删除');
@@ -627,7 +630,7 @@ onMounted(loadChannels);
       v-model="channelDialogVisible"
       :title="editingChannelId ? `配置${channelForm.name}` : `新增${providerName(channelForm.provider)}通道`"
       width="920px"
-      class="operations-dark-dialog payment-config-dialog"
+      class="operations-dialog payment-config-dialog"
       destroy-on-close
     >
       <div class="payment-dialog-overview" :class="`provider-${channelForm.provider}`">
@@ -682,15 +685,15 @@ onMounted(loadChannels);
             <el-form-item v-if="channelForm.provider === 'alipay' || channelForm.provider === 'wechat'" label="AppID" required><el-input v-model="channelForm.appId" maxlength="120" /></el-form-item>
             <el-form-item v-if="channelForm.provider === 'wechat'" label="商户号" required><el-input v-model="channelForm.mchId" maxlength="120" /></el-form-item>
             <el-form-item v-if="channelForm.provider === 'epay' || channelForm.provider === 'bepusdt' || channelForm.provider === 'wechat'" :label="secretLabel" required>
-              <el-input v-if="channelForm.provider === 'epay'" v-model="channelForm.key" type="password" show-password maxlength="2048" placeholder="留空保留现有密钥" />
-              <el-input v-else-if="channelForm.provider === 'bepusdt'" v-model="channelForm.token" type="password" show-password maxlength="2048" placeholder="留空保留现有 Token" />
-              <el-input v-else v-model="channelForm.apiKey" type="password" show-password maxlength="2048" placeholder="留空保留现有 V2 API 密钥" />
+              <el-input v-if="channelForm.provider === 'epay'" v-model="channelForm.key" type="text" maxlength="2048" placeholder="留空保留现有密钥" />
+              <el-input v-else-if="channelForm.provider === 'bepusdt'" v-model="channelForm.token" type="text" maxlength="2048" placeholder="留空保留现有 Token" />
+              <el-input v-else v-model="channelForm.apiKey" type="text" maxlength="2048" placeholder="留空保留现有 V2 API 密钥" />
             </el-form-item>
             <el-form-item v-if="channelForm.provider === 'alipay'" label="应用私钥" required class="payment-form-full"><el-input v-model="channelForm.privateKey" type="textarea" :rows="4" maxlength="12000" placeholder="编辑时留空表示不修改已保存私钥" /></el-form-item>
             <el-form-item v-if="channelForm.provider === 'alipay'" label="支付宝公钥" required class="payment-form-full"><el-input v-model="channelForm.publicKey" type="textarea" :rows="4" maxlength="12000" placeholder="编辑时留空表示不修改已保存公钥" /></el-form-item>
           </div>
           <div class="payment-secret-footer">
-            <span><ShieldCheck :size="15" />凭据只在主动读取时显示，请避免在共享设备上操作。</span>
+            <span><ShieldCheck :size="15" />已自动读取保存的凭据，可直接查看和修改。</span>
             <el-button v-if="editingChannelId" :loading="revealingChannelSecrets" @click="revealChannelSecrets"><Eye :size="15" />读取已保存凭据</el-button>
           </div>
         </section>

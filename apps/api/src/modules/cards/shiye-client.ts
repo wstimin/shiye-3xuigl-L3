@@ -41,14 +41,14 @@ export class ShiyeCardClient {
 
   /** 激活并归属本项目（一卡一次，兑换入口） */
   async activate(card: string): Promise<ShiyeCardResult> {
-    return this.request('POST', '/api/v1/card/activate', { card });
+    return this.request('POST', '/api/v1/card/activate', { card }, 1);
   }
 
-  private async request(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>): Promise<ShiyeCardResult> {
+  private async request(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>, attempts = MAX_ATTEMPTS): Promise<ShiyeCardResult> {
     // 先拼好最终要发送的 JSON 字符串，对同一字符串做 hash 再原样发送，避免重新序列化导致签名不一致
     const raw = body === undefined ? '' : JSON.stringify(body);
 
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (attempt > 0) await sleep(300 * attempt);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -72,18 +72,18 @@ export class ShiyeCardClient {
           signal: controller.signal
         });
         if (response.status >= 500) {
-          if (attempt + 1 < MAX_ATTEMPTS) continue;
+          if (attempt + 1 < attempts) continue;
           return { code: response.status, message: `卡密服务异常（HTTP ${response.status}）` };
         }
         const payload = await response.json().catch(() => null) as ShiyeCardResult | null;
         if (!payload || typeof payload.code !== 'number') {
-          if (attempt + 1 < MAX_ATTEMPTS) continue;
+          if (attempt + 1 < attempts) continue;
           return { code: -1, message: '卡密服务返回格式异常' };
         }
         return payload;
       } catch {
         const aborted = controller.signal.aborted;
-        if (attempt + 1 >= MAX_ATTEMPTS) {
+        if (attempt + 1 >= attempts) {
           return {
             code: -1,
             message: aborted ? '连接卡密服务超时' : '无法连接卡密服务，请检查服务器地址与网络'

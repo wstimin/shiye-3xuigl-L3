@@ -70,8 +70,12 @@ export class NodesService {
   ) {}
 
   async listServers() {
-    const servers = await this.prisma.xuiServer.findMany({ orderBy: { createdAt: 'desc' } });
+    const servers = await this.prisma.xuiServer.findMany({ where: { provider: 'xui' }, orderBy: { createdAt: 'desc' } });
     return servers.map(maskXuiServer);
+  }
+
+  async listPanelServers() {
+    return this.prisma.xuiServer.findMany({ select: { id: true, name: true, baseUrl: true, enabled: true, provider: true }, orderBy: { createdAt: 'desc' } });
   }
 
   async getServerSecrets(id: string) {
@@ -102,8 +106,8 @@ export class NodesService {
   }
 
   async updateServer(id: string, input: Partial<z.infer<typeof xuiServerUpsertSchema>>) {
-    const current = await this.prisma.xuiServer.findUnique({ where: { id }, select: { config: true, baseUrl: true, basePath: true } });
-    if (!current) throw new NotFoundException('3x-ui 服务器不存在');
+    const current = await this.prisma.xuiServer.findUnique({ where: { id }, select: { config: true, baseUrl: true, basePath: true, provider: true } });
+    if (!current || current.provider === 'sui') throw new NotFoundException('3x-ui 服务器不存在');
     const config = this.serverConfig(input, serverConfigFrom(current.config));
     const nextBasePath = input.basePath === undefined ? current.basePath : input.basePath || null;
     if ((input.baseUrl !== undefined && input.baseUrl !== current.baseUrl) || nextBasePath !== current.basePath) {
@@ -143,7 +147,7 @@ export class NodesService {
   async listServiceNodes() {
     const nodes = await this.prisma.serviceNode.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
+      include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true, provider: true } } }
     });
     const nodeIds = nodes.map((node) => node.id);
     const [tasks, trafficSnapshots] = await Promise.all([
@@ -165,7 +169,8 @@ export class NodesService {
   private async createServiceNodeUnlocked(input: z.infer<typeof serviceNodeUpsertSchema>) {
     if (input.protocol === 'hysteria') input = { ...input, encryption: 'tls', transport: 'tcp' };
     this.assertShareLinkProtocol(input.protocol);
-    await this.ensureServer(input.serverId);
+    const targetPanel = await this.ensureServer(input.serverId);
+    if (targetPanel.provider === 'sui') throw new BadRequestException('请在 S-UI 工作区选择客户端并接入业务，以保留原生协议配置');
     const remoteMode = input.remoteMode || 'create';
     let inboundId = input.inboundId || null;
     let remoteCreated: { inboundId: number; port: number; tag: string; remark: string; remoteInboundFingerprint?: string; remoteInboundLastCheckedAt?: string; remoteClientEmail?: string; remoteClientUuid?: string; remoteClientSubId?: string; links?: string[]; realityTarget?: string; realityServerName?: string } | null = null;
@@ -272,7 +277,7 @@ export class NodesService {
           enabled: remoteValidation?.enabled ?? input.enabled,
           remark: input.remark || null
         },
-        include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
+        include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true, provider: true } } }
       });
       localCreated = true;
       const pendingActions: SyncTaskAction[] = [];
@@ -309,6 +314,8 @@ export class NodesService {
 
   private async updateServiceNodeUnlocked(id: string, input: Partial<z.infer<typeof serviceNodeUpsertSchema>>, lockedServerIds: string[]) {
     const current = await this.ensureServiceNode(id);
+    const panel = await this.prisma.xuiServer.findUnique({ where: { id: current.serverId } });
+    if (panel?.provider === 'sui') return this.locks.withLock(this.locks.serviceNodeKey(id), () => this.xui.sui.update({ ...current, server: panel }, input));
     if (!lockedServerIds.includes(current.serverId)) throw new BadRequestException('服务节点绑定面板已被其他操作修改，请刷新后重试');
     const pendingRenewals = await this.prisma.renewalLog.count({
       where: { status: 'pending', customerNode: { serviceNodeId: id } }
@@ -560,7 +567,7 @@ export class NodesService {
           enabled: bindingChanged ? nextEnabled : input.enabled,
           remark: input.remark === undefined ? undefined : input.remark || null
         },
-        include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
+        include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true, provider: true } } }
       });
       localUpdated = true;
       const pendingActions: SyncTaskAction[] = [];
@@ -604,7 +611,7 @@ export class NodesService {
       }
       const finalNode = await this.prisma.serviceNode.findUnique({
         where: { id },
-        include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true } } }
+        include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true, provider: true } } }
       });
       return {
         ...(finalNode || updated),
@@ -629,6 +636,8 @@ export class NodesService {
 
   private async deleteServiceNodeUnlocked(id: string, recordFailure = true, lockedServerId?: string) {
     const current = await this.ensureServiceNode(id);
+    const panel = await this.prisma.xuiServer.findUnique({ where: { id: current.serverId } });
+    if (panel?.provider === 'sui') return this.xui.sui.unlink({ ...current, server: panel });
     if (lockedServerId && current.serverId !== lockedServerId) throw new BadRequestException('服务节点绑定面板已被其他操作修改，请刷新后重试');
     let remoteInboundDeleted = false;
     let recoveryTaskRecorded = false;
@@ -1453,8 +1462,9 @@ export class NodesService {
   }
 
   private async ensureServer(id: string) {
-    const exists = await this.prisma.xuiServer.findUnique({ where: { id }, select: { id: true } });
-    if (!exists) throw new NotFoundException('3x-ui 服务器不存在');
+    const exists = await this.prisma.xuiServer.findUnique({ where: { id }, select: { id: true, provider: true } });
+    if (!exists) throw new NotFoundException('面板连接不存在');
+    return exists;
   }
 
   private async ensureServiceNode(id: string) {

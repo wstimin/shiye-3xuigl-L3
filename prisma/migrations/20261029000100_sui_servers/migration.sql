@@ -1,0 +1,11 @@
+CREATE TABLE `sui_servers` (
+  `id` VARCHAR(191) NOT NULL,
+  `name` VARCHAR(120) NOT NULL,
+  `baseUrl` VARCHAR(500) NOT NULL,
+  `tokenEnc` TEXT NOT NULL,
+  `enabled` BOOLEAN NOT NULL DEFAULT true,
+  `remark` TEXT NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL,
+  PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

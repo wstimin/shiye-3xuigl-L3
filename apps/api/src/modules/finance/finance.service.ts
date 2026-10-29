@@ -250,7 +250,7 @@ export class FinanceService {
       currentRemote = await this.xui.customerNodeRemoteState(customerId, pending.customerNode.id);
     } catch (error) {
       await this.notePendingRecovery(pending, operator, 'remote-state-unavailable', error);
-      throw new BadGatewayException(`暂时无法确认 3x-ui 续费状态，本次请求不会重复扣款，系统将自动恢复：${errorMessage(error)}`);
+      throw new BadGatewayException(`暂时无法确认 远端面板续费状态，本次请求不会重复扣款，系统将自动恢复：${errorMessage(error)}`);
     }
 
     if (remoteMatches(currentRemote, pending.afterExpireAt, targetEnable)) {
@@ -274,7 +274,7 @@ export class FinanceService {
       const resolution = await this.resolveRemoteUpdateFailure(customerId, pending, operator, error);
       if (resolution === 'applied') return this.finalizeRenewal(customerId, pending, operator, { recovered: true, error: errorMessage(error) });
       if (resolution === 'refunded') throw error;
-      throw new BadGatewayException(`暂时无法确认 3x-ui 续费结果，本次请求不会重复扣款，系统将自动恢复：${errorMessage(error)}`);
+      throw new BadGatewayException(`暂时无法确认 远端面板续费结果，本次请求不会重复扣款，系统将自动恢复：${errorMessage(error)}`);
     }
 
     return this.finalizeRenewal(customerId, pending, operator, syncResult);
@@ -287,7 +287,7 @@ export class FinanceService {
         if (latest?.status === 'success') {
           const node = await tx.customerNode.findUnique({
             where: { id: pending.customerNode.id },
-            include: { serviceNode: { include: { server: true } } }
+            include: { serviceNode: { include: { server: { select: { id: true, name: true, baseUrl: true, provider: true, enabled: true } } } } }
           });
           return { node, renewalLog: latest, amount: pending.amount, afterBalance: pending.afterBalance, sync: jsonObject(latest.detail).sync };
         }
@@ -295,7 +295,7 @@ export class FinanceService {
         const updatedNode = await tx.customerNode.update({
           where: { id: pending.customerNode.id },
           data: { expireAt: pending.afterExpireAt, status: 'active', disabledReason: null, lastSyncedAt: new Date() },
-          include: { serviceNode: { include: { server: true } } }
+          include: { serviceNode: { include: { server: { select: { id: true, name: true, baseUrl: true, provider: true, enabled: true } } } } }
         });
         const renewalLog = await tx.renewalLog.update({
           where: { id: pending.renewalLog.id },
@@ -332,11 +332,11 @@ export class FinanceService {
       try {
         committed = await this.prisma.renewalLog.findUnique({ where: { id: pending.renewalLog.id } });
       } catch (verificationError) {
-        throw new BadGatewayException(`续费已同步到 3x-ui，但暂时无法确认本地事务结果，系统将自动恢复：${errorMessage(verificationError)}`);
+        throw new BadGatewayException(`续费已同步到远端面板，但暂时无法确认本地事务结果，系统将自动恢复：${errorMessage(verificationError)}`);
       }
       if (committed?.status === 'success') return this.completedRenewalResult(pending.renewalLog.id, pending.customerNode.id);
       if (!committed || committed.status !== 'pending') {
-        throw new BadGatewayException('续费已同步到 3x-ui，但本地续费记录状态异常，需要人工核对');
+        throw new BadGatewayException('续费已同步到远端面板，但本地续费记录状态异常，需要人工核对');
       }
 
       let rollbackError: unknown;
@@ -367,7 +367,7 @@ export class FinanceService {
 
       const rollbackEvidence = rollbackState || rollbackError || new Error('远端回滚结果无法确认');
       await this.markRenewalForReconciliation(pending, operator, localError, rollbackEvidence).catch(() => undefined);
-      throw new BadGatewayException(`续费已同步到 3x-ui，但本地保存后无法确认远端已回滚，需要人工核对：${diagnosticMessage(rollbackEvidence)}`);
+      throw new BadGatewayException(`续费已同步到远端面板，但本地保存后无法确认远端已回滚，需要人工核对：${diagnosticMessage(rollbackEvidence)}`);
     }
   }
 
@@ -451,7 +451,7 @@ export class FinanceService {
     const renewalLog = await this.prisma.renewalLog.findUnique({ where: { id } });
     const node = await this.prisma.customerNode.findUnique({
       where: { id: customerNodeId },
-      include: { serviceNode: { include: { server: true } } }
+      include: { serviceNode: { include: { server: { select: { id: true, name: true, baseUrl: true, provider: true, enabled: true } } } } }
     });
     if (!renewalLog || renewalLog.status !== 'success' || !node) throw new BadGatewayException('续费完成记录不完整');
     const balanceLog = renewalLog.balanceLogId

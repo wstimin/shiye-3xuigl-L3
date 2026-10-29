@@ -62,7 +62,7 @@ type ServiceNode = {
     remoteClientTrafficLimitGb?: number;
     remoteClientEnabled?: boolean;
   } | null;
-  server?: { name: string };
+  server?: { name: string; provider?: string };
   traffic?: {
     status: 'live' | 'error';
     usedBytes?: number;
@@ -74,16 +74,6 @@ type ServiceNode = {
 };
 type PageResult<T> = { items: T[]; page: number; pageSize: number; total: number };
 
-const customerAvatarPalettes = [
-  ['#4338ca', '#6366f1'],
-  ['#0369a1', '#0284c7'],
-  ['#047857', '#059669'],
-  ['#b45309', '#d97706'],
-  ['#be185d', '#db2777'],
-  ['#6d28d9', '#7c3aed'],
-  ['#b91c1c', '#dc2626'],
-  ['#0e7490', '#0891b2']
-] as const;
 
 const loading = ref(false);
 const savingCustomer = ref(false);
@@ -112,6 +102,7 @@ const editNodeDialogVisible = ref(false);
 const balanceDialogVisible = ref(false);
 const customerNodeDialogVisible = ref(false);
 const remoteClientDialogVisible = ref(false);
+const savedCustomerPassword = ref('');
 const customerForm = reactive({ name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active' as 'active' | 'disabled', remark: '' });
 const bindForm = reactive({ customerId: '', serviceNodeId: '', expireAt: defaultExpireAt(), trafficLimitGb: undefined as number | undefined });
 const nodeEditForm = reactive({ customerId: '', customerNodeId: '', serviceNodeId: '', expireAt: '', trafficLimitGb: undefined as number | undefined });
@@ -193,7 +184,7 @@ async function saveCustomer() {
   error.value = '';
   try {
     const body = editingCustomerId.value
-      ? { ...customerForm, balance: undefined, loginPassword: customerForm.loginPassword || undefined }
+      ? { ...customerForm, balance: undefined, loginPassword: customerForm.loginPassword !== savedCustomerPassword.value ? customerForm.loginPassword || undefined : undefined }
       : { ...customerForm, loginPassword: customerForm.loginPassword || undefined };
     const path = editingCustomerId.value ? `/api/admin/customers/${editingCustomerId.value}` : '/api/admin/customers';
     await api(path, { method: editingCustomerId.value ? 'PATCH' : 'POST', body });
@@ -357,7 +348,7 @@ async function showNodeTraffic(customer: Customer, node: CustomerNode) {
       `剩余流量：${remainingTrafficText(result)}`,
       `到期时间：${formatRemoteExpiry(traffic.expiryTime)}`,
       `最近在线：${formatRemoteLastOnline(traffic.lastOnline)}`
-    ].join('\n'), '3x-ui 客户端流量', { type: 'info', customClass: 'customer-dark-message-box' });
+    ].join('\n'), '3x-ui 客户端流量', { type: 'info', customClass: 'customer-message-box' });
   } catch (caught) {
     notifyError(caught, '读取失败');
   } finally {
@@ -408,13 +399,15 @@ function canManageRemoteClient(node: CustomerNode) {
   return node.serviceNode?.ownership === 'managed';
 }
 
+function isSuiBinding(node: CustomerNode) { return serviceNodeForBinding(node)?.server?.provider === 'sui'; }
+
 async function resetNodeTraffic(node: CustomerNode) {
   const serviceNodeId = node.serviceNode?.id;
   if (!serviceNodeId || resettingTrafficIds.value.has(serviceNodeId)) return;
   await ElMessageBox.confirm(
-    `确认重置「${node.serviceNode?.name || node.xuiEmail}」共享官方客户端的流量？该操作会影响此路由节点下所有绑定用户。`,
+    `确认重置「${node.serviceNode?.name || node.xuiEmail}」共享官方客户端的流量？该操作会影响此服务入站下所有绑定用户。`,
     '重置共享客户端流量',
-    { type: 'warning', customClass: 'customer-dark-message-box' }
+    { type: 'warning', customClass: 'customer-message-box' }
   );
   resettingTrafficIds.value = new Set(resettingTrafficIds.value).add(serviceNodeId);
   try {
@@ -449,9 +442,9 @@ function openRemoteClientDialog(node: CustomerNode, mode: 'create' | 'edit') {
 async function saveRemoteClient() {
   if (updatingCustomerNode.value || !remoteClientForm.serviceNodeId) return;
   await ElMessageBox.confirm(
-    `确认${remoteClientForm.mode === 'create' ? '创建' : '修改'}该路由节点的共享官方客户端？操作会影响此节点下所有绑定用户。`,
+    `确认${remoteClientForm.mode === 'create' ? '创建' : '修改'}该服务入站的共享官方客户端？操作会影响此节点下所有绑定用户。`,
     remoteClientForm.mode === 'create' ? '创建共享客户端' : '修改共享客户端',
-    { type: 'warning', customClass: 'customer-dark-message-box' }
+    { type: 'warning', customClass: 'customer-message-box' }
   );
   updatingCustomerNode.value = true;
   try {
@@ -481,7 +474,7 @@ async function deleteRemoteClient(node: CustomerNode) {
   await ElMessageBox.confirm(
     `确认删除「${node.serviceNode?.name || node.xuiEmail}」的共享官方客户端？所有本地用户绑定都会保留，但在重新创建客户端前无法同步或获取连接。`,
     '删除共享官方客户端',
-    { type: 'warning', customClass: 'customer-dark-message-box', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+    { type: 'warning', customClass: 'customer-message-box', confirmButtonText: '确认删除', cancelButtonText: '取消' }
   );
   deletingRemoteClientIds.value = new Set(deletingRemoteClientIds.value).add(serviceNodeId);
   try {
@@ -498,7 +491,7 @@ async function deleteRemoteClient(node: CustomerNode) {
 }
 
 async function unbindNode(customer: Customer, node: CustomerNode) {
-  await ElMessageBox.confirm(`确认解绑「${node.serviceNode?.name || node.xuiEmail}」？解绑只移除本地关系，不删除远端客户端。`, '解绑确认', { type: 'warning', customClass: 'customer-dark-message-box' });
+  await ElMessageBox.confirm(`确认解绑「${node.serviceNode?.name || node.xuiEmail}」？解绑只移除本地关系，不删除远端客户端。`, '解绑确认', { type: 'warning', customClass: 'customer-message-box' });
   await api(`/api/admin/customers/${customer.id}/nodes/${node.id}`, { method: 'DELETE' });
   ElMessage.success('节点已解绑');
   await loadCustomers();
@@ -514,7 +507,7 @@ async function deleteBoundServiceNode(customer: Customer, node: CustomerNode) {
   const message = managed
     ? `确认删除服务节点「${node.serviceNode.name}」？该节点由本系统托管，将删除本地全部绑定、远端入站及其中全部客户端。`
     : `确认删除本地服务节点「${node.serviceNode.name}」？该节点是官方面板引用资源，只删除本地节点和绑定，不修改远端入站或客户端。`;
-  await ElMessageBox.confirm(message, '删除服务节点', { type: 'warning', customClass: 'customer-dark-message-box' });
+  await ElMessageBox.confirm(message, '删除服务节点', { type: 'warning', customClass: 'customer-message-box' });
   deletingServiceNodeIds.value = new Set(deletingServiceNodeIds.value).add(node.id);
   error.value = '';
   try {
@@ -532,16 +525,14 @@ async function deleteBoundServiceNode(customer: Customer, node: CustomerNode) {
 
 async function revealEditingCustomerPassword() {
   if (!editingCustomerId.value) return;
+  const requestedId = editingCustomerId.value;
   readingPasswordIds.value = new Set(readingPasswordIds.value).add(editingCustomerId.value);
   error.value = '';
   try {
     const result = await api<{ loginPassword: string }>(`/api/admin/customers/${editingCustomerId.value}/secrets`);
-    if (!result.loginPassword) {
-      await ElMessageBox.alert('该用户没有可读取的已保存密码。历史用户如果只保存了哈希，需要管理员重置密码，或用户下次自行修改密码后才可读取。', '读取密码', { type: 'warning', customClass: 'customer-dark-message-box' });
-      return;
-    }
-    customerForm.loginPassword = result.loginPassword;
-    ElMessage.success('已读取到登录密码输入框');
+    if (editingCustomerId.value !== requestedId) return;
+    customerForm.loginPassword = result.loginPassword || '';
+    savedCustomerPassword.value = result.loginPassword;
   } catch (caught) {
     notifyError(caught, '读取失败');
   } finally {
@@ -586,7 +577,8 @@ function editCustomerNode(customer: Customer, node: CustomerNode) {
   editNodeDialogVisible.value = true;
 }
 
-function editCustomer(customer: Customer) {
+async function editCustomer(customer: Customer) {
+  savedCustomerPassword.value = '';
   editingCustomerId.value = customer.id;
   Object.assign(customerForm, {
     name: customer.name,
@@ -598,15 +590,17 @@ function editCustomer(customer: Customer) {
     status: customer.status,
     remark: customer.remark || ''
   });
+  await revealEditingCustomerPassword();
+  if (editingCustomerId.value !== customer.id) return;
   customerDialogVisible.value = true;
 }
 
 async function removeCustomer(customer: Customer) {
   if (deletingCustomerIds.value.has(customer.id)) return;
   try {
-    await ElMessageBox.confirm(`确认删除用户「${customer.name}」？系统只会删除面板用户和本地绑定，不会删除路由节点或远端 3x-ui 入站/客户端。`, '删除确认', {
+    await ElMessageBox.confirm(`确认删除用户「${customer.name}」？系统只会删除面板用户和本地绑定，不会删除服务入站或远端 3x-ui 入站/客户端。`, '删除确认', {
       type: 'warning',
-      customClass: 'customer-dark-message-box',
+      customClass: 'customer-message-box',
       confirmButtonText: '确认删除',
       cancelButtonText: '取消'
     });
@@ -659,6 +653,7 @@ async function toggleCustomerStatus(customer: Customer, enabled: boolean | strin
 }
 
 function resetCustomerForm() {
+  savedCustomerPassword.value = '';
   editingCustomerId.value = '';
   Object.assign(customerForm, { name: '', loginUsername: '', loginPassword: '', email: '', phone: '', balance: 0, status: 'active', remark: '' });
 }
@@ -757,19 +752,6 @@ function customerInitial(customer: Customer) {
   return Array.from(customer.name.trim() || customer.loginUsername.trim() || '用户')[0]?.toUpperCase() || '用';
 }
 
-function customerAvatarStyle(customer: Customer) {
-  const seed = customer.loginUsername.trim() || customer.id || customer.name.trim() || '用户';
-  let hash = 0;
-  for (const char of Array.from(seed)) {
-    hash = ((hash << 5) - hash + (char.codePointAt(0) || 0)) | 0;
-  }
-  const palette = customerAvatarPalettes[Math.abs(hash) % customerAvatarPalettes.length] || customerAvatarPalettes[0];
-  return {
-    '--customer-avatar-start': palette[0],
-    '--customer-avatar-end': palette[1]
-  };
-}
-
 function isExpiredNode(node: CustomerNode) {
   if (!node.expireAt) return false;
   return new Date(node.expireAt).getTime() <= Date.now();
@@ -822,7 +804,7 @@ onMounted(loadCustomers);
     <header class="customer-page-header">
       <div>
         <h1>用户管理</h1>
-        <p>管理面板登录用户、账户余额与 3x-ui 路由节点绑定。</p>
+        <p>管理面板登录用户、账户余额与 3x-ui / S-UI 服务入站绑定。</p>
       </div>
       <div class="customer-page-actions">
         <el-button class="customer-secondary-button" :loading="loading" @click="loadCustomers()"><RefreshCw :size="15" />刷新</el-button>
@@ -871,7 +853,7 @@ onMounted(loadCustomers);
       <article v-for="customer in customers" :key="customer.id" class="customer-user-card entity-runtime-card" :class="customer.status === 'active' ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="customer-card-header">
           <div class="customer-card-identity">
-            <span class="customer-card-avatar" :style="customerAvatarStyle(customer)">{{ customerInitial(customer) }}</span>
+            <span class="customer-card-avatar">{{ customerInitial(customer) }}</span>
             <div>
               <strong>{{ customer.name }}</strong>
               <span>@{{ customer.loginUsername }}</span>
@@ -948,7 +930,7 @@ onMounted(loadCustomers);
 
   <el-dialog
     v-model="customerNodeDialogVisible"
-    class="customer-dark-dialog customer-node-dialog"
+    class="customer-dialog customer-node-dialog"
     :title="selectedCustomerForNodes ? `${selectedCustomerForNodes.name} 的绑定节点` : '绑定节点'"
     width="960px"
     destroy-on-close
@@ -998,7 +980,8 @@ onMounted(loadCustomers);
               <el-button v-if="canManageRemoteClient(node) && serviceNodeHasRemoteClient(node)" size="small" class="customer-node-secondary-button" @click="openRemoteClientDialog(node, 'edit')"><Edit3 :size="15" />设置</el-button>
               <el-button v-if="canManageRemoteClient(node) && !serviceNodeHasRemoteClient(node)" size="small" class="customer-node-secondary-button" @click="openRemoteClientDialog(node, 'create')"><Plus :size="15" />创建/恢复</el-button>
               <el-button v-if="canManageRemoteClient(node)" size="small" class="customer-node-secondary-button" :loading="resettingTrafficIds.has(node.serviceNode?.id || '')" :disabled="!serviceNodeHasRemoteClient(node)" @click="resetNodeTraffic(node)"><RotateCcw :size="15" />重置</el-button>
-              <el-button v-if="canManageRemoteClient(node)" size="small" type="danger" plain :loading="deletingRemoteClientIds.has(node.serviceNode?.id || '')" :disabled="!serviceNodeHasRemoteClient(node)" @click="deleteRemoteClient(node)"><Trash2 :size="15" />删除</el-button>
+              <router-link v-if="isSuiBinding(node)" class="hub-link" to="/sui-servers">S-UI 工作区</router-link>
+              <el-button v-else-if="canManageRemoteClient(node)" size="small" type="danger" plain :loading="deletingRemoteClientIds.has(node.serviceNode?.id || '')" :disabled="!serviceNodeHasRemoteClient(node)" @click="deleteRemoteClient(node)"><Trash2 :size="15" />删除</el-button>
             </div>
             <div class="node-action-group manage-action">
               <span class="action-group-label">本地绑定</span>
@@ -1019,8 +1002,8 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="remoteClientDialogVisible" class="customer-dark-dialog" :title="remoteClientForm.mode === 'create' ? '创建共享官方客户端' : '设置共享官方客户端'" width="680px" destroy-on-close>
-    <div class="customer-dialog-intro"><ServerOff :size="18" /><div><strong>{{ remoteClientForm.mode === 'create' ? '在官方 3x-ui 入站中创建客户端' : '更新官方 3x-ui 客户端设置' }}</strong><span>该客户端归路由节点所有，名称、到期、额度和启停会影响此节点下所有绑定用户。</span></div></div>
+  <el-dialog v-model="remoteClientDialogVisible" class="customer-dialog" :title="remoteClientForm.mode === 'create' ? '创建共享官方客户端' : '设置共享官方客户端'" width="680px" destroy-on-close>
+    <div class="customer-dialog-intro"><ServerOff :size="18" /><div><strong>{{ remoteClientForm.mode === 'create' ? '在官方入站中创建客户端' : '更新官方客户端设置' }}</strong><span>该客户端归服务入站所有，名称、到期、额度和启停会影响此节点下所有绑定用户。</span></div></div>
     <el-form :model="remoteClientForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="客户端标识" class="form-item-full"><el-input v-model="remoteClientForm.email" maxlength="160" placeholder="例如：hk-premium，可在官方面板中识别" /></el-form-item>
       <el-form-item label="显示名称" class="form-item-full"><el-input v-model="remoteClientForm.clientName" maxlength="120" placeholder="例如：香港高级线路" /></el-form-item>
@@ -1036,14 +1019,14 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="customerDialogVisible" class="customer-dark-dialog" :title="editingCustomerId ? '编辑用户' : '新增用户'" width="720px" destroy-on-close>
+  <el-dialog v-model="customerDialogVisible" class="customer-dialog" :title="editingCustomerId ? '编辑用户' : '新增用户'" width="720px" destroy-on-close>
     <div class="customer-dialog-intro"><UserRound :size="18" /><div><strong>{{ editingCustomerId ? '编辑账户资料' : '创建面板用户' }}</strong><span>填写真实登录资料、联系方式、余额和账户状态。</span></div></div>
     <el-form :model="customerForm" label-width="82px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="名称"><el-input v-model="customerForm.name" /></el-form-item>
       <el-form-item label="登录账号"><el-input v-model="customerForm.loginUsername" /></el-form-item>
       <el-form-item label="登录密码">
         <div class="password-field-stack">
-          <el-input v-model="customerForm.loginPassword" type="password" show-password :placeholder="editingCustomerId ? '留空不修改' : '可留空自动生成'" />
+          <el-input v-model="customerForm.loginPassword" type="text" :placeholder="editingCustomerId ? '留空不修改' : '可留空自动生成'" />
           <el-button v-if="editingCustomerId" size="small" :loading="readingPasswordIds.has(editingCustomerId)" @click="revealEditingCustomerPassword"><KeyRound :size="15" />读取已保存密码</el-button>
         </div>
       </el-form-item>
@@ -1059,8 +1042,8 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="bindDialogVisible" class="customer-dark-dialog" title="绑定路由节点" width="680px" destroy-on-close>
-    <div class="customer-dialog-intro"><Link2 :size="18" /><div><strong>选择用户和路由节点即可完成绑定</strong><span>这里只建立本地用户授权，直接使用路由节点已有的官方客户端，不会创建或修改官方账号。</span></div></div>
+  <el-dialog v-model="bindDialogVisible" class="customer-dialog" title="绑定服务入站" width="680px" destroy-on-close>
+    <div class="customer-dialog-intro"><Link2 :size="18" /><div><strong>选择用户和服务入站即可完成绑定</strong><span>这里只建立本地用户授权，直接使用服务入站已有的官方客户端，同步到期与启用授权，不会创建新的远端账号。</span></div></div>
     <el-form :model="bindForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="用户">
         <el-select v-model="bindForm.customerId" placeholder="选择用户" style="width: 100%">
@@ -1091,7 +1074,7 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="editNodeDialogVisible" class="customer-dark-dialog" title="编辑绑定节点" width="760px" destroy-on-close>
+  <el-dialog v-model="editNodeDialogVisible" class="customer-dialog" title="编辑绑定节点" width="760px" destroy-on-close>
     <div class="customer-dialog-intro"><Edit3 :size="18" /><div><strong>更新绑定资料</strong><span>这里只更新本地授权；切换服务节点时会读取目标节点已有客户端，不创建或修改官方账号。</span></div></div>
     <el-form :model="nodeEditForm" label-width="104px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="服务节点">
@@ -1117,7 +1100,7 @@ onMounted(loadCustomers);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="balanceDialogVisible" class="customer-dark-dialog" title="调整余额" width="680px" destroy-on-close>
+  <el-dialog v-model="balanceDialogVisible" class="customer-dialog" title="调整余额" width="680px" destroy-on-close>
     <div class="customer-dialog-intro"><Wallet :size="18" /><div><strong>账户余额变更</strong><span>支持增加、扣减或直接设置余额，变更会记录到财务流水。</span></div></div>
     <el-form :model="balanceForm" label-width="82px" class="dialog-form-grid customer-dialog-form">
       <el-form-item label="用户">

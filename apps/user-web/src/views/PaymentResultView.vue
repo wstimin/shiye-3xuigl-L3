@@ -51,12 +51,12 @@ onMounted(loadResult);
 
 <template>
   <div class="user-page payment-result-page">
-    <div class="user-page-header">
-      <div><span class="user-page-kicker">PAYMENT STATUS</span><h2>支付结果</h2><p>查询并展示当前充值订单的真实处理状态。</p></div>
-      <button class="user-action-button secondary" type="button" :disabled="loading" @click="loadResult"><RefreshCw :size="16" />重新查询</button>
-    </div>
+    <header class="page-heading">
+      <div><span class="eyebrow">PAYMENT STATUS</span><h1>支付结果<span class="heading-dot">.</span></h1><p>查询并展示当前充值订单的真实处理状态。</p></div>
+      <button class="button secondary" type="button" :disabled="loading" @click="loadResult"><RefreshCw :size="16" />重新查询</button>
+    </header>
     <div v-if="error" class="user-feedback error">{{ error }}</div>
-    <section v-else class="user-section-card result-panel" :class="[{ loading }, statusClass]">
+    <section v-else class="surface result-panel" :class="[{ loading }, statusClass]">
       <div class="payment-status-icon"><component :is="statusIcon" :size="31" /></div>
       <span class="payment-status-kicker">{{ result?.status || 'loading' }}</span>
       <h3>{{ statusText(result?.status) }}</h3>
@@ -68,8 +68,8 @@ onMounted(loadResult);
         <div><span>到账时间</span><strong>{{ result?.paidAt ? new Date(result.paidAt).toLocaleString('zh-CN', { hour12: false }) : '-' }}</strong></div>
       </div>
       <div class="payment-result-actions">
-        <RouterLink to="/finance" class="user-action-button secondary"><ArrowLeft :size="16" />返回账户财务</RouterLink>
-        <a v-if="result?.status === 'pending' && result.payUrl" class="user-action-button primary" :href="result.payUrl"><CreditCard :size="16" />继续支付</a>
+        <RouterLink to="/finance" class="button secondary"><ArrowLeft :size="16" />返回账户财务</RouterLink>
+        <a v-if="result?.status === 'pending' && result.payUrl" class="button primary" :href="result.payUrl"><CreditCard :size="16" />继续支付</a>
       </div>
     <div v-if="result?.status === 'pending' && result.qrCode" class="qr-box">
       <img v-if="qrImage" :src="qrImage" alt="支付二维码" />

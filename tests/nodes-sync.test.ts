@@ -552,6 +552,7 @@ test('editing only the node name syncs the inbound without resyncing remote clie
   };
   let stored = { ...current };
   const prisma = {
+    xuiServer: { findUnique: async () => ({ provider: 'xui' }) },
     serviceNode: {
       findUnique: async () => stored,
       findFirst: async () => null,

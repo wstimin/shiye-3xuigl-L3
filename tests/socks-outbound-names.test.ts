@@ -27,6 +27,25 @@ function remoteClient(xraySetting: Record<string, unknown>, submitted: { value?:
   };
 }
 
+test('SOCKS shortcuts refuse an existing inbound route or occupied outbound tag without creating duplicates', async () => {
+  for (const conflict of ['route', 'tag']) {
+    const node = serviceNode({ socksRelayEnabled: true, socksNodeId: 'socks-1', remoteInboundTag: 'inbound-12' });
+    const prisma = {
+      serviceNode: { findUnique: async () => node },
+      socksNode: { findUnique: async () => ({ id: 'socks-1', name: '出口', host: '127.0.0.1', port: 1080, enabled: true }) }
+    };
+    const service = new XuiService(prisma as never, { decrypt: (value: string) => value } as never, testLocks()) as any;
+    const submitted: { value?: Record<string, unknown> } = {};
+    const setting = {
+      outbounds: conflict === 'tag' ? [{ tag: service.socksOutboundTag(node.id, '出口'), protocol: 'socks', settings: {} }] : [],
+      routing: { rules: conflict === 'route' ? [{ type: 'field', inboundTag: ['inbound-12'], outboundTag: 'existing-outbound' }] : [] }
+    };
+    service.createAuthenticatedClient = async () => remoteClient(setting, submitted);
+    await assert.rejects(() => service.syncServiceNodeRemoteConfig(node.id), /已有全流量路由|同名出站/);
+    assert.equal(submitted.value, undefined, 'conflicts must not write a second route or outbound');
+  }
+});
+
 test('SOCKS synchronization replaces the legacy tag with the readable outbound name', async () => {
   const legacyTag = 'shiye-socks-service-node-abc';
   const submitted: { value?: Record<string, unknown> } = {};

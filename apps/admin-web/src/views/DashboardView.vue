@@ -31,7 +31,7 @@ type Overview = {
   customers: { total: number; active: number };
   customerNodes: { total: number; active: number; disabled: number; expiredActive: number };
   serviceNodes: { total: number; enabled: number; expiredActive: number };
-  servers: { total: number; enabled: number };
+  servers: { total: number; enabled: number; xui: number; sui: number };
   socksNodes: { total: number; enabled: number };
   cards: { total: number; unused: number; used: number; disabled: number };
   payments: {
@@ -116,7 +116,7 @@ const operationalLabel = computed(() => {
   if (!operationalRates.value.length) return '待配置';
   if (operationalTone.value === 'bad') return '需要处理';
   if (operationalTone.value === 'warn') return '运行关注';
-  return '运行良好';
+  return '配置正常';
 });
 const operationalDescription = computed(() => {
   if (error.value) return '概览数据读取失败，请刷新后再次检查业务状态。';
@@ -124,7 +124,7 @@ const operationalDescription = computed(() => {
   const issues: string[] = [];
   if (expiredCustomerNodes.value) issues.push(`${expiredCustomerNodes.value} 个过期节点待停用`);
   if (enabledJobCount.value < 2) issues.push(`${2 - enabledJobCount.value} 项自动任务未启用`);
-  return issues.length ? `已配置资源综合启用率 ${operationalScore.value}%，${issues.join('，')}。` : `已配置资源综合启用率 ${operationalScore.value}%，节点、面板、出站与支付服务状态稳定。`;
+  return issues.length ? `已配置资源综合启用率 ${operationalScore.value}%，${issues.join('，')}。` : `已配置资源综合启用率 ${operationalScore.value}%，连通性请在对应面板页测试。`;
 });
 
 async function loadDashboard() {
@@ -223,7 +223,7 @@ async function disableExpiredNodes() {
   await ElMessageBox.confirm(
     '系统会把已到期且仍处于启用状态的用户节点同步停用到远端 3x-ui，远端同步成功后再更新本地状态。确认执行？',
     '停用过期节点',
-    { type: 'warning', customClass: 'operations-dark-message-box' }
+    { type: 'warning', customClass: 'operations-message-box' }
   );
   try {
     await runDisableExpiredNodes();
@@ -288,7 +288,7 @@ onMounted(loadDashboard);
     <section class="dashboard-welcome">
       <div>
         <h1>数据概览</h1>
-        <p>集中查看账户、节点、支付、卡密与远端同步的实时运行状态</p>
+        <p>集中查看双面板资源、用户服务与业务动态</p>
       </div>
       <div class="dashboard-welcome-meta">
         <div>
@@ -303,6 +303,11 @@ onMounted(loadDashboard);
     </section>
 
     <el-alert v-if="error" class="dashboard-alert" :title="error" type="error" show-icon :closable="false" />
+
+    <section class="engine-grid" aria-label="面板工作区">
+      <router-link to="/xui-servers" class="engine-card"><span class="engine-icon">X</span><div><strong>3x-ui <small>Xray Core</small></strong><p>{{ overview?.servers.xui ?? 0 }} 个面板 · 节点、用户与续费管理</p></div><span class="engine-arrow">↗</span></router-link>
+      <router-link to="/sui-servers" class="engine-card"><span class="engine-icon sing">S</span><div><strong>S-UI <small>sing-box</small></strong><p>{{ overview?.servers.sui ?? 0 }} 个面板 · 客户端、网络与核心控制</p></div><span class="engine-arrow">↗</span></router-link>
+    </section>
 
     <section class="dashboard-command-center" :class="`is-${operationalTone}`" aria-label="业务运行态势">
       <div class="dashboard-command-score">
@@ -341,7 +346,6 @@ onMounted(loadDashboard);
           <i><b :style="{ width: `${paymentChannelRate}%` }"></b></i>
         </div>
       </div>
-      <Activity class="dashboard-command-mark" :size="116" aria-hidden="true" />
     </section>
 
     <section class="dashboard-stat-grid" aria-label="核心业务统计">
@@ -360,7 +364,7 @@ onMounted(loadDashboard);
       <article class="dashboard-stat-card green">
         <div class="dashboard-stat-head"><span>网络资源</span><i><Router :size="18" /></i></div>
         <strong>{{ networkTotal }}</strong>
-        <p>路由启用 {{ enabledServiceNodes }} / 面板在线 {{ enabledServers }}/{{ serverTotal }}</p>
+        <p>路由启用 {{ enabledServiceNodes }} / 连接启用 {{ enabledServers }}/{{ serverTotal }}</p>
         <div class="dashboard-stat-bar"><i :style="{ width: `${networkRate}%` }"></i></div>
       </article>
       <article class="dashboard-stat-card orange">

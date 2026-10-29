@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ServicePricingDialog from '../components/ServicePricingDialog.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
@@ -37,10 +38,11 @@ import {
 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
-import { entityAvatarStyle, entityInitial } from '../entity-avatar';
+import { entityInitial } from '../entity-avatar';
 import { notifyError } from '../notify';
 
-type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
+const suiEditing = ref<ServiceNode | null>(null);
+type XuiServer = { provider?: string; id: string; name: string; baseUrl: string; enabled: boolean };
 type SyncTask = { id: string; action: string; status: string; message?: string | null; attemptCount: number; updatedAt: string };
 type OperationResult = { state?: 'success' | 'partial' | 'failed'; message?: string; pendingActions?: string[] };
 type RealityDetection = { target: string; serverName: string; source: 'scan' | 'configured' | 'preset' };
@@ -193,7 +195,7 @@ const inboundReadyNodeCount = computed(() => nodes.value.filter((item) => item.i
 const availableRegions = computed(() => regionDefinitions.filter((region) => nodes.value.some((node) => nodeRegion(node)?.value === region.value)));
 const availableProtocols = computed(() => {
   const values = new Set(nodes.value.map((node) => node.protocol));
-  return protocolOptions.filter((item) => values.has(item.value));
+  return [...values].map(value => ({ value, label: protocolLabel(value) }));
 });
 const filteredNodes = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase();
@@ -236,7 +238,7 @@ async function loadNodes() {
   error.value = '';
   try {
     const [serverList, nodeList, socksList] = await Promise.all([
-      api<XuiServer[]>('/api/admin/xui-servers'),
+      api<XuiServer[]>('/api/admin/panel-servers'),
       api<ServiceNode[]>('/api/admin/service-nodes'),
       api<SocksNode[]>('/api/admin/socks-nodes')
     ]);
@@ -275,7 +277,7 @@ async function saveNode() {
       : form;
     const result = await api<OperationResult>(path, { method: editingId.value ? 'PATCH' : 'POST', body });
     if (result.state === 'partial') ElMessage.warning(readableError(result.message, '保存成功，但部分同步失败'));
-    else ElMessage.success(editingId.value ? '路由节点已更新' : '路由节点已创建');
+    else ElMessage.success(editingId.value ? '服务入站已更新' : '服务入站已创建');
     dialogVisible.value = false;
     resetForm();
     await loadNodes();
@@ -287,12 +289,22 @@ async function saveNode() {
 }
 
 async function syncRemoteConfig(node: ServiceNode) {
+  if (node.server?.provider === 'sui') {
+    try {
+      const result = await api<{ synced: boolean; results: { error?: string }[] }>(`/api/admin/sui-servers/${node.serverId}/sync`, { method: 'POST' });
+      await loadNodes();
+      if (result.synced) ElMessage.success('业务状态已同步');
+      else notifyError(result.results.find(item => item.error)?.error || '部分业务入站未能同步');
+    }
+    catch (cause) { notifyError(cause, '同步失败'); }
+    return;
+  }
   if (syncingConfigIds.value.has(node.id)) return;
   try {
     await ElMessageBox.confirm(
       `确认把「${node.name}」的出站中转配置写入远端 Xray？系统只会管理本项目标记的出站和路由。`,
       '同步出站配置',
-      { type: 'warning', customClass: 'node-dark-message-box' }
+      { type: 'warning', customClass: 'node-message-box' }
     );
   } catch {
     return;
@@ -329,9 +341,9 @@ async function syncTrafficLimit(node: ServiceNode) {
 async function resetRemoteTraffic(node: ServiceNode) {
   try {
     await ElMessageBox.confirm(
-      `确认重置「${node.name}」共享官方客户端的流量？该操作会影响此路由节点下所有绑定用户。`,
+      `确认重置「${node.name}」共享官方客户端的流量？该操作会影响此服务入站下所有绑定用户。`,
       '重置共享客户端流量',
-      { type: 'warning', customClass: 'node-dark-message-box' }
+      { type: 'warning', customClass: 'node-message-box' }
     );
   } catch {
     return;
@@ -385,6 +397,7 @@ function openDialog() {
 }
 
 function editNode(node: ServiceNode) {
+  if (node.server?.provider === 'sui') { suiEditing.value = node; return; }
   const config = node.config || {};
   editingId.value = node.id;
   Object.assign(form, {
@@ -421,13 +434,13 @@ function editNode(node: ServiceNode) {
 async function removeNode(node: ServiceNode) {
   if (deletingIds.value.has(node.id)) return;
   try {
-    const message = node.ownership === 'managed'
-      ? `确认删除路由节点「${node.name}」？该节点由本系统托管，将清理关联出站路由并删除远端入站及全部客户端。`
-      : `确认删除本地路由节点「${node.name}」？该节点是官方面板引用资源，只删除本地记录，不修改远端入站和客户端。`;
+    const message = node.server?.provider === 'sui' ? `移除「${node.name}」的业务接入？须先解绑用户，远端入站与客户端将保留。` : node.ownership === 'managed'
+      ? `确认删除服务入站「${node.name}」？该节点由本系统托管，将清理关联出站路由并删除远端入站及全部客户端。`
+      : `确认删除本地服务入站「${node.name}」？该节点是官方面板引用资源，只删除本地记录，不修改远端入站和客户端。`;
     await ElMessageBox.confirm(
       message,
-      '删除路由节点',
-      { type: 'warning', customClass: 'node-dark-message-box' }
+      '删除服务入站',
+      { type: 'warning', customClass: 'node-message-box' }
     );
   } catch {
     return;
@@ -436,7 +449,7 @@ async function removeNode(node: ServiceNode) {
   error.value = '';
   try {
     await api(`/api/admin/service-nodes/${node.id}`, { method: 'DELETE' });
-    ElMessage.success('路由节点已删除');
+    ElMessage.success('服务入站已删除');
     await loadNodes();
   } catch (caught) {
     notifyError(caught, '删除失败');
@@ -454,7 +467,7 @@ async function toggleNodeEnabled(node: ServiceNode, enabled = !node.enabled) {
   try {
     const result = await api<OperationResult>(`/api/admin/service-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
     if (result.state === 'partial') ElMessage.warning('保存成功，同步失败');
-    else ElMessage.success(enabled ? '路由节点已启用' : '路由节点已停用');
+    else ElMessage.success(enabled ? '服务入站已启用' : '服务入站已停用');
     await loadNodes();
   } catch (caught) {
     node.enabled = previous;
@@ -556,7 +569,7 @@ function socksLabel(id?: string | null) {
 }
 
 function remoteModeLabel(node: ServiceNode) {
-  return node.config?.remoteManaged ? '自动创建' : '绑定已有';
+  return node.config?.remoteMode === 'bind' ? '绑定已有' : '自动创建';
 }
 
 function ownershipLabel(ownership: ServiceNode['ownership']) {
@@ -692,11 +705,12 @@ watch(() => form.transport, () => {
   <section class="node-management-page" :class="{ loading }">
     <header class="node-page-header">
       <div>
-        <h1>路由节点</h1>
-        <p>管理服务节点、远端 3x-ui 入站、传输安全和 SOCKS 出站中转配置。</p>
+        <h1>服务入站</h1>
+        <p>统一管理 3x-ui 与 S-UI 服务入站、月费和额度，在用户管理中分配并续费。</p>
       </div>
       <div class="node-page-actions">
         <el-button class="node-secondary-button" :loading="loading" @click="loadNodes"><RefreshCw :size="15" />刷新</el-button>
+        <router-link class="hub-button" to="/sui-servers">接入 S-UI 服务</router-link>
         <el-button type="primary" @click="openDialog"><Plus :size="15" />创建节点</el-button>
       </div>
     </header>
@@ -706,7 +720,7 @@ watch(() => form.transport, () => {
     <div class="node-stat-grid">
       <article class="node-stat-card">
         <span class="node-stat-icon tone-indigo"><Router :size="18" /></span>
-        <div><small>节点总数</small><strong>{{ nodes.length }}</strong><span>全部路由节点</span></div>
+        <div><small>节点总数</small><strong>{{ nodes.length }}</strong><span>全部服务入站</span></div>
       </article>
       <article class="node-stat-card">
         <span class="node-stat-icon tone-emerald"><CheckCircle2 :size="18" /></span>
@@ -747,10 +761,10 @@ watch(() => form.transport, () => {
       <article v-for="node in filteredNodes" :key="node.id" class="route-node-card entity-runtime-card" :class="node.syncTasks?.length ? 'runtime-state-error' : node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="route-node-card-header">
           <div class="route-node-identity">
-            <span class="route-node-icon entity-name-avatar" :style="entityAvatarStyle(node.name, node.id)">{{ entityInitial(node.name, '节') }}</span>
+            <span class="route-node-icon entity-name-avatar">{{ entityInitial(node.name, '节') }}</span>
             <div>
               <strong :title="node.name">{{ node.name }}</strong>
-              <span>{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }} · {{ node.config?.encryption || 'none' }}</span>
+              <span>{{ protocolLabel(node.protocol) }} · {{ node.server?.provider === 'sui' ? 'sing-box' : transportLabel(node.config?.transport) + ' · ' + (node.config?.encryption || 'none') }}</span>
             </div>
           </div>
           <span class="node-status-chip" :class="node.syncTasks?.length ? 'is-pending' : node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.syncTasks?.length ? '待同步' : node.enabled ? '已启用' : '已停用' }}</span>
@@ -772,8 +786,8 @@ watch(() => form.transport, () => {
         <div class="runtime-summary-line route-node-summary">
           <div class="route-node-tags">
             <span v-if="nodeRegion(node)" class="route-node-tag region">{{ nodeRegion(node)?.label }}</span>
-            <span class="route-node-tag transport">{{ transportLabel(node.config?.transport) }}</span>
-            <span class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
+            <span class="route-node-tag transport">{{ node.server?.provider === 'sui' ? 'S-UI' : transportLabel(node.config?.transport) }}</span>
+            <span v-if="node.server?.provider !== 'sui'" class="route-node-tag security">{{ node.config?.encryption || 'none' }}</span>
             <span v-if="node.config?.remoteInboundPort" class="route-node-tag">端口 {{ node.config.remoteInboundPort }}</span>
             <span class="route-node-tag" :class="node.ownership === 'managed' ? 'relay' : 'security'">{{ ownershipLabel(node.ownership) }}</span>
             <span v-if="node.config?.socksRelayEnabled" class="route-node-tag relay" :title="socksLabel(node.config.socksNodeId)">SOCKS 中转</span>
@@ -783,7 +797,7 @@ watch(() => form.transport, () => {
         </div>
 
         <footer class="route-node-actions runtime-card-footer">
-          <span class="runtime-footer-label"><RadioTower :size="13" />{{ protocolLabel(node.protocol) }} · {{ transportLabel(node.config?.transport) }}</span>
+          <span class="runtime-footer-label"><RadioTower :size="13" />{{ protocolLabel(node.protocol) }} · {{ node.server?.provider === 'sui' ? 'sing-box' : transportLabel(node.config?.transport) }}</span>
           <div class="runtime-action-group">
           <el-tooltip v-if="node.syncTasks?.length" content="重试待同步任务" placement="top">
             <el-button class="runtime-icon-button runtime-retry-button" :loading="retryingIds.has(node.id)" aria-label="重试待同步任务" @click="retryNodeTasks(node)"><RefreshCw :size="15" /></el-button>
@@ -791,12 +805,12 @@ watch(() => form.transport, () => {
           <el-tooltip content="编辑节点" placement="top">
             <el-button class="runtime-icon-button" aria-label="编辑节点" @click="editNode(node)"><Edit3 :size="15" /></el-button>
           </el-tooltip>
-          <el-tooltip content="同步出站" placement="top">
+          <el-tooltip :content="node.server?.provider === 'sui' ? '同步业务状态' : '同步出站'" placement="top">
           <el-button
             class="node-sync-button runtime-icon-button"
             :loading="syncingConfigIds.has(node.id)"
             :disabled="!node.inboundId || node.ownership !== 'managed'"
-            aria-label="同步出站"
+            :aria-label="node.server?.provider === 'sui' ? '同步业务状态' : '同步出站'"
             @click="syncRemoteConfig(node)"
           ><UploadCloud :size="15" /></el-button>
           </el-tooltip>
@@ -825,19 +839,20 @@ watch(() => form.transport, () => {
 
       <div v-if="!filteredNodes.length && !loading" class="node-empty-state">
         <CloudCog :size="28" />
-        <strong>{{ nodes.length ? '没有符合筛选条件的节点' : '暂无路由节点' }}</strong>
+        <strong>{{ nodes.length ? '没有符合筛选条件的节点' : '暂无服务入站' }}</strong>
         <span>{{ nodes.length ? '调整筛选条件后再查看' : '使用右上角创建节点接入真实面板连接' }}</span>
       </div>
     </div>
 
     <footer class="node-list-footer">显示 {{ filteredNodes.length }} / {{ nodes.length }} 个真实节点</footer>
   </section>
+  <ServicePricingDialog v-if="suiEditing" :node="suiEditing" @close="suiEditing = null" @saved="loadNodes" />
 
   <el-dialog
     v-model="dialogVisible"
-    :title="editingId ? '编辑路由节点' : '创建路由节点'"
+    :title="editingId ? '编辑服务入站' : '创建服务入站'"
     width="min(920px, 94vw)"
-    class="node-dark-dialog"
+    class="node-dialog"
     destroy-on-close
   >
     <div class="node-dialog-intro">
@@ -855,7 +870,7 @@ watch(() => form.transport, () => {
           <el-form-item label="节点名称"><el-input v-model="form.name" maxlength="100" placeholder="输入节点名称" /></el-form-item>
           <el-form-item label="面板连接">
             <el-select v-model="form.serverId" placeholder="选择面板连接" style="width: 100%" @change="handleServerChange">
-              <el-option v-for="server in servers" :key="server.id" :label="server.name" :value="server.id" />
+              <el-option v-for="server in servers.filter(item => item.provider !== 'sui')" :key="server.id" :label="server.name" :value="server.id" />
             </el-select>
           </el-form-item>
           <el-form-item label="启用节点" class="node-switch-item"><el-switch v-model="form.enabled" /></el-form-item>

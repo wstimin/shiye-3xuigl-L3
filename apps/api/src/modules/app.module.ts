@@ -16,6 +16,7 @@ import { SecurityModule } from './security/security.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { SetupModule } from './setup/setup.module.js';
 import { XuiModule } from './xui/xui.module.js';
+import { SuiModule } from './sui/sui.module.js';
 import { DatabaseLockModule } from '../shared/database-lock.module.js';
 
 @Module({
@@ -33,6 +34,7 @@ import { DatabaseLockModule } from '../shared/database-lock.module.js';
     DiagnosticsModule,
     NodesModule,
     XuiModule,
+    SuiModule,
     OverviewModule,
     CardsModule,
     FinanceModule,

@@ -132,7 +132,7 @@ async function refreshSettings() {
         type: 'warning',
         confirmButtonText: '继续刷新',
         cancelButtonText: '取消',
-        customClass: 'operations-dark-message-box'
+        customClass: 'operations-message-box'
       });
     } catch {
       return;
@@ -211,7 +211,7 @@ async function saveRuntime() {
           type: 'warning',
           confirmButtonText: '保存并跳转',
           cancelButtonText: '取消',
-          customClass: 'operations-dark-message-box'
+          customClass: 'operations-message-box'
         }
       );
     } catch {
@@ -420,7 +420,7 @@ onMounted(loadSettings);
         </nav>
         <div class="settings-navigation-footer">
           <ShieldCheck :size="16" />
-          <span>配置通过鉴权接口保存</span>
+          <span>仅管理员可修改设置</span>
         </div>
       </aside>
 
@@ -431,7 +431,7 @@ onMounted(loadSettings);
             <div><strong>{{ activeModule.title }}</strong><small>{{ activeModule.description }}</small></div>
           </div>
           <div class="settings-workspace-meta">
-            <span class="settings-api-badge"><b>{{ activeModule.method }}</b>{{ activeModule.endpoint }}</span>
+            <span class="settings-state-badge">{{ moduleStatus(activeModule.id).label }}</span>
             <span v-if="moduleChanged(activeModule.id)" class="settings-change-badge"><i></i>存在未保存修改</span>
           </div>
         </header>

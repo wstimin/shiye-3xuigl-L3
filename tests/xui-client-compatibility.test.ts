@@ -85,7 +85,7 @@ test('official 3.6 client and inbound operations use only the documented paths',
   assert.deepEqual(requests, [
     { path: '/panel/api/inbounds/9/resetTraffic', body: undefined },
     { path: '/panel/api/inbounds/setEnable/9', body: { enable: false } },
-    { path: '/panel/api/clients/add', body: { client: { email: 'user@example.com', uuid: 'v36-uuid' }, inboundIds: [9] } },
+    { path: '/panel/api/clients/add', body: { client: { email: 'user@example.com', uuid: 'v36-uuid', id: 'v36-uuid' }, inboundIds: [9] } },
     { path: '/panel/api/clients/user%40example.com/detach', body: { inboundIds: [9] } },
     { path: '/panel/api/clients/del/user%40example.com', body: undefined }
   ]);
@@ -469,13 +469,15 @@ test('3.6 client patches preserve unrelated writable fields and omit read-only f
     body: {
       email: 'new@example.com',
       uuid: 'new-uuid',
+      id: 'new-uuid',
       password: 'keep-password',
       auth: 'keep-auth',
       enable: false,
       totalGB: 1024,
       reverse: { tag: 'keep-reverse' },
       comment: 'keep-comment',
-      group_name: 'keep-group'
+      group_name: 'keep-group',
+      group: 'keep-group'
     }
   });
 });
@@ -654,6 +656,7 @@ test('node authorization uses the official full-row update endpoint without addi
   assert.deepEqual(updateRequest?.body, {
     email: 'shared@example.com',
     uuid: 'shared-uuid',
+    id: 'shared-uuid',
     password: 'keep-password',
     flow: 'xtls-rprx-vision',
     totalGB: 107374182400,

@@ -5,10 +5,21 @@ import { AuthGuard } from '../../shared/auth.guard.js';
 import { Roles } from '../../shared/roles.decorator.js';
 import { ZodValidationPipe } from '../../shared/zod-validation.pipe.js';
 import { XuiService } from './xui.service.js';
+import { nativeExecuteSchema } from './native-api.js';
 
 @Controller()
 export class XuiController {
   constructor(private readonly xui: XuiService) {}
+
+  @Get('admin/xui-servers/:id/native/catalog')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  nativeCatalog(@Param('id') id: string) { return this.xui.nativeCatalog(id); }
+
+  @Post('admin/xui-servers/:id/native/execute')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  nativeExecute(@Param('id') id: string, @Body(new ZodValidationPipe(nativeExecuteSchema)) body: z.infer<typeof nativeExecuteSchema>) { return this.xui.nativeExecute(id, body); }
 
   @Post('admin/xui/test')
   @UseGuards(AuthGuard)

@@ -12,6 +12,11 @@ import { NodesService } from './nodes.service.js';
 export class NodesController {
   constructor(private readonly nodes: NodesService) {}
 
+  @Get('admin/panel-servers')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  panelServers() { return this.nodes.listPanelServers(); }
+
   @Get('admin/xui-servers')
   @UseGuards(AuthGuard)
   @Roles('admin')

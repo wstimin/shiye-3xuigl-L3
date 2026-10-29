@@ -1,3 +1,5 @@
+export * from './sui.js';
+
 export type XuiAuth =
   | { kind: 'token'; token: string }
   | { kind: 'password'; username: string; password: string };
@@ -129,6 +131,36 @@ export class XuiClient {
     const response = await this.request('/login', { method: 'POST', headers: this.csrfHeaders(), body });
     await this.refreshCsrfToken(true);
     return response;
+  }
+
+  async nativeRequest(endpoint: string, options: XuiRequestOptions & { encoding?: string; file?: { field: string; name: string; type: string; base64: string } }) {
+    const headers = { ...this.authHeaders(), ...this.cookieHeaders(), ...this.csrfHeaders() };
+    let body: BodyInit | undefined;
+    if (options.encoding === 'multipart/form-data') {
+      const form = new FormData();
+      for (const [key, value] of Object.entries((options.body || {}) as Record<string, unknown>)) form.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+      if (options.file) {
+        const file = options.file;
+        form.append(file.field, new Blob([Uint8Array.from(atob(file.base64), char => char.charCodeAt(0))], { type: file.type }), file.name);
+      }
+      body = form;
+    } else if (options.body !== undefined) {
+      headers['content-type'] = options.encoding || 'application/json';
+      body = options.encoding === 'application/x-www-form-urlencoded' ? this.encodeForm(options.body as Record<string, unknown>) : JSON.stringify(options.body);
+    }
+    const response = await this.fetchWithTimeout(endpoint, { method: options.method, headers, body, redirect: 'error' });
+    this.rememberCookies(response.headers);
+    if (/attachment/i.test(response.headers.get('content-disposition') || '') || /octet-stream|application\/zip/.test(response.headers.get('content-type') || '')) {
+      if (!response.ok) throw new XuiClientError(`3x-ui 下载失败：HTTP ${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+      return { download: { base64: btoa(binary), name: response.headers.get('content-disposition')?.match(/filename="?([^";]+)/i)?.[1] || 'panel-backup.db', type: response.headers.get('content-type') || 'application/octet-stream' } };
+    }
+    const text = await response.text();
+    const payload = text ? this.parse(text) : null;
+    if (!response.ok) throw this.requestError(response.status, payload);
+    return payload;
   }
 
   listInbounds() {
@@ -442,7 +474,8 @@ export class XuiClient {
       'port',
       'protocol',
       'tag',
-      'nodeId'
+      'nodeId',
+      'subSortIndex', 'excludeFromSub', 'trafficResetDay', 'shareAddrStrategy', 'shareAddr', 'disableFlow'
     ]) {
       if (source[key] !== undefined && source[key] !== null) result[key] = source[key];
     }
@@ -491,9 +524,22 @@ export class XuiClient {
       'reset',
       'reverse',
       'comment',
-      'group_name'
+      'group_name',
+      'limitHwid', 'privateKey', 'publicKey', 'allowedIPs', 'allowedIPsByInbound', 'preSharedKey', 'keepAlive',
+      'forwardedPorts', 'secret', 'adTag', 'group', 'resetDay', 'resetWeekday', 'resetMax', 'trafficReset',
+      'trafficResetDay', 'clientHostRuleIds'
     ]) {
       if (merged[key] !== undefined && merged[key] !== null) payload[key] = merged[key];
+    }
+    // Current 3x-ui writes use protocol id; list/get return uuid and a numeric database id.
+    if (typeof merged.uuid === 'string' && merged.uuid) payload.id = merged.uuid;
+    if (payload.group === undefined && typeof merged.group_name === 'string') payload.group = merged.group_name;
+    if (payload.allowedIPs === '') payload.allowedIPs = [];
+    if (payload.reverse === '') delete payload.reverse;
+    for (const key of ['allowedIPs', 'reverse']) {
+      if (typeof payload[key] === 'string' && /^[\[{]/.test(payload[key] as string)) {
+        payload[key] = this.parse(payload[key] as string);
+      }
     }
     return payload;
   }

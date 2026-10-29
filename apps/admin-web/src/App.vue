@@ -17,15 +17,15 @@ const navSections = [
     label: '业务管理',
     items: [
       { to: '/customers', label: '用户管理', icon: Users },
-      { to: '/nodes', label: '路由节点', icon: Router }
+      { to: '/nodes', label: '服务入站', icon: Router }
     ]
   },
   {
     label: '网络配置',
     items: [
-      { to: '/xui-servers', label: '面板连接', icon: Network },
-      { to: '/socks-nodes', label: '出站节点', icon: ShieldCheck },
-      { to: '/network-config', label: '出站与路由', icon: GitBranch },
+      { to: '/xui-servers', label: '3x-ui 面板', icon: Network },
+      { to: '/sui-servers', label: 'S-UI 面板', icon: Router },
+      { to: '/network-config', label: '网络规则', icon: GitBranch },
       { to: '/sync-logs', label: '同步日志', icon: ClipboardList },
       { to: '/diagnostics', label: '健康诊断', icon: HeartPulse }
     ]
@@ -50,24 +50,7 @@ const branding = reactive<Branding>({ brandName: fallbackBrandName, logoDataUrl:
 const loginForm = reactive({ username: '', password: '' });
 const route = useRoute();
 let stopSessionExpired: (() => void) | undefined;
-const isDashboardRoute = computed(() => route.path === '/');
-const darkAdminRoutes = new Set(['/', '/customers', '/nodes', '/xui-servers', '/socks-nodes', '/network-config', '/sync-logs', '/diagnostics', '/finance', '/cards', '/payments', '/settings']);
-const isDarkAdminRoute = computed(() => darkAdminRoutes.has(route.path));
-const currentRouteLabel = computed(() => {
-  if (route.path === '/') return '数据概览';
-  if (route.path === '/customers') return '用户管理';
-  if (route.path === '/nodes') return '路由节点';
-  if (route.path === '/xui-servers') return '\u9762\u677f\u8fde\u63a5';
-  if (route.path === '/socks-nodes') return '\u51fa\u7ad9\u8282\u70b9';
-  if (route.path === '/network-config') return '\u51fa\u7ad9\u4e0e\u8def\u7531';
-  if (route.path === '/sync-logs') return '\u540c\u6b65\u65e5\u5fd7';
-  if (route.path === '/diagnostics') return '\u5065\u5eb7\u8bca\u65ad';
-  if (route.path === '/finance') return '\u8d22\u52a1\u8bb0\u5f55';
-  if (route.path === '/cards') return '\u5361\u5bc6\u7ba1\u7406';
-  if (route.path === '/payments') return '\u652f\u4ed8\u8bbe\u7f6e';
-  if (route.path === '/settings') return '\u7cfb\u7edf\u8bbe\u7f6e';
-  return '';
-});
+const currentRouteLabel = computed(() => route.path === '/xui-native' ? '3x-ui 面板管理' : navSections.flatMap(section => section.items).find(item => item.to === route.path)?.label || '');
 
 watch(() => route.path, () => {
   mobileNavOpen.value = false;
@@ -197,13 +180,13 @@ onUnmounted(() => {
         </div>
 
         <div class="intro-content">
-          <p class="intro-kicker">XUI MANAGEMENT CONSOLE</p>
-          <h1 id="admin-login-title">统一管理 XUI 节点与用户服务</h1>
+          <p class="intro-kicker">ONE WORKSPACE. EVERY CONNECTION.</p>
+          <h1 id="admin-login-title">连接每个节点，<br />掌握每一程。</h1>
           <p class="intro-description">集中维护面板连接、入站用户和节点配置，完成创建、删除、同步、流量状态检查与运行诊断。</p>
           <div class="login-feature-list">
             <div class="login-feature-item">
               <span class="feature-icon"><Network :size="18" /></span>
-              <div><strong>面板与节点</strong><span>维护 XUI 面板连接、路由节点与出站配置</span></div>
+              <div><strong>双引擎，一个工作区</strong><span>集中接入 3x-ui 与 S-UI，管理 Xray 与 sing-box</span></div>
             </div>
             <div class="login-feature-item">
               <span class="feature-icon"><Users :size="18" /></span>
@@ -261,7 +244,7 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <el-container v-else class="shell" :class="{ 'overview-shell': isDarkAdminRoute, 'mobile-nav-open': mobileNavOpen }">
+  <el-container v-else class="shell overview-shell" :class="{ 'mobile-nav-open': mobileNavOpen }">
     <button v-if="mobileNavOpen" class="mobile-nav-backdrop" type="button" aria-label="关闭导航" @click="mobileNavOpen = false"></button>
     <el-aside width="220px" class="sidebar" aria-label="管理后台导航">
       <div class="brand">
@@ -295,11 +278,10 @@ onUnmounted(() => {
       <el-header class="topbar">
         <div class="topbar-heading">
           <button class="mobile-nav-toggle" type="button" aria-label="打开导航" title="打开导航" @click="mobileNavOpen = true"><Menu :size="19" /></button>
-          <strong>管理后台</strong>
+          <strong>工作空间</strong>
           <span v-if="currentRouteLabel">/ <b>{{ currentRouteLabel }}</b></span>
         </div>
-        <div v-if="isDarkAdminRoute" class="topbar-user-badge"><i></i>{{ user.username }}</div>
-        <el-tag v-else size="small" type="success">{{ user.username }}</el-tag>
+        <div class="topbar-user-badge"><i></i>{{ user.username }} · 管理员</div>
       </el-header>
       <el-main class="route-stage">
         <div class="route-progress" :class="{ active: routeLoading }" aria-hidden="true"><span></span></div>

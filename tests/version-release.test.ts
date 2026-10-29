@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
 const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8')) as { version: string; packages: Record<string, { version?: string }> };
@@ -32,6 +33,13 @@ test('release workflow creates versioned releases without deleting older release
   assert.equal(workflow.includes('release_tag="v$(node -p'), true);
   assert.doesNotMatch(workflow, /gh release delete|delete-release/i);
   assert.match(workflow, /Release tag .* already points/);
+});
+
+test('release deployment checks allow future versions and new migrations support automatic updates', async () => {
+  assert.doesNotMatch(deployCheck, /packageMetadata\.version\s*!==\s*['"]\d+\.\d+\.\d+['"]/);
+  const { findUnsafePendingMigrations } = await import('../scripts/check-update-migrations.mjs');
+  const applied = readdirSync('prisma/migrations').filter(name => !name.startsWith('20261029'));
+  assert.deepEqual(findUnsafePendingMigrations('prisma/migrations', applied), []);
 });
 
 function escapeRegex(value: string) {

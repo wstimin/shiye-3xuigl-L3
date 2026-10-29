@@ -254,7 +254,7 @@ export class DiagnosticsService {
         key: 'xui-empty',
         label: '面板连接',
         status: 'skipped',
-        message: '没有启用中的 3-x-ui 面板连接',
+        message: '没有启用中的 3x-ui 或 S-UI 面板连接',
         meta: [{ label: '启用面板', value: '0 个' }],
         checkedAt: new Date(),
         durationMs: 0

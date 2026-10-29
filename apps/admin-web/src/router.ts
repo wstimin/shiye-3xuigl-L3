@@ -6,8 +6,9 @@ const viewLoaders: Record<string, () => Promise<{ default: Component }>> = {
   '/': () => import('./views/DashboardView.vue'),
   '/customers': () => import('./views/CustomersView.vue'),
   '/xui-servers': () => import('./views/XuiServersView.vue'),
+  '/xui-native': () => import('./views/XuiNativeView.vue'),
+  '/sui-servers': () => import('./views/SuiServersView.vue'),
   '/nodes': () => import('./views/NodesView.vue'),
-  '/socks-nodes': () => import('./views/SocksNodesView.vue'),
   '/network-config': () => import('./views/NetworkConfigView.vue'),
   '/sync-logs': () => import('./views/SyncLogsView.vue'),
   '/diagnostics': () => import('./views/DiagnosticsView.vue'),
@@ -22,7 +23,8 @@ export const routeLoadError = ref('');
 
 export const router = createRouter({
   history: createWebHistory(adminBasePath()),
-  routes: Object.entries(viewLoaders).map(([path, component]) => ({ path, component }))
+  scrollBehavior: () => ({ top: 0 }),
+  routes: [{ path: '/socks-nodes', redirect: '/network-config?tab=library' }, ...Object.entries(viewLoaders).map(([path, component]) => ({ path, component }))]
 });
 
 router.beforeEach(() => {

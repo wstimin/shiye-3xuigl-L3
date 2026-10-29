@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { AtSign, KeyRound, LockKeyhole, Mail, Phone, ShieldCheck, UserRound } from 'lucide-vue-next';
+import { ArrowRight, KeyRound, LockKeyhole, ShieldCheck, UserRound } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { userAvatarStyle, userInitial } from '../avatar';
@@ -69,54 +69,13 @@ onMounted(loadProfile);
 </script>
 
 <template>
-  <div class="user-page">
-    <div class="user-page-header">
-      <div>
-        <span class="user-page-kicker">PERSONAL SETTINGS</span>
-        <h2>个人设置</h2>
-        <p>查看真实账户资料，并管理当前账号的登录密码。</p>
-      </div>
-    </div>
-
-    <div v-if="message" class="user-feedback success">{{ message }}</div>
-    <div v-if="error" class="user-feedback error">{{ error }}</div>
-
-    <div class="profile-layout" :class="{ loading }">
-      <section class="user-section-card profile-identity-card">
-        <div class="profile-avatar-wrap">
-          <span class="profile-avatar" :style="userAvatarStyle(displayName)">{{ avatarText }}</span>
-          <i></i>
-        </div>
-        <h3>{{ displayName }}</h3>
-        <p>{{ dashboard?.customer.loginUsername || user?.username || '--' }}</p>
-        <span class="profile-role"><ShieldCheck :size="14" />{{ dashboard?.customer.status === 'active' ? '账号状态正常' : '账号已停用' }}</span>
-        <div class="profile-created"><span>加入时间</span><strong>{{ formatDate(dashboard?.customer.createdAt) }}</strong></div>
-      </section>
-
-      <section class="user-section-card profile-detail-card">
-        <header class="business-card-head compact">
-          <span class="business-card-icon blue"><UserRound :size="20" /></span>
-          <div><h3>账号资料</h3><p>这些信息来自当前面板账户。</p></div>
-        </header>
-        <div class="profile-detail-list">
-          <div><i><AtSign :size="17" /></i><span>登录账号</span><strong>{{ user?.username || '--' }}</strong></div>
-          <div><i><UserRound :size="17" /></i><span>账号类型</span><strong>{{ user?.role === 'user' ? '用户账号' : '--' }}</strong></div>
-          <div><i><Mail :size="17" /></i><span>邮箱</span><strong>{{ dashboard?.customer.email || '未设置' }}</strong></div>
-          <div><i><Phone :size="17" /></i><span>手机</span><strong>{{ dashboard?.customer.phone || '未设置' }}</strong></div>
-        </div>
-      </section>
-
-      <section class="user-section-card profile-security-card">
-        <header class="business-card-head compact">
-          <span class="business-card-icon purple"><KeyRound :size="20" /></span>
-          <div><h3>修改密码</h3><p>新密码至少 8 位，提交后请使用新密码重新登录。</p></div>
-        </header>
-        <form class="password-form" autocomplete="off" @submit.prevent="changePassword">
-          <label><span>当前密码</span><i><LockKeyhole :size="17" /></i><input v-model="form.currentPassword" name="shiye-user-current-passcode" type="password" placeholder="请输入当前密码" autocomplete="current-password" /></label>
-          <label><span>新密码</span><i><KeyRound :size="17" /></i><input v-model="form.newPassword" name="shiye-user-next-passcode" type="password" placeholder="请输入至少 8 位的新密码" autocomplete="new-password" /></label>
-          <button :disabled="changing || !form.currentPassword || form.newPassword.length < 8">{{ changing ? '提交中' : '确认修改密码' }}</button>
-        </form>
-      </section>
-    </div>
+  <div class="user-page settings-page" :aria-busy="loading">
+    <header class="page-heading"><div><span class="eyebrow">ACCOUNT & SECURITY</span><h1>账户设置<span class="heading-dot">.</span></h1><p>查看个人账户资料，管理登录安全。</p></div></header>
+    <div v-if="message" class="user-feedback success" role="status">{{ message }}</div><div v-if="error" class="user-feedback error" role="alert">{{ error }}</div>
+    <section class="identity-band"><span class="profile-avatar" :style="userAvatarStyle(displayName)">{{ avatarText }}</span><div><h2>{{ displayName }}</h2><p>@{{ dashboard?.customer.loginUsername || user?.username || '—' }}<span class="footer-divider">/</span>用户账号</p></div><span class="identity-status"><ShieldCheck :size="16" />{{ dashboard?.customer.status === 'active' ? '账户正常' : '账户已停用' }}</span></section>
+    <div class="settings-layout"><nav class="settings-index" aria-label="设置分区"><span class="section-number">PREFERENCES</span><a href="#account-details"><UserRound :size="16" />账户资料</a><a href="#account-security"><LockKeyhole :size="16" />登录与安全</a></nav><div class="surface settings-content">
+      <section id="account-details" class="settings-section"><header><span class="section-number">01 / PROFILE</span><h2>账户资料</h2><p>资料由管理员维护。如需更改，请联系管理员。</p></header><dl class="account-details"><div><dt>显示名称</dt><dd>{{ dashboard?.customer.name || '—' }}</dd></div><div><dt>登录账号</dt><dd>{{ dashboard?.customer.loginUsername || user?.username || '—' }}</dd></div><div><dt>电子邮箱</dt><dd>{{ dashboard?.customer.email || '未设置' }}</dd></div><div><dt>联系电话</dt><dd>{{ dashboard?.customer.phone || '未设置' }}</dd></div><div><dt>加入时间</dt><dd>{{ formatDate(dashboard?.customer.createdAt) }}</dd></div></dl></section>
+      <section id="account-security" class="settings-section"><header><span class="section-number">02 / SECURITY</span><h2>登录与安全</h2><p>定期更新密码，让账户访问更安心。</p></header><form class="password-form" autocomplete="off" @submit.prevent="changePassword"><label><span>当前密码</span><input v-model="form.currentPassword" name="shiye-user-current-passcode" type="password" placeholder="输入当前密码" autocomplete="current-password" required /></label><label><span>新密码</span><input v-model="form.newPassword" name="shiye-user-next-passcode" type="password" placeholder="至少 8 位字符" autocomplete="new-password" minlength="8" required /></label><div class="password-form-footer"><span><KeyRound :size="14" />修改成功后，请使用新密码重新登录。</span><button class="button primary" :disabled="changing || !form.currentPassword || form.newPassword.length < 8">{{ changing ? '正在更新…' : '更新登录密码' }}<ArrowRight :size="16" /></button></div></form></section>
+    </div></div>
   </div>
 </template>

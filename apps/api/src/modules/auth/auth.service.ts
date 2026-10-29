@@ -3,6 +3,7 @@ import { changePasswordSchema, loginSchema } from '@shiye/shared';
 import type { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import type { SessionUser } from '../../shared/auth.types.js';
+import { credentialVersion } from '../../shared/auth.guard.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EncryptionService } from '../security/encryption.service.js';
 
@@ -19,14 +20,14 @@ export class AuthService {
       if (!admin || admin.status !== 'active') throw new UnauthorizedException('账号或密码错误');
       const valid = await bcrypt.compare(input.password, admin.passwordHash);
       if (!valid) throw new UnauthorizedException('账号或密码错误');
-      return { role: 'admin' as const, username: admin.username, userId: admin.id };
+      return { role: 'admin' as const, username: admin.username, userId: admin.id, credentialVersion: credentialVersion(admin.passwordHash) };
     }
 
     const customer = await this.prisma.customer.findUnique({ where: { loginUsername: input.username } });
     if (!customer || customer.status !== 'active') throw new UnauthorizedException('账号或密码错误');
     const valid = await bcrypt.compare(input.password, customer.loginPasswordHash);
     if (!valid) throw new UnauthorizedException('账号或密码错误');
-    return { role: 'user' as const, username: customer.loginUsername, customerId: customer.id };
+    return { role: 'user' as const, username: customer.loginUsername, customerId: customer.id, credentialVersion: credentialVersion(customer.loginPasswordHash) };
   }
 
   async logout() {

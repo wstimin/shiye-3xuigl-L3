@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import QRCode from 'qrcode';
-import { Activity, CalendarClock, Copy, ListFilter, Network, QrCode, RefreshCw, Search, X } from 'lucide-vue-next';
+import { useRoute } from 'vue-router';
+import { ArrowUpRight, ChevronDown, Copy, Network, QrCode, RefreshCw, Search, X } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { notifyError, notifySuccess } from '../notify';
@@ -28,6 +29,7 @@ type UserNode = {
   serviceNode: { name: string; protocol: string; priceMonthly: string; server: { name: string } };
 };
 
+const route = useRoute();
 const loading = ref(false);
 const renewingId = ref('');
 const error = ref('');
@@ -82,6 +84,9 @@ async function loadNodes() {
   error.value = '';
   try {
     nodes.value = await api<UserNode[]>('/api/user/nodes');
+    for (const node of nodes.value) {
+      if (![1, 3, 6, 12].includes(monthsByNode.value[node.id] || 0)) monthsByNode.value[node.id] = 1;
+    }
   } catch (caught) {
     error.value = readableError(caught, '加载失败');
   } finally {
@@ -201,11 +206,11 @@ function nodeStatusHint(node: UserNode) {
   const expireTime = node.expireAt ? new Date(node.expireAt).getTime() : null;
   const diff = expireTime ? expireTime - Date.now() : null;
 
-  if (node.status !== 'active' && node.disabledReason === 'expired') return { type: 'danger', label: '已到期', text: '节点因本系统授权到期停用，续费成功后会恢复本地访问授权。' };
+  if (node.status !== 'active' && node.disabledReason === 'expired') return { type: 'danger', label: '已到期', text: '节点已到期，续费成功后会恢复服务。' };
   if (node.status !== 'active' && node.disabledReason === 'traffic_exceeded') return { type: 'danger', label: '流量用尽', text: '续费只延长有效期，不会重置流量，请联系管理员处理流量额度。' };
   if (node.status !== 'active' && node.disabledReason === 'admin') return { type: 'danger', label: '管理员停用', text: '该节点不能通过用户续费恢复，请联系管理员。' };
   if (node.status !== 'active') return { type: 'danger', label: '已停用', text: '该节点当前不可用，请联系管理员核对停用原因。' };
-  if (diff !== null && diff <= 0) return { type: 'danger', label: '已到期', text: '本系统访问授权已到期，续费成功后会恢复本地授权。' };
+  if (diff !== null && diff <= 0) return { type: 'danger', label: '已到期', text: '节点已到期，续费成功后会恢复服务。' };
   if (limit > 0 && used >= limit) return { type: 'danger', label: '流量用尽', text: '可用流量已用完，续费不会重置流量，请联系管理员增加额度或重置流量。' };
   if (diff !== null && diff <= 3 * 24 * 60 * 60 * 1000) return { type: 'warning', label: '临近到期', text: `还剩 ${daysLeft(diff)} 天到期，建议提前续费。` };
   if (diff !== null && diff <= 7 * 24 * 60 * 60 * 1000) return { type: 'warning', label: '即将到期', text: `还剩 ${daysLeft(diff)} 天到期。` };
@@ -226,76 +231,35 @@ onMounted(loadNodes);
 </script>
 
 <template>
-  <div class="user-page">
-  <div class="user-page-header">
-    <div>
-      <span class="user-page-kicker">NODE SERVICES</span>
-      <h2>我的节点</h2>
-      <p>查看真实节点状态、连接链接、二维码、流量与续费信息。</p>
-    </div>
-    <button class="user-action-button secondary" type="button" :disabled="loading" @click="loadNodes"><RefreshCw :size="16" />刷新节点</button>
-  </div>
-  <div v-if="message" class="user-feedback success">{{ message }}</div>
-  <div v-if="error" class="user-feedback error">{{ error }}</div>
-
-  <div v-if="!error" class="node-stat-grid">
-    <article><i class="purple"><Network :size="17" /></i><span>全部节点</span><strong>{{ nodes.length }}</strong></article>
-    <article><i class="green"><Activity :size="17" /></i><span>正常可用</span><strong>{{ activeCount }}</strong></article>
-    <article><i class="orange"><CalendarClock :size="17" /></i><span>7 天内到期</span><strong>{{ expiringCount }}</strong></article>
-    <article><i class="blue"><ListFilter :size="17" /></i><span>当前结果</span><strong>{{ filteredNodes.length }}</strong></article>
-  </div>
-
-  <div v-if="!error" class="user-section-card node-filter-panel">
-    <label class="search-field">
-      <Search :size="16" />
-      <input v-model="searchQuery" placeholder="搜索节点、服务器、协议、状态" />
-    </label>
-    <span>显示 {{ filteredNodes.length }} / {{ nodes.length }}</span>
-  </div>
-
-  <div v-if="!error" class="node-list" :class="{ loading }">
-    <article v-for="node in filteredNodes" :key="node.id" class="user-section-card node-card">
-      <div class="node-card-head">
-        <div>
-          <h2>{{ node.serviceNode.name }}</h2>
-          <p>{{ node.serviceNode.server.name }} / {{ node.serviceNode.protocol }}</p>
-        </div>
-        <span class="status-pill" :class="[node.status, nodeStatusHint(node).type]">{{ nodeStatusHint(node).label }}</span>
+  <div class="user-page connections-page" :aria-busy="loading">
+    <header class="page-heading"><div><span class="eyebrow">YOUR CONNECTIONS</span><h1>连接服务<span class="heading-dot">.</span></h1><p>所有连接集中管理。展开服务，获取链接、扫码导入或续费。</p></div><button class="button secondary" :disabled="loading" @click="loadNodes"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新服务</button></header>
+    <div v-if="message" class="user-feedback success" role="status">{{ message }}</div><div v-if="error" class="user-feedback error" role="alert">{{ error }}</div>
+    <section class="surface connections-surface">
+      <header class="connections-toolbar"><div class="connection-totals"><strong>{{ nodes.length }} <span>项服务</span></strong><span class="live-dot">{{ activeCount }} 项启用</span><span v-if="expiringCount" class="attention-text">{{ expiringCount }} 项即将到期</span></div><label class="search-field"><Search :size="16" /><input v-model="searchQuery" type="search" aria-label="搜索服务" placeholder="搜索名称、协议或状态" /></label></header>
+      <div class="connection-list-head" aria-hidden="true"><span>服务 / 位置</span><span>流量情况</span><span>有效期</span><span>状态</span><span></span></div>
+      <div class="node-list">
+        <details v-for="node in filteredNodes" :id="'service-' + node.id" :key="node.id" class="node-entry" :open="String(route.query.node || '') === node.id">
+          <summary class="node-summary">
+            <div class="service-identity"><span class="protocol-symbol">{{ node.serviceNode.protocol.slice(0, 1).toUpperCase() }}</span><div><strong>{{ node.serviceNode.name }}</strong><small>{{ node.serviceNode.server.name }} · {{ node.serviceNode.protocol.toUpperCase() }}</small></div></div>
+            <div class="summary-usage"><strong>{{ node.trafficStatus === 'live' ? node.officialTrafficUnlimited ? '无限流量' : hasFiniteTrafficQuota(node) ? formatTraffic(Number(node.officialTrafficRemainingBytes)) + ' 剩余' : '额度未返回' : '用量暂不可用' }}</strong><small>{{ Number(node.serviceNode.priceMonthly).toFixed(2) }} 元 / 月</small></div>
+            <div class="summary-expiry"><strong>{{ node.expireAt ? new Date(node.expireAt).toLocaleDateString('zh-CN') : '长期有效' }}</strong><small>{{ node.links?.length || 0 }} 个连接入口</small></div>
+            <span class="status-pill" :class="nodeStatusHint(node).type"><i></i>{{ nodeStatusHint(node).label }}</span>
+            <ChevronDown class="entry-chevron" :size="17" />
+          </summary>
+          <div class="node-detail">
+            <section class="connection-access"><header class="detail-heading"><span class="section-number">01 / CONNECT</span><h2>连接与导入</h2><p>复制订阅链接或扫描二维码，导入支持此协议的客户端。</p></header>
+              <div v-if="node.links?.length" class="link-list"><div v-for="(link, index) in node.links" :key="link" class="connection-link"><div><span class="connection-link-label">{{ /^https?:/.test(link) ? '订阅地址' : '线路 ' + (index + 1) }}</span><code :title="link">{{ link }}</code></div><div class="connection-link-actions"><button class="button small secondary" type="button" title="复制节点" @click="copyText(link)"><Copy :size="14" />复制</button><button class="button small secondary" type="button" title="显示二维码" @click="showQrCode(node, link, index)"><QrCode :size="14" /><span>二维码</span></button></div></div></div>
+              <div v-else class="user-feedback warning">{{ node.linkError || '连接信息暂不可用，请联系管理员同步此服务。' }}</div>
+              <div class="connection-quota"><div><span>流量与用量</span><strong>{{ totalAndRemainingTrafficText(node) }}</strong></div><span v-if="hasFiniteTrafficQuota(node)" class="progress-track"><i :style="{ width: `${trafficPercent(node)}%` }"></i></span><small v-if="trafficStateText(node)" class="attention-text">{{ trafficStateText(node) }}</small><small class="quiet-text">服务有效期：{{ node.expireAt ? formatDate(node.expireAt) : '长期有效' }}</small><small v-if="node.subId" class="quiet-text">订阅标识：{{ node.subId }}</small></div>
+            </section>
+            <section class="renew-box"><header class="detail-heading"><span class="section-number">02 / RENEW</span><h2>延长服务有效期</h2></header><div class="renew-price"><strong>¥{{ Number(node.serviceNode.priceMonthly).toFixed(2) }}</strong><span> / 月</span></div><p v-if="nodeStatusHint(node).type !== 'success'" class="user-feedback" :class="nodeStatusHint(node).type">{{ nodeStatusHint(node).text }}</p><form class="renew-form" @submit.prevent="renewNode(node.id)"><label :for="'renew-' + node.id">续费时长</label><select :id="'renew-' + node.id" v-model.number="monthsByNode[node.id]"><option :value="1">1 个月</option><option :value="3">3 个月</option><option :value="6">6 个月</option><option :value="12">12 个月</option></select><button class="button primary" :disabled="Boolean(renewingId)">{{ renewingId === node.id ? '续费处理中…' : '使用余额续费' }}<ArrowUpRight :size="16" /></button></form><small class="renew-note">续费延长有效期，不重置流量。请确认账户余额充足。</small></section>
+          </div>
+        </details>
       </div>
-      <div class="node-status-hint" :class="nodeStatusHint(node).type">{{ nodeStatusHint(node).text }}</div>
-      <div class="node-traffic-block">
-        <div><span>总流量 / 剩余流量</span><strong>{{ totalAndRemainingTrafficText(node) }}</strong></div>
-        <span class="node-traffic-track"><i :class="nodeStatusHint(node).type" :style="{ width: `${trafficPercent(node)}%` }"></i></span>
-        <div v-if="trafficStateText(node)" class="empty-hint">{{ trafficStateText(node) }}</div>
-      </div>
-      <div class="node-meta">
-        <span>到期：{{ formatDate(node.expireAt) }}</span>
-        <span>月费：{{ node.serviceNode.priceMonthly }} 元</span>
-        <span v-if="node.subId">订阅标识：{{ node.subId }}</span>
-      </div>
-      <div v-if="node.links?.length" class="link-list">
-        <div v-for="(link, index) in node.links" :key="link" class="link-row">
-          <span class="link-label">线路 {{ index + 1 }}</span>
-          <button class="copy-button" type="button" title="复制节点" @click="copyText(link)"><Copy :size="15" /></button>
-          <button class="copy-button" type="button" title="显示二维码" @click="showQrCode(node, link, index)"><QrCode :size="15" /></button>
-        </div>
-      </div>
-      <div v-else class="empty-hint">{{ node.linkError ? `节点链接获取失败：${node.linkError}` : '暂未获取到 3-x-ui 节点链接，请联系管理员同步节点。' }}</div>
-      <form class="renew-form" @submit.prevent="renewNode(node.id)">
-        <select v-model.number="monthsByNode[node.id]">
-          <option :value="1">1 个月</option>
-          <option :value="3">3 个月</option>
-          <option :value="6">6 个月</option>
-          <option :value="12">12 个月</option>
-        </select>
-        <button :disabled="renewingId === node.id">{{ renewingId === node.id ? '续费中' : '余额续费' }}</button>
-      </form>
-      <div class="empty-hint">续费只延长本系统访问授权，不修改路由节点共享的官方客户端。</div>
-    </article>
-    <div v-if="!loading && !filteredNodes.length" class="user-empty-state user-section-card">暂无符合条件的节点</div>
-  </div>
-
-  <div v-if="qrPreview" class="qr-modal" @click.self="closeQrCode">
+      <div v-if="!loading && !filteredNodes.length" class="empty-state"><Network :size="28" /><strong>{{ searchQuery ? '没有找到匹配的服务' : '暂无连接服务' }}</strong><p>{{ searchQuery ? '试试其他服务名称或协议。' : '服务开通后，你可以在这里获取连接信息。' }}</p></div>
+      <footer class="panel-footnote"><span>显示 {{ filteredNodes.length }} / {{ nodes.length }} 项服务</span><span>展开一项服务即可查看完整操作</span></footer>
+    </section>
+  <div v-if="qrPreview" class="qr-modal" role="dialog" aria-modal="true" @click.self="closeQrCode">
     <div class="qr-modal-panel">
       <div class="qr-modal-head">
         <strong>{{ qrPreview.title }}</strong>
@@ -308,7 +272,7 @@ onMounted(loadNodes);
     </div>
   </div>
 
-  <div v-if="renewErrorDialog" class="qr-modal" @click.self="closeRenewError">
+  <div v-if="renewErrorDialog" class="qr-modal" role="dialog" aria-modal="true" @click.self="closeRenewError">
     <div class="qr-modal-panel message-modal-panel">
       <div class="qr-modal-head">
         <strong>{{ renewErrorDialog.title }}</strong>

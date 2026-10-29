@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PanelFields from '../components/PanelFields.vue';
+import { decodePanelValue } from '../panel-fields';
 import { computed, onMounted, reactive, ref } from 'vue';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
@@ -95,6 +97,10 @@ async function copyDetail(log = selectedLog.value) {
   }
 }
 
+function formatDetail(value: unknown) {
+  return typeof value === 'string' ? value : JSON.stringify(value ?? {}, null, 2);
+}
+
 function statusType(status: string) {
   if (status === 'success') return 'success';
   if (status === 'failed') return 'danger';
@@ -140,11 +146,6 @@ function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
 }
 
-function formatDetail(value: unknown) {
-  if (value === undefined || value === null) return '没有详情';
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value, null, 2);
-}
 
 function shortDetail(value: unknown) {
   const object = objectValue(value);
@@ -247,7 +248,7 @@ onMounted(loadLogs);
     </el-table>
   </div>
 
-  <el-dialog v-model="detailDialogVisible" title="同步日志详情" width="min(760px, 92vw)" class="operations-dark-dialog" destroy-on-close>
+  <el-dialog v-model="detailDialogVisible" title="同步日志详情" width="min(760px, 92vw)" class="operations-dialog" destroy-on-close>
     <div v-if="selectedLog" class="log-detail-dialog">
       <div class="log-detail-meta">
         <span>{{ formatDate(selectedLog.createdAt) }}</span>
@@ -256,7 +257,7 @@ onMounted(loadLogs);
         <el-tag :type="statusType(selectedLog.status)">{{ statusLabel(selectedLog.status) }}</el-tag>
       </div>
       <el-alert v-if="selectedLog.message" :title="readableMessage(selectedLog)" :type="selectedLog.status === 'failed' ? 'warning' : 'info'" show-icon :closable="false" />
-      <pre class="json-preview">{{ formatDetail(selectedLog.detail) }}</pre>
+      <PanelFields :model-value="decodePanelValue(selectedLog.detail)" readonly />
     </div>
     <template #footer>
       <el-button @click="detailDialogVisible = false">关闭</el-button>

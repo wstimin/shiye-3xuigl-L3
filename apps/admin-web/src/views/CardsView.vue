@@ -22,6 +22,7 @@ const ElTableColumn = ElTableColumnComponent as any;
 import { Copy, CreditCard, Download, Edit3, KeyRound, Layers, LayoutTemplate, Plus, RefreshCw, RotateCcw, Search, TicketCheck, TicketX, Trash2 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import ExternalCardReceipts from '../components/ExternalCardReceipts.vue';
 import { notifyError } from '../notify';
 
 type CardTemplate = { id: string; name: string; amount: string; quantity: number; prefix?: string | null; enabled: boolean; remark?: string | null };
@@ -203,7 +204,7 @@ function editTemplate(template: CardTemplate) {
 }
 
 async function removeTemplate(template: CardTemplate) {
-  await ElMessageBox.confirm(`确认删除模板「${template.name}」？已经生成的批次和卡密会保留。`, '删除确认', { type: 'warning', customClass: 'operations-dark-message-box' });
+  await ElMessageBox.confirm(`确认删除模板「${template.name}」？已经生成的批次和卡密会保留。`, '删除确认', { type: 'warning', customClass: 'operations-message-box' });
   await api(`/api/admin/card-templates/${template.id}`, { method: 'DELETE' });
   ElMessage.success('模板已删除');
   if (editingTemplateId.value === template.id) resetTemplateForm();
@@ -212,7 +213,7 @@ async function removeTemplate(template: CardTemplate) {
 }
 
 async function removeUnusedTemplateCards(template: CardTemplate) {
-  await ElMessageBox.confirm(`确认删除模板「${template.name}」下所有未使用卡密？已使用卡密和兑换记录会保留。`, '删除未使用卡密', { type: 'warning', customClass: 'operations-dark-message-box' });
+  await ElMessageBox.confirm(`确认删除模板「${template.name}」下所有未使用卡密？已使用卡密和兑换记录会保留。`, '删除未使用卡密', { type: 'warning', customClass: 'operations-message-box' });
   deletingUnusedTemplateIds.value = new Set(deletingUnusedTemplateIds.value).add(template.id);
   error.value = '';
   try {
@@ -229,21 +230,21 @@ async function removeUnusedTemplateCards(template: CardTemplate) {
 }
 
 async function removeBatch(batch: CardBatch) {
-  await ElMessageBox.confirm(`确认删除批次「${batch.name}」及其未使用卡密？如果批次内已有使用记录，系统会拒绝删除。`, '删除确认', { type: 'warning', customClass: 'operations-dark-message-box' });
+  await ElMessageBox.confirm(`确认删除批次「${batch.name}」及其未使用卡密？如果批次内已有使用记录，系统会拒绝删除。`, '删除确认', { type: 'warning', customClass: 'operations-message-box' });
   await api(`/api/admin/card-batches/${batch.id}`, { method: 'DELETE' });
   ElMessage.success('批次已删除');
   await loadCards();
 }
 
 async function removeCard(card: Card) {
-  await ElMessageBox.confirm(`确认删除卡密 ${card.codePreview}？已使用卡密不能删除。`, '删除确认', { type: 'warning', customClass: 'operations-dark-message-box' });
+  await ElMessageBox.confirm(`确认删除卡密 ${card.codePreview}？已使用卡密不能删除。`, '删除确认', { type: 'warning', customClass: 'operations-message-box' });
   await api(`/api/admin/cards/${card.id}`, { method: 'DELETE' });
   ElMessage.success('卡密已删除');
   await loadCards();
 }
 
 async function removeUsedCards() {
-  await ElMessageBox.confirm('确认清除所有已使用卡密记录？用户余额不会回退，余额流水会保留。', '清除已使用记录', { type: 'warning', customClass: 'operations-dark-message-box' });
+  await ElMessageBox.confirm('确认清除所有已使用卡密记录？用户余额不会回退，余额流水会保留。', '清除已使用记录', { type: 'warning', customClass: 'operations-message-box' });
   clearingUsed.value = true;
   error.value = '';
   try {
@@ -258,7 +259,7 @@ async function removeUsedCards() {
 }
 
 async function removeUsedBatchCards(batch: CardBatch) {
-  await ElMessageBox.confirm(`确认清除批次「${batch.name}」里的已使用卡密记录？用户余额不会回退，余额流水会保留。`, '清除批次已使用记录', { type: 'warning', customClass: 'operations-dark-message-box' });
+  await ElMessageBox.confirm(`确认清除批次「${batch.name}」里的已使用卡密记录？用户余额不会回退，余额流水会保留。`, '清除批次已使用记录', { type: 'warning', customClass: 'operations-message-box' });
   clearingUsedBatchIds.value = new Set(clearingUsedBatchIds.value).add(batch.id);
   error.value = '';
   try {
@@ -301,10 +302,11 @@ function openIntegrationDialog() {
 
 async function loadIntegration() {
   try {
-    const result = await api<{ enabled: boolean; baseUrl: string; appKey: string; appSecretSet: boolean }>('/api/admin/card-integration');
+    const result = await api<{ enabled: boolean; baseUrl: string; appKey: string; appSecretSet: boolean; appSecret: string }>('/api/admin/card-integration');
     integrationForm.enabled = result.enabled;
     integrationForm.baseUrl = result.baseUrl;
     integrationForm.appKey = result.appKey;
+    integrationForm.appSecret = result.appSecret || '';
     integrationAppSecretSet.value = result.appSecretSet;
   } catch (caught) {
     notifyError(caught, '读取对接设置失败');
@@ -492,6 +494,7 @@ onMounted(() => { loadCards(); void loadIntegration(); });
     <div class="metric operations-stat-card"><span class="operations-stat-icon tone-amber"><TicketX :size="19" /></span><div><span>已使用记录</span><strong>{{ usedCardCount }}</strong><small>可按批次或全局清除</small></div></div>
   </div>
 
+  <ExternalCardReceipts />
   <div class="panel list-panel operations-content-card cards-business-card">
     <div class="panel-toolbar">
       <strong>卡密列表</strong>
@@ -543,7 +546,7 @@ onMounted(() => { loadCards(); void loadIntegration(); });
     </div>
   </div>
 
-  <el-dialog v-model="templateManagementVisible" title="卡密模板管理" width="min(980px, 94vw)" class="operations-dark-dialog card-management-dialog" destroy-on-close>
+  <el-dialog v-model="templateManagementVisible" title="卡密模板管理" width="min(980px, 94vw)" class="operations-dialog card-management-dialog" destroy-on-close>
     <div class="management-dialog-toolbar">
       <span class="muted-text">共 {{ templates.length }} 个模板</span>
       <el-button type="primary" @click="openTemplateDialog"><Plus :size="15" />新增模板</el-button>
@@ -573,7 +576,7 @@ onMounted(() => { loadCards(); void loadIntegration(); });
     </div>
   </el-dialog>
 
-  <el-dialog v-model="batchManagementVisible" title="卡密批次管理" width="min(1120px, 96vw)" class="operations-dark-dialog card-management-dialog card-batch-dialog" destroy-on-close>
+  <el-dialog v-model="batchManagementVisible" title="卡密批次管理" width="min(1120px, 96vw)" class="operations-dialog card-management-dialog card-batch-dialog" destroy-on-close>
     <div class="management-dialog-toolbar">
       <span class="muted-text">共 {{ batches.length }} 个批次</span>
       <el-button type="primary" @click="openGenerateDialog()"><Plus :size="15" />生成卡密</el-button>
@@ -627,7 +630,7 @@ onMounted(() => { loadCards(); void loadIntegration(); });
     <div v-else class="empty-panel">暂无卡密批次</div>
   </el-dialog>
 
-  <el-dialog v-model="templateDialogVisible" :title="editingTemplateId ? '编辑卡密模板' : '新增卡密模板'" width="680px" class="operations-dark-dialog" destroy-on-close>
+  <el-dialog v-model="templateDialogVisible" :title="editingTemplateId ? '编辑卡密模板' : '新增卡密模板'" width="680px" class="operations-dialog" destroy-on-close>
     <el-form :model="templateForm" label-width="82px" class="sectioned-dialog-form">
       <section class="dialog-form-section">
         <div class="dialog-section-head"><strong>模板规则</strong><span>模板只保存默认金额、数量和前缀，生成时会在该模板下追加新批次。</span></div>
@@ -647,7 +650,7 @@ onMounted(() => { loadCards(); void loadIntegration(); });
     </template>
   </el-dialog>
 
-  <el-dialog v-model="generateDialogVisible" title="生成卡密" width="680px" class="operations-dark-dialog" destroy-on-close>
+  <el-dialog v-model="generateDialogVisible" title="生成卡密" width="680px" class="operations-dialog" destroy-on-close>
     <el-form :model="generateForm" label-width="82px" class="sectioned-dialog-form">
       <section class="dialog-form-section">
         <div class="dialog-section-head"><strong>生成批次</strong><span>选择模板后会锁定金额、数量和前缀，生成结果会持久保存在模板批次里。</span></div>
@@ -678,7 +681,7 @@ onMounted(() => { loadCards(); void loadIntegration(); });
     </template>
   </el-dialog>
 
-  <el-dialog v-model="integrationVisible" title="十夜卡密对接设置" width="620px" class="operations-dark-dialog" destroy-on-close>
+  <el-dialog v-model="integrationVisible" title="十夜卡密对接设置" width="620px" class="operations-dialog" destroy-on-close>
     <el-alert type="info" :closable="false" show-icon title="对接后用户兑换卡密时，将同时支持本项目生成的本地卡密与十夜卡密系统的金额卡。" style="margin-bottom:16px" />
     <el-form :model="integrationForm" label-width="100px" class="sectioned-dialog-form">
       <section class="dialog-form-section">
@@ -695,7 +698,7 @@ onMounted(() => { loadCards(); void loadIntegration(); });
             <el-input v-model="integrationForm.appKey" placeholder="十夜后台领取的 app_key" maxlength="80" />
           </el-form-item>
           <el-form-item class="form-item-full" label="App Secret">
-            <el-input v-model="integrationForm.appSecret" type="password" show-password placeholder="留空保存将保留原值" maxlength="512" />
+            <el-input v-model="integrationForm.appSecret" type="text" placeholder="留空保存将保留原值" maxlength="512" />
             <span class="muted-text" style="margin-top:4px;display:block">状态：<el-tag :type="integrationAppSecretSet ? 'success' : 'info'" size="small">{{ integrationAppSecretSet ? '已设置' : '未设置' }}</el-tag></span>
           </el-form-item>
         </div>

@@ -11,7 +11,7 @@ apps/
   user-web/     Vue3 + Vite + TypeScript 用户中心
 packages/
   shared/       前后端共享 DTO、类型和校验规则
-  xui-client/   3x-ui API SDK
+  xui-client/   3x-ui SDK + 独立 S-UI Token API 客户端
   payment-core/ 支付通道统一抽象
 prisma/
   schema.prisma 结构化 MySQL 数据模型
@@ -61,6 +61,8 @@ npm run prisma:dev
 ```
 
 ## 当前状态
+
+两种连接统一保存于 `xui_servers`，由 `provider` 区分。S-UI 通过 `SuiModule` 管理原生资源，`SuiBusinessService` 将客户端映射到原有服务入站和用户绑定，复用续费状态机、流量与到期任务。3x-ui 增加基于远端 OpenAPI 的原生 HTTP 控制台。共用加密服务及数据库锁，sing-box 资源不进入 Xray 转换逻辑。迁移、使用流程与验证边界见 [项目改造说明](./项目改造说明.md)。
 
 - monorepo workspace 已建立。
 - API 模块边界已建立。

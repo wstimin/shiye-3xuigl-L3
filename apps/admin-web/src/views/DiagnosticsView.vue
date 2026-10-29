@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PanelFields from '../components/PanelFields.vue';
+import { decodePanelValue } from '../panel-fields';
 import type { Component } from 'vue';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
@@ -248,11 +250,6 @@ function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
 }
 
-function formatDetail(value: unknown) {
-  if (value === undefined || value === null) return '没有详细数据';
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value, null, 2);
-}
 
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -418,7 +415,7 @@ onMounted(() => loadDiagnostics(false));
       <span>正在连接数据库、面板并采集系统资源。</span>
     </div>
 
-    <el-dialog v-model="detailVisible" class="operations-dark-dialog diagnostics-detail-dialog" width="620px" append-to-body>
+    <el-dialog v-model="detailVisible" class="operations-dialog diagnostics-detail-dialog" width="620px" append-to-body>
       <template #header>
         <div v-if="selectedCheck" class="diagnostics-dialog-title">
           <span class="diagnostics-check-icon" :class="`is-${selectedCheck.status}`"><component :is="checkIcon(selectedCheck.key)" :size="19" /></span>
@@ -434,13 +431,13 @@ onMounted(() => loadDiagnostics(false));
         </div>
         <div class="diagnostics-json-block">
           <span>原始详情</span>
-          <pre class="json-preview">{{ formatDetail(selectedCheck.detail) }}</pre>
+          <PanelFields :model-value="decodePanelValue(selectedCheck.detail)" readonly />
         </div>
       </template>
       <template #footer><el-button @click="detailVisible = false">关闭</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="logVisible" class="operations-dark-dialog diagnostics-detail-dialog" title="同步日志详情" width="660px" append-to-body>
+    <el-dialog v-model="logVisible" class="operations-dialog diagnostics-detail-dialog" title="同步日志详情" width="660px" append-to-body>
       <template v-if="selectedLog">
         <div class="diagnostics-detail-meta diagnostics-log-meta">
           <div><span>时间</span><strong>{{ formatDate(selectedLog.createdAt) }}</strong></div>
@@ -454,7 +451,7 @@ onMounted(() => loadDiagnostics(false));
         </div>
         <div class="diagnostics-json-block">
           <span>原始详情</span>
-          <pre class="json-preview">{{ formatDetail(selectedLog.detail) }}</pre>
+          <PanelFields :model-value="decodePanelValue(selectedLog.detail)" readonly />
         </div>
       </template>
       <template #footer><el-button @click="logVisible = false">关闭</el-button></template>

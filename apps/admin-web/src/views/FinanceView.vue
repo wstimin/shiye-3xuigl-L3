@@ -217,7 +217,7 @@ async function askHistoryRange(title: string) {
 
 async function askDatePrompt(title: string, message: string, inputValue: string, allowEmpty: boolean) {
   const { value } = await ElMessageBox.prompt(message, title, {
-    customClass: 'operations-dark-message-box',
+    customClass: 'operations-message-box',
     confirmButtonText: '下一步',
     cancelButtonText: '取消',
     inputValue,
@@ -229,7 +229,7 @@ async function askDatePrompt(title: string, message: string, inputValue: string,
 
 async function askConfirmText(confirmText: string) {
   await ElMessageBox.prompt(`二次确认：请输入 ${confirmText}`, '确认清理历史', {
-    customClass: 'operations-dark-message-box',
+    customClass: 'operations-message-box',
     confirmButtonText: '确认清理',
     cancelButtonText: '取消',
     inputPattern: new RegExp(`^${confirmText}$`),

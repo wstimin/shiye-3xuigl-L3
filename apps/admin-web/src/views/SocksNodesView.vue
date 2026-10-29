@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+defineProps<{ embedded?: boolean }>();
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
 import 'element-plus/es/components/checkbox/style/css';
@@ -32,7 +33,7 @@ import {
 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
-import { entityAvatarStyle, entityInitial } from '../entity-avatar';
+import { entityInitial } from '../entity-avatar';
 import { notifyError } from '../notify';
 
 type SyncTask = { id: string; action: string; status: string; message?: string | null; attemptCount: number; updatedAt: string };
@@ -114,7 +115,7 @@ async function loadNodes() {
     const firstEnabledServer = enabledServers.value[0];
     if (!syncServerId.value && firstEnabledServer) syncServerId.value = firstEnabledServer.id;
   } catch (err) {
-    error.value = readableError(err, '加载出站节点失败');
+    error.value = readableError(err, '加载SOCKS 中转模板失败');
   } finally {
     loading.value = false;
   }
@@ -128,12 +129,12 @@ async function saveNode() {
     const path = editingId.value ? `/api/admin/socks-nodes/${editingId.value}` : '/api/admin/socks-nodes';
     const result = await api<OperationResult>(path, { method: editingId.value ? 'PATCH' : 'POST', body: cleanFormBody() });
     if (result.state === 'partial') ElMessage.warning(readableError(result.message, '保存成功，但部分同步失败'));
-    else ElMessage.success(editingId.value ? '出站节点已更新' : '出站节点已添加');
+    else ElMessage.success(editingId.value ? 'SOCKS 中转模板已更新' : 'SOCKS 中转模板已添加');
     dialogVisible.value = false;
     resetForm();
     await loadNodes();
   } catch (err) {
-    showError(err, '保存出站节点失败');
+    showError(err, '保存SOCKS 中转模板失败');
   } finally {
     saving.value = false;
   }
@@ -148,9 +149,9 @@ async function syncRemoteSocks() {
   const server = servers.value.find((item) => item.id === syncServerId.value);
   try {
     await ElMessageBox.confirm(
-      `确认从“${server?.name || '选中的面板'}”读取并导入远端 SOCKS 出站？此操作只同步真实 SOCKS 出站到本地列表，不会创建远端规则。`,
-      '导入远端 SOCKS',
-      { type: 'warning', customClass: 'socks-dark-message-box' }
+      `确认从“${server?.name || '选中的面板'}”读取并从面板复制模板 出站？此操作只同步真实 SOCKS 出站到本地列表，不会创建远端规则。`,
+      '从面板复制模板',
+      { type: 'warning', customClass: 'socks-message-box' }
     );
   } catch {
     return;
@@ -162,7 +163,7 @@ async function syncRemoteSocks() {
     ElMessage.success('导入成功');
     await loadNodes();
   } catch (err) {
-    showError(err, '导入远端 SOCKS 失败');
+    showError(err, '从面板复制模板 失败');
   } finally {
     syncingRemote.value = false;
   }
@@ -173,7 +174,7 @@ function openDialog() {
   dialogVisible.value = true;
 }
 
-function editNode(node: SocksNode) {
+async function editNode(node: SocksNode) {
   editingId.value = node.id;
   clearPassword.value = false;
   Object.assign(form, {
@@ -185,18 +186,21 @@ function editNode(node: SocksNode) {
     enabled: node.enabled,
     remark: node.remark || ''
   });
+  await revealNodeSecret();
+  if (editingId.value !== node.id) return;
   dialogVisible.value = true;
 }
 
 async function revealNodeSecret() {
   if (!editingId.value) return;
+  const requestedId = editingId.value;
   revealingSecret.value = true;
   error.value = '';
   try {
     const secrets = await api<{ password: string }>(`/api/admin/socks-nodes/${editingId.value}/secrets`);
+    if (editingId.value !== requestedId) return;
     form.password = secrets.password || '';
     clearPassword.value = false;
-    ElMessage.success(secrets.password ? '已读取保存的出站密码' : '该出站节点没有保存密码');
   } catch (err) {
     showError(err, '读取保存密码失败');
   } finally {
@@ -211,9 +215,9 @@ async function removeNode(node: SocksNode) {
     : '该节点由本地创建，只会删除本地记录。';
   try {
     await ElMessageBox.confirm(
-      `确认删除出站节点“${node.name}”？${remoteHint} 正在被路由节点使用时，后端会拒绝删除。`,
-      '删除出站节点',
-      { type: 'warning', customClass: 'socks-dark-message-box' }
+      `确认删除SOCKS 中转模板“${node.name}”？${remoteHint} 正在被服务入站使用时，后端会拒绝删除。`,
+      '删除SOCKS 中转模板',
+      { type: 'warning', customClass: 'socks-message-box' }
     );
   } catch {
     return;
@@ -223,10 +227,10 @@ async function removeNode(node: SocksNode) {
   try {
     const takeover = isImportedNode(node) ? '?takeover=true' : '';
     await api(`/api/admin/socks-nodes/${node.id}${takeover}`, { method: 'DELETE' });
-    ElMessage.success('出站节点已删除');
+    ElMessage.success('SOCKS 中转模板已删除');
     await loadNodes();
   } catch (err) {
-    showError(err, '删除出站节点失败');
+    showError(err, '删除SOCKS 中转模板失败');
   } finally {
     deletingIds.value = removePendingId(deletingIds.value, node.id);
   }
@@ -241,11 +245,11 @@ async function toggleNodeEnabled(node: SocksNode, enabled = !node.enabled) {
   try {
     const result = await api<OperationResult>(`/api/admin/socks-nodes/${node.id}`, { method: 'PATCH', body: { enabled } });
     if (result.state === 'partial') ElMessage.warning('保存成功，同步失败');
-    else ElMessage.success(enabled ? '出站节点已启用' : '出站节点已停用');
+    else ElMessage.success(enabled ? 'SOCKS 中转模板已启用' : 'SOCKS 中转模板已停用');
     await loadNodes();
   } catch (err) {
     node.enabled = previous;
-    showError(err, '更新出站节点状态失败');
+    showError(err, '更新SOCKS 中转模板状态失败');
   } finally {
     await loadNodes();
     togglingIds.value = removePendingId(togglingIds.value, node.id);
@@ -365,17 +369,17 @@ onMounted(loadNodes);
 <template>
   <section class="socks-management-page" :class="{ loading }">
     <header class="socks-page-header">
-      <div>
-        <h1>出站节点</h1>
-        <p>维护真实 SOCKS 出站连接；路由节点启用出站中转后会引用这里的地址与认证信息。</p>
+      <div v-if="!embedded">
+        <h1>SOCKS 中转模板</h1>
+        <p>维护真实 SOCKS 出站连接；服务入站启用出站中转后会引用这里的地址与认证信息。</p>
       </div>
       <div class="socks-page-actions">
         <el-select v-model="syncServerId" placeholder="选择来源面板" class="socks-server-select">
           <el-option v-for="server in enabledServers" :key="server.id" :label="server.name" :value="server.id" />
         </el-select>
-        <el-button class="socks-secondary-button" :loading="syncingRemote" :disabled="!syncServerId" @click="syncRemoteSocks"><Download :size="15" />导入远端 SOCKS</el-button>
+        <el-button class="socks-secondary-button" :loading="syncingRemote" :disabled="!syncServerId" @click="syncRemoteSocks"><Download :size="15" />从面板复制模板</el-button>
         <el-button class="socks-secondary-button" :loading="loading" @click="loadNodes"><RefreshCw :size="15" />刷新</el-button>
-        <el-button type="primary" @click="openDialog"><Plus :size="15" />添加出站</el-button>
+        <el-button type="primary" @click="openDialog"><Plus :size="15" />添加模板</el-button>
       </div>
     </header>
 
@@ -426,7 +430,7 @@ onMounted(loadNodes);
       <article v-for="node in filteredNodes" :key="node.id" class="socks-outbound-card entity-runtime-card" :class="node.syncTasks?.length ? 'runtime-state-error' : node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="socks-card-header">
           <div class="socks-card-identity">
-            <span class="socks-card-icon entity-name-avatar" :style="entityAvatarStyle(node.name, node.id)">{{ entityInitial(node.name, '出') }}</span>
+            <span class="socks-card-icon entity-name-avatar">{{ entityInitial(node.name, '出') }}</span>
             <div>
               <strong :title="node.name">{{ node.name }}</strong>
               <span>SOCKS 出站 · {{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
@@ -477,8 +481,8 @@ onMounted(loadNodes);
               @change="(enabled: boolean | string | number) => toggleNodeEnabled(node, Boolean(enabled))"
             />
           </el-tooltip>
-          <el-tooltip content="删除出站节点" placement="top">
-            <el-button class="socks-delete-button runtime-icon-button" :loading="deletingIds.has(node.id)" aria-label="删除出站节点" @click="removeNode(node)"><Trash2 :size="15" /></el-button>
+          <el-tooltip content="删除SOCKS 中转模板" placement="top">
+            <el-button class="socks-delete-button runtime-icon-button" :loading="deletingIds.has(node.id)" aria-label="删除SOCKS 中转模板" @click="removeNode(node)"><Trash2 :size="15" /></el-button>
           </el-tooltip>
           </div>
         </footer>
@@ -486,7 +490,7 @@ onMounted(loadNodes);
 
       <div v-if="!filteredNodes.length && !loading" class="socks-empty-state">
         <CloudCog :size="28" />
-        <strong>{{ nodes.length ? '没有符合筛选条件的出站节点' : '暂无出站节点' }}</strong>
+        <strong>{{ nodes.length ? '没有符合筛选条件的SOCKS 中转模板' : '暂无SOCKS 中转模板' }}</strong>
         <span>{{ nodes.length ? '调整筛选条件后再查看' : '使用右上角按钮添加真实 SOCKS 出站，或从已启用面板导入' }}</span>
       </div>
     </div>
@@ -498,14 +502,14 @@ onMounted(loadNodes);
     v-model="dialogVisible"
     :title="editingId ? '编辑 SOCKS 出站' : '添加 SOCKS 出站'"
     width="min(680px, 94vw)"
-    class="socks-dark-dialog"
+    class="socks-dialog"
     destroy-on-close
   >
     <div class="socks-dialog-intro">
       <ShieldCheck :size="18" />
       <div>
         <strong>{{ editingId ? '更新已保存的 SOCKS 出站配置' : '添加真实 SOCKS 出站连接' }}</strong>
-        <span>这里只保存当前系统实际支持的 SOCKS 地址与认证信息，路由节点引用后会同步写入对应远端 Xray。</span>
+        <span>这里只保存当前系统实际支持的 SOCKS 地址与认证信息，服务入站引用后会同步写入对应远端 Xray。</span>
       </div>
     </div>
 
@@ -516,7 +520,7 @@ onMounted(loadNodes);
           <el-form-item label="节点名称"><el-input v-model="form.name" maxlength="120" placeholder="例如 HK-SOCKS-01" /></el-form-item>
           <el-form-item label="启用此出站" class="socks-switch-item">
             <div class="socks-switch-row">
-              <span>停用时不能被新的路由节点选择</span>
+              <span>停用时不能被新的服务入站选择</span>
               <el-switch v-model="form.enabled" />
             </div>
           </el-form-item>
@@ -536,7 +540,7 @@ onMounted(loadNodes);
         <div class="socks-dialog-grid">
           <el-form-item label="用户名"><el-input v-model="form.username" maxlength="120" placeholder="可选 SOCKS 用户名" /></el-form-item>
           <el-form-item label="密码">
-            <el-input v-model="form.password" type="password" show-password maxlength="256" :disabled="clearPassword" placeholder="编辑时留空不修改" />
+            <el-input v-model="form.password" type="text" maxlength="256" :disabled="clearPassword" placeholder="编辑时留空不修改" />
             <el-checkbox v-if="editingId" v-model="clearPassword" class="socks-clear-secret">清除已保存密码</el-checkbox>
           </el-form-item>
           <el-form-item v-if="editingId" label="已保存凭据" class="socks-dialog-full">
@@ -548,14 +552,14 @@ onMounted(loadNodes);
       <section class="socks-dialog-section">
         <header><strong>备注</strong><span>记录线路、机房、用途或维护信息</span></header>
         <div class="socks-dialog-grid">
-          <el-form-item label="备注" class="socks-dialog-full"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="500" placeholder="输入出站节点备注" /></el-form-item>
+          <el-form-item label="备注" class="socks-dialog-full"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="500" placeholder="输入SOCKS 中转模板备注" /></el-form-item>
         </div>
       </section>
     </el-form>
 
     <template #footer>
       <el-button class="socks-secondary-button" @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!form.name.trim() || !form.host.trim() || !form.port" @click="saveNode">{{ editingId ? '保存修改' : '添加出站' }}</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!form.name.trim() || !form.host.trim() || !form.port" @click="saveNode">{{ editingId ? '保存修改' : '添加模板' }}</el-button>
     </template>
   </el-dialog>
 </template>

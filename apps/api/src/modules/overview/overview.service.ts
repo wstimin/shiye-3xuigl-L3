@@ -41,14 +41,16 @@ export class OverviewService {
       enabledPaymentChannels,
       pendingOrders,
       todayPaidOrders,
-      todayRenewals
+      todayRenewals,
+      totalSuiServers,
+      enabledSuiServers
     ] = await this.prisma.$transaction([
       this.prisma.customer.count(),
       this.prisma.customer.count({ where: { status: 'active' } }),
       this.prisma.serviceNode.count(),
       this.prisma.serviceNode.count({ where: { enabled: true } }),
-      this.prisma.xuiServer.count(),
-      this.prisma.xuiServer.count({ where: { enabled: true } }),
+      this.prisma.xuiServer.count({ where: { provider: 'xui' } }),
+      this.prisma.xuiServer.count({ where: { enabled: true, provider: 'xui' } }),
       this.prisma.customerNode.count(),
       this.prisma.customerNode.count({ where: { status: 'active' } }),
       this.prisma.customerNode.count({ where: { status: 'disabled' } }),
@@ -71,7 +73,9 @@ export class OverviewService {
         where: { status: 'success', createdAt: { gte: todayStart } },
         _count: { _all: true },
         _sum: { amount: true }
-      })
+      }),
+      this.prisma.xuiServer.count({ where: { provider: 'sui' } }),
+      this.prisma.xuiServer.count({ where: { enabled: true, provider: 'sui' } })
     ]);
 
     const [recentPayments, recentRenewals, recentCardRedemptions, recentSyncLogs] = await Promise.all([
@@ -176,7 +180,7 @@ export class OverviewService {
         enabled: enabledServiceNodes,
         expiredActive: expiredActiveCustomerNodes
       },
-      servers: { total: totalServers, enabled: enabledServers },
+      servers: { total: totalServers + totalSuiServers, enabled: enabledServers + enabledSuiServers, xui: totalServers, sui: totalSuiServers },
       socksNodes: { total: totalSocksNodes, enabled: enabledSocksNodes },
       cards: { total: totalCards, unused: unusedCards, used: usedCards, disabled: disabledCards },
       payments: {
@@ -204,6 +208,7 @@ export class OverviewService {
 
   private syncActionLabel(action: string) {
     const labels: Record<string, string> = {
+      'sui-operation': 'S-UI 面板操作',
       'disable-expired-nodes': '过期节点检测',
       'disable-traffic-exceeded-nodes': '远端流量同步',
       'service-node-delete': '路由节点删除同步',

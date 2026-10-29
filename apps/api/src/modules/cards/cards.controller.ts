@@ -1,16 +1,29 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { cardGenerateSchema, cardIntegrationSchema, cardListQuerySchema, cardRedeemSchema, cardTemplateUpsertSchema } from '@shiye/shared';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { AuthGuard } from '../../shared/auth.guard.js';
 import { CurrentUser } from '../../shared/current-user.decorator.js';
 import { Roles } from '../../shared/roles.decorator.js';
 import type { SessionUser } from '../../shared/auth.types.js';
 import { ZodValidationPipe } from '../../shared/zod-validation.pipe.js';
 import { CardsService } from './cards.service.js';
+import { ExternalCardsService } from './external-cards.service.js';
 
 @Controller()
 export class CardsController {
-  constructor(private readonly cards: CardsService) {}
+  constructor(private readonly cards: CardsService, private readonly external: ExternalCardsService) {}
+
+  @Get('admin/external-card-redemptions')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  externalRedemptions() { return this.external.list(); }
+
+  @Post('admin/external-card-redemptions/:id/resolve')
+  @UseGuards(AuthGuard)
+  @Roles('admin')
+  resolveExternal(@Param('id') id: string, @Body(new ZodValidationPipe(z.object({ amount: z.coerce.number().finite().positive().max(99999999.99) }))) body: { amount: number }, @CurrentUser() user: SessionUser) {
+    return this.external.resolve(id, body.amount, user.username);
+  }
 
   @Get('admin/cards')
   @UseGuards(AuthGuard)
