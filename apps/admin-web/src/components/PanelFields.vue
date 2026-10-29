@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { randomUuid } from '@shiye/shared';
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { ArrowUp, ArrowDown, Plus, Trash2 } from "lucide-vue-next";
@@ -224,7 +225,7 @@ function addItem() {
           ? 0
           : "";
   if (props.field === "clients" && value && typeof value === "object")
-    (value as PanelRecord).id = crypto.randomUUID();
+    (value as PanelRecord).id = randomUuid();
   emit("update:modelValue", [...items.value, value]);
 }
 async function copyValue() {

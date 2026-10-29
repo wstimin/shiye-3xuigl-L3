@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { randomUuid } from '@shiye/shared';
 import { computed, onMounted, reactive, ref } from 'vue';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
@@ -319,7 +320,7 @@ function renewalRequestId(requestKey: string) {
   const storageKey = `shiye:admin-renewal:${requestKey}`;
   const existing = window.sessionStorage.getItem(storageKey);
   if (existing) return existing;
-  const created = crypto.randomUUID();
+  const created = randomUuid();
   window.sessionStorage.setItem(storageKey, created);
   return created;
 }

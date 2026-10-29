@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { randomUuid } from '@shiye/shared';
 import SuiBusinessLink from "../components/SuiBusinessLink.vue";
 import PanelFields from "../components/PanelFields.vue";
 import { suiRouteRule, suiRouteSchema, suiTagChoices } from "../sui-panel";
@@ -192,14 +193,14 @@ watch(
         config[protocol] = ["vless", "vmess", "tuic"].includes(protocol)
           ? {
               name: "",
-              uuid: crypto.randomUUID(),
-              ...(protocol === "tuic" ? { password: crypto.randomUUID() } : {}),
+              uuid: randomUuid(),
+              ...(protocol === "tuic" ? { password: randomUuid() } : {}),
             }
           : {
               ...(["socks", "http", "mixed"].includes(protocol)
                 ? { username: "" }
                 : { name: "" }),
-              password: crypto.randomUUID(),
+              password: randomUuid(),
             };
       }
     clientConfig.value = config;
@@ -465,7 +466,7 @@ async function editResource(row?: Row) {
       volume: 0,
       expiry: 0,
       links: [],
-      config: { vless: { name: "", uuid: crypto.randomUUID() } },
+      config: { vless: { name: "", uuid: randomUuid() } },
     },
     inbounds: {
       type: "vless",
