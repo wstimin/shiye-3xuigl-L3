@@ -663,7 +663,7 @@ onMounted(async () => {
             v-if="prepared && operation.encoding"
             v-model="draft"
             :schema="bodySchema"
-            :choices="choices"
+            :choices="{ inboundId: inboundChoices, inboundIds: inboundChoices, childId: inboundChoices }"
             :immutable="
               operation.path.includes('/inbounds/update/')
                 ? [

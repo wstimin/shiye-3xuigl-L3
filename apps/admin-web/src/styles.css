@@ -651,6 +651,8 @@ input:focus, select:focus, textarea:focus { outline-color: #b77900; }
   .diagnostics-score-mark { display: none; }
   .diagnostics-score-meta { flex-wrap: wrap; gap: 6px; }
   .panel { padding: 16px; }
+  .panel-toolbar { flex-wrap: wrap; }
+  .overview-shell .el-pagination { flex-wrap: wrap; row-gap: 8px; }
   .template-card-grid, .generated-template-grid { grid-template-columns: 1fr; }
   .login-screen { padding: 24px 16px; }
   .login-layout { display: block; max-width: 420px; }
