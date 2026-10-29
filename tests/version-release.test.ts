@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
 const packageLock = JSON.parse(readFileSync('package-lock.json', 'utf8')) as { version: string; packages: Record<string, { version?: string }> };
@@ -40,6 +41,17 @@ test('release deployment checks allow future versions and new migrations support
   const { findUnsafePendingMigrations } = await import('../scripts/check-update-migrations.mjs');
   const applied = readdirSync('prisma/migrations').filter(name => !name.startsWith('20261029'));
   assert.deepEqual(findUnsafePendingMigrations('prisma/migrations', applied), []);
+});
+
+test('installer reads release identity from wrapped and legacy health responses', () => {
+  const healthFunction = installScript.slice(installScript.indexOf('api_health_matches_installed_release()'), installScript.indexOf('wait_for_api_health_soft()'));
+  const parser = healthFunction.match(/node -e '([^']+)'/)?.[1];
+  assert.ok(parser);
+  const identity = { version: packageJson.version, commit: 'verified-commit', buildTime: '2026-10-30T00:00:00Z' };
+  for (const payload of [identity, { ok: true, data: identity }]) {
+    const result = execFileSync(process.execPath, ['-e', parser], { input: JSON.stringify(payload), encoding: 'utf8' });
+    assert.equal(result, `${identity.version}|${identity.commit}|${identity.buildTime}`);
+  }
 });
 
 function escapeRegex(value: string) {

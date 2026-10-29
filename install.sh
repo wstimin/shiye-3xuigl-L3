@@ -651,7 +651,7 @@ api_health_matches_installed_release() {
   case "${expected_identity}" in *'|'*'|'*) ;; *) return 1 ;; esac
 
   health_payload="$(curl -fsS "${health_url}" 2>/dev/null)" || return 1
-  actual_identity="$(printf '%s' "${health_payload}" | node -e 'let data = ""; process.stdin.on("data", (chunk) => { data += chunk; }); process.stdin.on("end", () => { try { const value = JSON.parse(data); process.stdout.write([value.version, value.commit, value.buildTime].map((item) => String(item || "")).join("|")); } catch {} });' 2>/dev/null)" || return 1
+  actual_identity="$(printf '%s' "${health_payload}" | node -e 'let data = ""; process.stdin.on("data", (chunk) => { data += chunk; }); process.stdin.on("end", () => { try { const payload = JSON.parse(data); const value = payload.data || payload; process.stdout.write([value.version, value.commit, value.buildTime].map((item) => String(item || "")).join("|")); } catch {} });' 2>/dev/null)" || return 1
   [ "${actual_identity}" = "${expected_identity}" ]
 }
 
