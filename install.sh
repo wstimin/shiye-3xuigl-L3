@@ -698,9 +698,9 @@ verify_web_routes_soft() {
   expected_identity="$(installed_release_identity)" || return 1
   for path in / "${admin_path}" "${admin_path}/"; do
     url="http://127.0.0.1:${PORT}${path}"
-    content_type="$(curl -fsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
+    content_type="$(curl -fLsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
     case "${content_type}" in text/html*) ;; *) return 1 ;; esac
-    html="$(curl -fsS "${url}" 2>/dev/null)" || return 1
+    html="$(curl -fLsS "${url}" 2>/dev/null)" || return 1
     actual_identity="$(printf '%s' "${html}" | node -e 'let html = ""; process.stdin.on("data", (chunk) => { html += chunk; }); process.stdin.on("end", () => { const read = (name) => html.match(new RegExp(`<meta[^>]+name=["'\'']${name}["'\''][^>]+content=["'\'']([^"'\'']*)["'\'']`, "i"))?.[1] || ""; process.stdout.write([read("shiye-version"), read("shiye-commit"), read("shiye-build-time")].join("|")); });' 2>/dev/null)" || return 1
     [ "${actual_identity}" = "${expected_identity}" ] || return 1
   done
@@ -711,12 +711,12 @@ verify_web_routes() {
   expected_identity="$(installed_release_identity)" || die "Installed build identity is missing or invalid"
   for path in / "${admin_path}" "${admin_path}/"; do
     url="http://127.0.0.1:${PORT}${path}"
-    content_type="$(curl -fsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
+    content_type="$(curl -fLsS -o /dev/null -D - "${url}" 2>/dev/null | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2; exit}')"
     case "${content_type}" in
       text/html*) ;;
       *) die "Web route ${url} did not return HTML. Got content-type: ${content_type:-none}" ;;
     esac
-    html="$(curl -fsS "${url}" 2>/dev/null)" || die "Web route ${url} could not be read for build identity verification"
+    html="$(curl -fLsS "${url}" 2>/dev/null)" || die "Web route ${url} could not be read for build identity verification"
     actual_identity="$(printf '%s' "${html}" | node -e 'let html = ""; process.stdin.on("data", (chunk) => { html += chunk; }); process.stdin.on("end", () => { const read = (name) => html.match(new RegExp(`<meta[^>]+name=["'\'']${name}["'\''][^>]+content=["'\'']([^"'\'']*)["'\'']`, "i"))?.[1] || ""; process.stdout.write([read("shiye-version"), read("shiye-commit"), read("shiye-build-time")].join("|")); });' 2>/dev/null)" || die "Web route ${url} build identity could not be parsed"
     [ "${actual_identity}" = "${expected_identity}" ] || die "Web route ${url} is not serving the installed build identity"
   done

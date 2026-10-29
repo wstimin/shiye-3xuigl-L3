@@ -26,6 +26,7 @@ test('all product surfaces use the root release version', () => {
   assert.match(installScript, /api_health_matches_installed_release/);
   assert.match(installScript, /installed_release_identity/);
   assert.match(installScript, /value\.version, value\.commit, value\.buildTime/);
+  assert.equal((installScript.match(/html="\$\(curl -fLsS "\$\{url\}"/g) || []).length, 2, 'initial installation and atomic update must follow admin redirects');
   assert.match(installScript, /ExecStart=\$\{node_bin\} \$\{APP_DIR\}\/apps\/api\/dist\/main\.js/);
   assert.match(readFileSync('infra/systemd/shiye-api.service', 'utf8'), /ExecStart=\/usr\/bin\/node \/opt\/shiye\/apps\/api\/dist\/main\.js/);
   assert.match(deployCheck, /verifyFrontendBuildIdentity/);
