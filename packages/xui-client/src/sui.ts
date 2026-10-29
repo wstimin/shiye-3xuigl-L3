@@ -36,7 +36,20 @@ export class SuiClient {
 
   read(object: SuiObject) { return this.request(object); }
   status() { return this.request('status?r=cpu,mem,net,sys,sbd'); }
-  save(object: SuiObject, action: 'new' | 'edit' | 'del' | 'set', data: SuiRecord) {
-    return this.request('save', { object, action, data: action === 'del' ? Number(data.id) : data });
+  async save(object: SuiObject, action: 'new' | 'edit' | 'del' | 'set', data: SuiRecord) {
+    let nativeData: SuiRecord | number | string = data;
+    if (action === 'del') {
+      const id = Number(data.id);
+      if (!Number.isSafeInteger(id) || id <= 0) throw new Error('S-UI 删除需要有效的资源 ID');
+      nativeData = id;
+      if (['inbounds', 'outbounds', 'endpoints', 'services'].includes(object)) {
+        const resources = (await this.read(object))[object];
+        const row = Array.isArray(resources) ? resources.find(item => Number(item?.id) === id) : undefined;
+        if (!row || typeof row.tag !== 'string' || !row.tag) throw new Error('S-UI 资源已不存在，请刷新后重试');
+        // Tagged resources delete by JSON string; clients and TLS delete by numeric ID.
+        nativeData = JSON.stringify(row.tag);
+      }
+    }
+    return this.request('save', { object, action, data: nativeData });
   }
 }

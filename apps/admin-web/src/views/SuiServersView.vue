@@ -170,10 +170,16 @@ watch(
       if (!config[protocol]) {
         config[protocol] = ["vless", "vmess", "tuic"].includes(protocol)
           ? {
+              name: "",
               uuid: crypto.randomUUID(),
               ...(protocol === "tuic" ? { password: crypto.randomUUID() } : {}),
             }
-          : { password: crypto.randomUUID() };
+          : {
+              ...(["socks", "http", "mixed"].includes(protocol)
+                ? { username: "" }
+                : { name: "" }),
+              password: crypto.randomUUID(),
+            };
       }
     clientConfig.value = config;
   },
@@ -438,7 +444,7 @@ async function editResource(row?: Row) {
       volume: 0,
       expiry: 0,
       links: [],
-      config: { vless: { uuid: crypto.randomUUID() } },
+      config: { vless: { name: "", uuid: crypto.randomUUID() } },
     },
     inbounds: {
       type: "vless",
