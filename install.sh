@@ -612,9 +612,7 @@ run_atomic_update() {
 }
 write_service() {
   node_bin="$(command -v node)"
-  npm_bin="$(command -v npm)"
   [ -n "${node_bin}" ] || die "node binary was not found"
-  [ -n "${npm_bin}" ] || die "npm binary was not found"
 
   if ! id shiye >/dev/null 2>&1; then
     useradd --system --home "${APP_DIR}" --shell /usr/sbin/nologin shiye
@@ -630,7 +628,7 @@ After=network.target mysql.service mariadb.service
 Type=simple
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${APP_DIR}/.env
-ExecStart=${npm_bin} run start -w @shiye/api
+ExecStart=${node_bin} ${APP_DIR}/apps/api/dist/main.js
 Restart=always
 RestartSec=3
 User=shiye
