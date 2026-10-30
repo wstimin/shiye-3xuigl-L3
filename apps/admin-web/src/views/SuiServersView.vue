@@ -12,6 +12,8 @@ import {
   type FieldSchema,
 } from "../panel-fields";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useRoute } from 'vue-router';
+const route = useRoute();
 import {
   Activity,
   ArrowLeft,
@@ -713,7 +715,21 @@ async function control(
     busy.value = false;
   }
 }
-onMounted(loadServers);
+onMounted(async () => {
+  await loadServers();
+  const panel = servers.value.find(item => item.id === route.query.serverId);
+  if (!panel) return;
+  resource.value = resources.some(item => item.id === route.query.resource) ? String(route.query.resource) : 'clients';
+  await nextTick();
+  selected.value = panel;
+  await refresh();
+  if (error.value) return;
+  if (route.query.create === '1' && writable.value) await editResource();
+  else if (route.query.inboundId && resource.value === 'inbounds') {
+    const row = rows.value.find(item => Number(item.id) === Number(route.query.inboundId));
+    if (row) await editResource(row);
+  }
+});
 </script>
 
 <template>
@@ -734,6 +750,7 @@ onMounted(loadServers);
         </p>
       </div>
       <div class="hub-actions">
+        <router-link v-if="route.query.from === 'services'" class="hub-button" to="/nodes"><ArrowLeft :size="16" />返回服务入站</router-link>
         <button
           v-if="selected"
           class="hub-button"

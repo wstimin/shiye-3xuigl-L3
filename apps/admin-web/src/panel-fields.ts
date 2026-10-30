@@ -13,6 +13,12 @@ export type FieldSchema = {
 };
 
 const labels: Record<string, string> = {
+  kcpSettings: 'mKCP 设置', xdriveSettings: '存储传输设置', masqueSettings: 'MASQUE 设置', hysteriaSettings: 'Hysteria 设置',
+  tti: '发送间隔（毫秒）', uplinkCapacity: '上传容量（MB/s）', downlinkCapacity: '下载容量（MB/s）', cwndMultiplier: '拥塞窗口倍数', maxSendingWindow: '最大发送窗口',
+  heartbeatPeriod: '心跳周期（秒）', acceptProxyProtocol: '接受代理协议', allowTransparent: '允许透明代理', portMap: '端口映射', allowedNetwork: '允许的网络类型', followRedirect: '跟随重定向', rewritePort: '重写目标端口',
+  noKernelTun: '使用用户态隧道', subnetIp: '隧道子网地址', subnetCidr: '子网掩码位数', fakeTlsDomain: '伪装 TLS 域名', primaryDns: '首选解析服务器', secondaryDns: '备用解析服务器', externalInterface: '出口网卡', kernelMode: '内核模式', ipv6Enabled: '启用 IPv6',
+  gateway: '网关', userLevel: '用户等级', autoSystemRoutingTable: '自动系统路由表', autoOutboundsInterface: '出站网卡', congestion_control: '拥塞控制', udp_relay_mode: 'UDP 转发模式', zero_rtt_handshake: '零往返握手', log_level: '日志级别', max_idle_time: '最大空闲时间（秒）', authentication_timeout: '认证超时（秒）', max_udp_relay_packet_size: 'UDP 数据包上限',
+  udpIdleTimeout: 'UDP 空闲超时（秒）', remoteFolder: '远端目录', secrets: '访问凭据列表', service: '存储服务',
   clientReverseTags: "客户端反向连接标签", geodataSources: "规则数据来源", file: "文件", inboundTags: "入站标签", rewriteAddress: "重写目标地址", overrideAddress: "覆盖目标地址",
   cpu: "处理器使用率", cpuCores: "物理核心", logicalPro: "逻辑处理器", cpuSpeedMhz: "处理器频率（MHz）",
   mem: "内存", swap: "交换空间", disk: "磁盘", current: "已使用", diskIO: "磁盘读写速度", diskTraffic: "磁盘累计读写",
@@ -295,7 +301,6 @@ const labels: Record<string, string> = {
   serverKey: "服务器密钥",
   address_resolver: "地址解析服务器",
   packet_encoding: "数据包编码",
-  congestion_control: "拥塞控制",
   up_mbps: "上传速率（Mbps）",
   down_mbps: "下载速率（Mbps）",
   masquerade: "伪装地址",
@@ -568,7 +573,7 @@ export const fieldOptions: Record<string, string[]> = {
     "wireguard",
   ],
   security: ["none", "tls", "reality"],
-  network: ["tcp", "ws", "grpc", "xhttp", "httpupgrade", "udp"],
+  network: ["tcp", "kcp", "ws", "grpc", "xhttp", "httpupgrade", "hysteria", "xdrive", "masque", "udp"],
   level: ["trace", "debug", "info", "warn", "error", "fatal"],
   loglevel: ["debug", "info", "warning", "error", "none"],
   scope: ["admin", "monitor", "node-sync", "node-admin"],

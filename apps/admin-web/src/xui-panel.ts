@@ -242,6 +242,9 @@ export function unwrapPanelResult(value: unknown): unknown {
   }
   return value;
 }
+export function operationParameters(item: PanelOperation): PanelRecord {
+  return Object.fromEntries(item.parameters.map(field => [field.name, field.name === 'count' ? 100 : field.schema.default ?? (field.schema.type === 'boolean' ? false : '')]));
+}
 export function xuiClientFormValue(value: unknown): PanelRecord {
   const root = value as PanelRecord;
   const client = { ...((root.client || root) as PanelRecord) };

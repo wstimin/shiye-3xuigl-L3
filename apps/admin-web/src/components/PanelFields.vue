@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { randomUuid } from '@shiye/shared';
 import RemarkTemplate from './RemarkTemplate.vue';
+import { nativeInboundSettings, nativeInboundStream, xrayTransportDefaults, mapEntry } from '../xray-inbound-fields';
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { ArrowUp, ArrowDown, Plus, Trash2 } from "lucide-vue-next";
@@ -58,6 +59,7 @@ const serialized = computed(() => {
 });
 
 const uploadName = ref("");
+const mapKey = ref('');
 const schema = computed(() => normalizeSchema(props.schema));
 const isArray = computed(
   () => Array.isArray(props.modelValue) || schema.value.type === "array",
@@ -174,11 +176,13 @@ function changeKey(key: string, value: unknown) {
     record.value.settings &&
     typeof record.value.settings === "object" &&
     value !== record.value.protocol
-  )
-    next.settings = xrayProtocolSettings(
-      String(value),
-      props.field === "outbounds",
-    );
+  ) {
+    next.settings = props.field === 'outbounds' ? xrayProtocolSettings(String(value), true) : nativeInboundSettings(String(value)) || xrayProtocolSettings(String(value), false);
+    if (props.field !== 'outbounds' && 'streamSettings' in record.value) {
+      next.streamSettings = nativeInboundStream(String(value), (record.value.streamSettings || {}) as PanelRecord);
+      if (['wireguard', 'amneziawg', 'mtproto', 'tuic'].includes(String(value)) && record.value.sniffing) next.sniffing = { enabled: false };
+    }
+  }
   if (props.field === "streamSettings" && key === "security") {
     if (value === "tls" && !next.tlsSettings)
       next.tlsSettings = {
@@ -195,17 +199,20 @@ function changeKey(key: string, value: unknown) {
       };
   }
   if (props.field === "streamSettings" && key === "network") {
-    const defaults: Record<string, PanelRecord> = {
-      ws: { path: "/", headers: { Host: "" } },
-      grpc: { serviceName: "" },
-      xhttp: { path: "/", host: "", mode: "auto" },
-      httpupgrade: { path: "/", host: "" },
-    };
     const settingsKey = `${String(value)}Settings`;
-    if (defaults[String(value)] && !next[settingsKey])
-      next[settingsKey] = defaults[String(value)];
+    if (xrayTransportDefaults[String(value)] && !next[settingsKey])
+      next[settingsKey] = clonePanelValue(xrayTransportDefaults[String(value)]);
+    if (value === 'kcp') next.security = 'none';
   }
   emit("update:modelValue", next);
+}
+function addMapEntry() {
+  try { emit('update:modelValue', mapEntry(record.value, mapKey.value.trim(), '')); mapKey.value = ''; }
+  catch (error) { ElMessage.error((error as Error).message); }
+}
+function renameMapEntry(key: string, event: Event) {
+  try { emit('update:modelValue', mapEntry(record.value, (event.target as HTMLInputElement).value.trim(), record.value[key], key)); }
+  catch (error) { (event.target as HTMLInputElement).value = key; ElMessage.error((error as Error).message); }
 }
 function changeItem(index: number, value: unknown) {
   const copy = [...items.value];
@@ -264,6 +271,10 @@ async function readConfig(event: Event) {
 
 <template>
   <PanelFields v-if="serialized" :model-value="serialized" :schema="{ ...schema, type: Array.isArray(serialized) ? 'array' : 'object' }" :field="field" :readonly="readonly" :disabled="disabled" :choices="choices" :immutable="immutable" :presets="presets" :required="required" :file-fields="fileFields" @update:model-value="emit('update:modelValue', encodePanelValue($event, modelValue, field))" />
+  <div v-else-if="isObject && !readonly && ['headers', 'portMap', 'hosts'].includes(field)" class="panel-map-editor">
+    <div v-for="key in keys" :key="key" class="panel-map-row"><input :value="key" :aria-label="field === 'portMap' ? '来源端口' : '项目名称'" :disabled="disabled" @change="renameMapEntry(key, $event)" /><PanelFields :model-value="record[key]" :field="key" :disabled="disabled" @update:model-value="changeKey(key, $event)" /><button type="button" class="hub-link danger" :disabled="disabled" @click="emit('update:modelValue', Object.fromEntries(Object.entries(record).filter(([name]) => name !== key)))">删除</button></div>
+    <div class="panel-map-row"><input v-model="mapKey" :aria-label="field === 'portMap' ? '新增来源端口' : '新增项目名称'" :placeholder="field === 'portMap' ? '来源端口，例如 8080' : '输入项目名称'" :disabled="disabled" /><button type="button" class="hub-button" :disabled="disabled || !mapKey.trim()" @click="addMapEntry">添加{{ field === 'portMap' ? '端口映射' : '项目' }}</button></div>
+  </div>
   <div
     v-else-if="isObject"
     class="panel-fields"
@@ -449,3 +460,10 @@ async function readConfig(event: Event) {
     ><small v-if="date">留空表示不限期</small>
   </div>
 </template>
+
+<style scoped>
+.panel-map-editor { display: grid; gap: 12px; }
+.panel-map-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.panel-map-row > input { flex: 1; min-width: 120px; }
+.panel-map-row > :nth-child(2) { flex: 1; min-width: 120px; }
+</style>

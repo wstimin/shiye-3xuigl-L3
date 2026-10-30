@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PanelInboundPicker from '../components/PanelInboundPicker.vue';
 import ServicePricingDialog from '../components/ServicePricingDialog.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import 'element-plus/es/components/alert/style/css';
@@ -25,7 +26,6 @@ import {
   Gauge,
   MoreHorizontal,
   Network,
-  Plus,
   RadioTower,
   RefreshCw,
   RotateCcw,
@@ -48,6 +48,7 @@ type OperationResult = { state?: 'success' | 'partial' | 'failed'; message?: str
 type RealityDetection = { target: string; serverName: string; source: 'scan' | 'configured' | 'preset' };
 type SocksNode = { id: string; name: string; host: string; port: number; enabled: boolean };
 type ServiceNodeConfig = {
+  suiClientId?: number;
   encryption?: string;
   transport?: string;
   tcpHeaderType?: string;
@@ -391,11 +392,6 @@ function handleServerChange() {
   void detectReality();
 }
 
-function openDialog() {
-  resetForm();
-  dialogVisible.value = true;
-}
-
 function editNode(node: ServiceNode) {
   if (node.server?.provider === 'sui') { suiEditing.value = node; return; }
   const config = node.config || {};
@@ -710,12 +706,12 @@ watch(() => form.transport, () => {
       </div>
       <div class="node-page-actions">
         <el-button class="node-secondary-button" :loading="loading" @click="loadNodes"><RefreshCw :size="15" />刷新</el-button>
-        <router-link class="hub-button" to="/sui-servers">接入 S-UI 服务</router-link>
-        <el-button type="primary" @click="openDialog"><Plus :size="15" />创建节点</el-button>
       </div>
     </header>
 
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="node-page-alert" />
+
+    <PanelInboundPicker :panels="servers" :linked="nodes" @connected="loadNodes" />
 
     <div class="node-stat-grid">
       <article class="node-stat-card">
@@ -758,7 +754,7 @@ watch(() => form.transport, () => {
     </div>
 
     <div v-loading="loading" class="node-card-grid">
-      <article v-for="node in filteredNodes" :key="node.id" class="route-node-card entity-runtime-card" :class="node.syncTasks?.length ? 'runtime-state-error' : node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
+      <article v-for="node in filteredNodes" :id="'service-' + node.id" :key="node.id" class="route-node-card entity-runtime-card" :class="node.syncTasks?.length ? 'runtime-state-error' : node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
         <header class="route-node-card-header">
           <div class="route-node-identity">
             <span class="route-node-icon entity-name-avatar">{{ entityInitial(node.name, '节') }}</span>

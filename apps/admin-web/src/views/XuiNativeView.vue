@@ -13,12 +13,14 @@ import PanelFields from "../components/PanelFields.vue";
 import PanelDetails from '../components/PanelDetails.vue';
 import PanelConfig from '../components/PanelConfig.vue';
 import PanelOverview from '../components/PanelOverview.vue';
+import { xrayInboundProtocols, wireguardKeys } from '../xray-inbound-fields';
 import { api } from "../api";
 import {
   clonePanelValue,
   emptyPanelItem,
   decodePanelValue,
   encodePanelValue,
+  normalizeSchema,
   type FieldSchema,
   type PanelRecord,
 } from "../panel-fields";
@@ -26,6 +28,7 @@ import {
   operationLabel,
   operationSection,
   operationTemplate,
+  operationParameters,
   panelSections,
   unwrapPanelResult,
   visibleOperation,
@@ -175,7 +178,7 @@ const binaryField = computed(
     )?.[0],
 );
 const bodySchema = computed<FieldSchema>(() => {
-  const schema = operation.value?.schema || {};
+  const schema = normalizeSchema(operation.value?.schema);
   if (Array.isArray(draft.value))
     return {
       type: "array",
@@ -195,16 +198,7 @@ const bodySchema = computed<FieldSchema>(() => {
   );
   if (/\/inbounds\/(add|update)/.test(operation.value?.path || ""))
     properties.protocol = {
-      enum: [
-        "vless",
-        "vmess",
-        "trojan",
-        "shadowsocks",
-        "socks",
-        "http",
-        "wireguard",
-        "hysteria",
-      ],
+      enum: properties.protocol?.enum || xrayInboundProtocols,
     };
   return { ...schema, properties };
 });
@@ -261,6 +255,19 @@ async function readOperation(id: string, values: PanelRecord = {}) {
   if (!item) throw new Error("当前面板版本尚不支持这项操作");
   return unwrapPanelResult(await request(item, values));
 }
+async function generateInboundKeys() {
+  if (running.value || loading.value) return;
+  running.value = true; error.value = '';
+  try {
+    const item = catalog.value.find(item => item.path.endsWith('/getNewX25519Cert'));
+    if (!item) throw new Error('当前面板未提供密钥生成功能，请填写已有密钥');
+    const keys = wireguardKeys(unwrapPanelResult(await request(item)) as PanelRecord);
+    const record = draft.value as PanelRecord, settings = (record.settings || {}) as PanelRecord;
+    draft.value = { ...record, settings: record.protocol === 'wireguard' ? { ...settings, secretKey: keys.privateKey } : { ...settings, server: { ...settings.server as PanelRecord, ...keys } } };
+    ElMessage.success('密钥已生成并填入表单，保存后才会生效');
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '密钥生成失败'; }
+  finally { running.value = false; }
+}
 async function loadCatalog() {
   const version = ++revision;
   catalog.value = [];
@@ -283,8 +290,16 @@ async function loadCatalog() {
   } finally {
     if (version === revision) loading.value = false;
   }
-  if (version === revision && catalog.value.length)
-    await openSection("overview");
+  if (version === revision && catalog.value.length) {
+    const initial = tabs.value.some(tab => tab.id === route.query.section) ? String(route.query.section) : 'overview';
+    await openSection(initial);
+    const action = route.query.create === '1' && initial === 'inbounds' ? findOperation('POST /panel/api/inbounds/add') : undefined;
+    if (action && operationSection(action) === initial) await choose(action);
+    else if (initial === 'inbounds' && route.query.inboundId) {
+      const row = rows.value.find(item => Number(item.id) === Number(route.query.inboundId));
+      if (row) rowAction('update', row);
+    }
+  }
 }
 watch(serverId, loadCatalog);
 async function openSection(id: string) {
@@ -306,12 +321,7 @@ async function choose(item: PanelOperation, row?: PanelRecord) {
   prepared.value = false;
   completed.value = false;
   editTarget.value = false;
-  parameters.value = Object.fromEntries(
-    item.parameters.map((field) => [
-      field.name,
-      field.name === "count" ? 100 : (field.schema.default ?? ""),
-    ]),
-  );
+  parameters.value = operationParameters(item);
   if (row)
     for (const field of item.parameters)
       parameters.value[field.name] =
@@ -546,8 +556,8 @@ onMounted(async () => {
         <h1>面板管理</h1>
         <p>选择面板后，直接管理入站、客户端、网络、证书与运行设置。</p>
       </div>
-      <router-link class="hub-button" to="/xui-servers"
-        ><ArrowLeft :size="15" />返回面板列表</router-link
+      <router-link class="hub-button" :to="route.query.from === 'services' ? '/nodes' : '/xui-servers'"
+        ><ArrowLeft :size="15" />{{ route.query.from === 'services' ? '返回服务入站' : '返回面板列表' }}</router-link
       >
     </header>
     <div class="hub-actions">
@@ -629,6 +639,7 @@ onMounted(async () => {
             <Settings2 :size="18" />
             <h3>{{ operationLabel(operation) }}</h3>
           </header>
+          <div v-if="prepared && /\/inbounds\/(add|update)/.test(operation.path) && ['wireguard', 'amneziawg'].includes(String((draft as PanelRecord).protocol))" class="hub-alert"><span>服务器密钥可自动生成；更换已有密钥后，原客户端需要重新配置。</span><button type="button" class="hub-button" :disabled="running" @click="generateInboundKeys">生成协议密钥</button></div>
           <label v-if="!prepared && !error"
             >选择要编辑的资源<select
               aria-label="选择要编辑的资源"

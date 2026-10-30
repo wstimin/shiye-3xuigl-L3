@@ -13,11 +13,17 @@ import {
   operationLabel,
   operationSection,
   operationTemplate,
+  operationParameters,
   unwrapPanelResult,
   xuiClientFormValue,
   type PanelOperation,
 } from "../apps/admin-web/src/xui-panel.js";
 import { nativeCatalog } from "../apps/api/src/modules/xui/native-api.js";
+
+test('required native boolean controls submit an explicit false without requiring a checkbox toggle', () => {
+  const item = { parameters: [{ name: 'keepTraffic', required: true, schema: { type: 'boolean' } }, { name: 'enabled', schema: { type: 'boolean', default: true } }, { name: 'count', schema: {} }, { name: 'id', schema: {} }] } as PanelOperation;
+  assert.deepEqual(operationParameters(item), { keepTraffic: false, enabled: true, count: 100, id: '' });
+});
 
 test('serialized native response envelopes retain the nested write encoding', () => {
   const core = { xraySetting: JSON.stringify({ outbounds: [{ tag: 'direct', protocol: 'freedom' }], routing: { rules: [] } }), outboundTestUrl: 'https://example.com' };
