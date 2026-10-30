@@ -2,6 +2,8 @@
 import { randomUuid } from '@shiye/shared';
 import SuiBusinessLink from "../components/SuiBusinessLink.vue";
 import PanelFields from "../components/PanelFields.vue";
+import PanelDetails from '../components/PanelDetails.vue';
+import PanelConfig from '../components/PanelConfig.vue';
 import { suiRouteRule, suiRouteSchema, suiTagChoices } from "../sui-panel";
 import {
   clonePanelValue,
@@ -1076,7 +1078,8 @@ onMounted(loadServers);
           "
           class="hub-resource-detail"
         >
-          <PanelFields :model-value="decodePanelValue(data)" readonly />
+          <PanelConfig v-if="resource === 'config'" :model-value="decodePanelValue((data as Row)?.config ?? data)" mode="core" readonly />
+          <PanelDetails v-else :model-value="decodePanelValue(data)" />
         </div>
         <div v-else class="hub-empty">
           <Layers :size="30" />
@@ -1293,7 +1296,7 @@ onMounted(loadServers);
             </section>
             <details class="panel-credential-section">
               <summary>DNS 与其他核心设置</summary>
-              <PanelFields v-model="otherConfig" :disabled="busy" />
+              <PanelConfig v-model="otherConfig" mode="core" :disabled="busy" />
             </details>
           </template>
           <PanelFields

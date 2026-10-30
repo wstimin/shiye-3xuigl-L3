@@ -13,6 +13,20 @@ export type FieldSchema = {
 };
 
 const labels: Record<string, string> = {
+  clientReverseTags: "客户端反向连接标签", geodataSources: "规则数据来源", file: "文件", inboundTags: "入站标签", rewriteAddress: "重写目标地址", overrideAddress: "覆盖目标地址",
+  cpu: "处理器使用率", cpuCores: "物理核心", logicalPro: "逻辑处理器", cpuSpeedMhz: "处理器频率（MHz）",
+  mem: "内存", swap: "交换空间", disk: "磁盘", current: "已使用", diskIO: "磁盘读写速度", diskTraffic: "磁盘累计读写",
+  read: "读取", write: "写入", xray: "Xray 核心", state: "运行状态", errorMsg: "异常信息", version: "版本",
+  amneziawg: "AmneziaWG 服务", configured: "已配置", running: "运行中", panelVersion: "面板版本", panelGuid: "面板标识",
+  uptime: "运行时长", loads: "系统负载", tcpCount: "TCP 连接数", udpCount: "UDP 连接数", netIO: "实时网络速度", netTraffic: "累计网络流量",
+  pktUp: "发送数据包", pktDown: "接收数据包", sent: "已发送", recv: "已接收", pktSent: "发送数据包", pktRecv: "接收数据包",
+  publicIP: "公网地址", ipv4: "IPv4 地址", ipv6: "IPv6 地址", appStats: "面板进程", threads: "线程数",
+  trustedProxyCIDRs: "可信代理地址范围", realityScanCandidates: "Reality 候选目标", ipLimitAllowlist: "IP 限制白名单", panelOutbound: "面板默认出口",
+  pageSize: "每页记录数", expireDiff: "到期提醒提前天数", trafficDiff: "流量提醒阈值", remarkTemplate: "备注模板", datepicker: "日期格式",
+  outboundDownThreshold: "出站离线告警阈值", nodeDownThreshold: "节点离线告警阈值", restartXrayOnClientDisable: "停用客户端后重启核心",
+  twoFactorEnable: "启用双重验证", twoFactorToken: "双重验证密钥", warpUpdateInterval: "WARP 更新间隔",
+  externalSubUserAgent: "外部订阅访问标识", externalTrafficInformEnable: "启用外部流量通知", externalTrafficInformURI: "外部流量通知地址",
+  hasApiToken: "已设置访问令牌", hasWarpSecret: "已设置 WARP 密钥", hasNordSecret: "已设置 Nord 密钥",
   pass: "密码",
   accounts: "登录账号",
   vnext: "代理服务器",
@@ -91,22 +105,10 @@ const labels: Record<string, string> = {
   msg: "说明",
   success: "操作成功",
   status: "状态",
-  state: "运行状态",
-  running: "运行中",
-  version: "版本",
-  panelVersion: "面板版本",
   xrayVersion: "核心版本",
-  xray: "代理核心",
-  cpu: "处理器使用率",
-  mem: "内存",
   memory: "内存",
-  disk: "磁盘",
-  swap: "交换空间",
-  netIO: "网络流量",
-  netTraffic: "累计流量",
   netUp: "上传流量",
   netDown: "下载流量",
-  uptime: "运行时长",
   uptimeSecs: "运行秒数",
   publicKey: "公钥",
   privateKey: "私钥",
@@ -158,7 +160,6 @@ const labels: Record<string, string> = {
   scope: "权限",
   expectedScope: "原有权限",
   clearApiToken: "清除已保存的令牌",
-  hasApiToken: "已保存令牌",
   basePath: "面板路径",
   scheme: "连接方式",
   allowPrivateAddress: "允许内网地址",
@@ -168,7 +169,6 @@ const labels: Record<string, string> = {
   pinnedCertSha256: "证书指纹",
   tlsVerifyMode: "证书验证方式",
   inboundSyncMode: "入站同步方式",
-  inboundTags: "入站标签",
   outboundTag: "目标出站",
   outbound: "目标出站",
   outbounds: "出站列表",
@@ -424,7 +424,21 @@ export const optionLabels: Record<string, string> = {
   set: "保存",
   "": "默认",
 };
+const families: Record<string, string> = { subHapp: 'Happ 客户端', subIncy: 'Incy 客户端', subClash: 'Clash 订阅', subJson: '通用订阅', sub: '订阅', tgBot: 'Telegram 通知', tg: 'Telegram', smtp: '邮件通知', discordBot: 'Discord 通知', discord: 'Discord', ldap: '账号目录', has: '已设置' };
+const suffixes: Record<string, string> = {
+  Enable: '启用', Enabled: '启用', Token: '令牌', Password: '密码', BotToken: '机器人令牌', TwoFactorToken: '双重验证密钥', ApiToken: '访问令牌', LdapPassword: '目录密码', TgBotToken: 'Telegram 令牌', SmtpPassword: '邮件密码', DiscordBotToken: 'Discord 令牌',
+  Proxy: '代理地址', APIServer: '服务地址', ChatId: '群组编号', RunTime: '发送时间', Backup: '自动备份', BotBackup: '自动备份', Cpu: '处理器告警阈值', Memory: '内存告警阈值', Lang: '语言', EnabledEvents: '通知事件', Username: '登录账号', FromName: '发件人名称', To: '收件人', EncryptionType: '连接加密', ChannelId: '频道编号', AdminIds: '管理员编号',
+  Host: '主机', Port: '端口', UseTLS: '启用 TLS', InsecureSkipVerify: '跳过证书验证', BindDN: '绑定身份', BaseDN: '搜索范围', UserFilter: '用户筛选', UserAttr: '用户名属性', VlessField: 'VLESS 标识属性', SyncCron: '同步计划', FlagField: '状态属性', TruthyValues: '启用状态值', InvertFlag: '反转启用状态', InboundTags: '授权入站', AutoCreate: '自动创建账号', AutoDelete: '自动删除账号', DefaultTotalGB: '默认流量额度（GB）', DefaultExpiryDays: '默认有效天数', DefaultLimitIP: '默认 IP 上限',
+  ShowIdentityOnAllLinks: '所有链接显示身份', InfoNodeEnable: '显示信息节点', HostSortMode: '主机排序方式', CalendarExpireInclusive: '到期日包含当天', ExpiredTemplate: '到期提示模板', TrafficDepletedTemplate: '流量用尽提示模板',
+  AutoDetect: '自动识别', AlwaysArray: '始终返回列表', UserAgentRegex: '客户端识别规则', Title: '标题', SupportUrl: '支持地址', ProfileMode: '配置模式', ProfileUrl: '配置地址', Announce: '公告', EnableRouting: '启用分流', RoutingRules: '分流规则', Rules: '规则', RemoteDNS: '远程解析', Mux: '多路复用', Dns: '域名解析', FinalMask: '最终伪装', Observatory: '健康探测', ThemeDir: '主题目录', HideSettings: '隐藏设置',
+  ProviderId: '服务商标识', NewUrl: '新地址', FallbackUrl: '备用地址', SubInfoColor: '信息颜色', SubInfoText: '信息文本', SubInfoButtonText: '信息按钮文字', SubInfoButtonLink: '信息按钮链接', SubExpire: '到期提示', SubExpireButtonLink: '到期按钮链接', NotificationExpire: '到期通知', NoLimit: '显示不限量', AlwaysHwid: '始终携带设备标识', TunMode: '虚拟网卡模式', TunType: '虚拟网卡类型', ExcludeRoutes: '排除路由', ExcludeApns: '排除接入点', ColorProfile: '配色方案', PingType: '延迟检测方式', AutoConnect: '自动连接', AutoConnectType: '自动连接方式', PerAppMode: '按应用分流模式', PerAppList: '应用列表', LocalProxyAuth: '本地代理认证',
+  AppAutoDetect: '自动识别应用', ProfileDescription: '配置说明', SortOrder: '排序方式', SupportEmail: '支持邮箱', AnnounceUrl: '公告地址', PremiumUrl: '升级地址', BannerText: '横幅文字', BannerButtonText: '横幅按钮文字', BannerButtonUrl: '横幅按钮地址', BannerBgColor: '横幅背景色', BannerButtonColor: '横幅按钮颜色', HideUrl: '隐藏地址', HideCheck: '隐藏检测', NoLimitEnabled: '启用不限量显示', PerAppEnable: '启用按应用分流', FragmentationEnable: '启用分片', FragmentLength: '分片长度', FragmentInterval: '分片间隔', FragmentPackets: '分片数据包', NoisesEnable: '启用噪声', NoisesType: '噪声类型', NoisesPacket: '噪声数据包', NoisesDelay: '噪声延迟', ResolveEnable: '启用预解析', ResolveDnsDomain: '预解析域名', ResolveDnsIp: '预解析地址',
+};
 export function fieldLabel(key: string) {
+  if (labels[key]) return labels[key];
+  for (const [prefix, label] of Object.entries(families)) {
+    if (key.startsWith(prefix) && suffixes[key.slice(prefix.length)]) return `${label} · ${suffixes[key.slice(prefix.length)]}`;
+  }
   return (
     labels[key] || key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ")
   );

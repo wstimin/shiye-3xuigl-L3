@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { randomUuid } from '@shiye/shared';
+import RemarkTemplate from './RemarkTemplate.vue';
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { ArrowUp, ArrowDown, Plus, Trash2 } from "lucide-vue-next";
 import {
   fieldLabel,
+  decodePanelValue,
+  encodePanelValue,
   emptyPanelItem,
   clonePanelValue,
   xrayProtocolSettings,
@@ -48,6 +51,11 @@ const props = withDefaults(
   },
 );
 const emit = defineEmits<{ "update:modelValue": [value: unknown] }>();
+const serialized = computed(() => {
+  if (typeof props.modelValue !== 'string' || isSecretField(props.field)) return undefined;
+  const value = decodePanelValue(props.modelValue, props.field);
+  return value && typeof value === 'object' ? value : undefined;
+});
 
 const uploadName = ref("");
 const schema = computed(() => normalizeSchema(props.schema));
@@ -255,8 +263,9 @@ async function readConfig(event: Event) {
 </script>
 
 <template>
+  <PanelFields v-if="serialized" :model-value="serialized" :schema="{ ...schema, type: Array.isArray(serialized) ? 'array' : 'object' }" :field="field" :readonly="readonly" :disabled="disabled" :choices="choices" :immutable="immutable" :presets="presets" :required="required" :file-fields="fileFields" @update:model-value="emit('update:modelValue', encodePanelValue($event, modelValue, field))" />
   <div
-    v-if="isObject"
+    v-else-if="isObject"
     class="panel-fields"
     :class="{ 'is-readonly': readonly }"
   >
@@ -354,6 +363,7 @@ async function readConfig(event: Event) {
       </button></template
     >
   </div>
+  <RemarkTemplate v-else-if="field === 'remarkTemplate'" :model-value="String(modelValue || '')" :disabled="disabled" @update:model-value="emit('update:modelValue', $event)" />
   <div v-else-if="fileFields?.includes(field)" class="panel-field-input">
     <input
       type="file"

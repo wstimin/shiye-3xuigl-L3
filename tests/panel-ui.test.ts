@@ -13,10 +13,26 @@ import {
   operationLabel,
   operationSection,
   operationTemplate,
+  unwrapPanelResult,
   xuiClientFormValue,
   type PanelOperation,
 } from "../apps/admin-web/src/xui-panel.js";
 import { nativeCatalog } from "../apps/api/src/modules/xui/native-api.js";
+
+test('serialized native response envelopes retain the nested write encoding', () => {
+  const core = { xraySetting: JSON.stringify({ outbounds: [{ tag: 'direct', protocol: 'freedom' }], routing: { rules: [] } }), outboundTestUrl: 'https://example.com' };
+  const original = unwrapPanelResult({ success: true, obj: JSON.stringify(core) }) as any;
+  assert.deepEqual(original, core);
+  const draft = decodePanelValue(original) as any;
+  assert.equal(draft.xraySetting.outbounds[0].tag, 'direct');
+  draft.xraySetting.outbounds[0].tag = 'renamed';
+  const body = encodePanelValue(draft, original) as any;
+  assert.equal(typeof body, 'object');
+  assert.equal(typeof body.xraySetting, 'string');
+  assert.equal(JSON.parse(body.xraySetting).outbounds[0].tag, 'renamed');
+  assert.deepEqual(unwrapPanelResult({ obj: core }), core);
+  assert.equal(unwrapPanelResult({ obj: '[plain log line' }), '[plain log line');
+});
 
 test("visual settings preserve nested objects, unknown fields and legacy string encoding", () => {
   const original = {

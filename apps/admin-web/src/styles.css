@@ -236,7 +236,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .hub-resource-nav { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border); }
 .hub-resource-nav button { padding: 12px 14px; border: 0; background: transparent; color: var(--muted); white-space: nowrap; display: flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
 .hub-resource-nav button.active { border-bottom-color: var(--border-strong); color: var(--primary-strong); font-weight: 600; }
-.hub-resource-detail { background: var(--surface); padding: 20px; max-height: 560px; overflow: auto; }
+.hub-resource-detail { background: var(--surface); padding: 20px; }
 .resource-detail { display: block; color: var(--muted); font-size: 15px; margin-top: 4px; }
 .hub-control { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 20px; border: 1px solid var(--border); background: var(--surface); border-radius: 8px; }
 .hub-control p { color: var(--muted); font-size: 15px; margin-top: 4px; }

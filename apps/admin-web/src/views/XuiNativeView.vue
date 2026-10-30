@@ -10,6 +10,9 @@ import {
 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import PanelFields from "../components/PanelFields.vue";
+import PanelDetails from '../components/PanelDetails.vue';
+import PanelConfig from '../components/PanelConfig.vue';
+import PanelOverview from '../components/PanelOverview.vue';
 import { api } from "../api";
 import {
   clonePanelValue,
@@ -315,6 +318,7 @@ async function choose(item: PanelOperation, row?: PanelRecord) {
         row[field.name] ?? (field.name === "id" ? row.id : "") ?? "";
   draft.value = operationTemplate(item);
   original.value = clonePanelValue(draft.value);
+  draft.value = decodePanelValue(draft.value);
   const requiresResource =
     /\/(inbounds|clients|nodes|hosts)\/update\//.test(item.path) ||
     (item.path === "/panel/api/sub-balancers/{id}" && item.method === "POST");
@@ -583,7 +587,7 @@ onMounted(async () => {
         <div class="hub-actions">
           <button
             v-for="item in actions.filter((item) =>
-              /\/add$|\/restartXrayService$/.test(item.path),
+              /\/add$|\/restartXrayService$|\/(xray|setting)\/update$/.test(item.path),
             )"
             :key="item.id"
             class="hub-button primary"
@@ -659,8 +663,9 @@ onMounted(async () => {
               :readonly="editTarget"
             />
           </div>
+          <PanelConfig v-if="prepared && operation.encoding && ['/panel/api/setting/update', '/panel/api/xray/update'].includes(operation.path)" v-model="draft" :mode="operation.path.includes('/setting/') ? 'settings' : 'core'" :schema="bodySchema" :disabled="running" />
           <PanelFields
-            v-if="prepared && operation.encoding"
+            v-else-if="prepared && operation.encoding"
             v-model="draft"
             :schema="bodySchema"
             :choices="{ inboundId: inboundChoices, inboundIds: inboundChoices, childId: inboundChoices }"
@@ -796,7 +801,9 @@ onMounted(async () => {
             </button>
           </div>
           <p v-if="completed && data == null">操作已完成，可返回列表查看最新数据。</p>
-          <PanelFields v-else :model-value="data" readonly />
+          <PanelOverview v-else-if="selected === 'GET /panel/api/server/status'" :model-value="data" />
+          <PanelConfig v-else-if="['POST /panel/api/setting/all', 'POST /panel/api/xray/'].includes(selected)" :model-value="data" :mode="section === 'setting' ? 'settings' : 'core'" readonly />
+          <PanelDetails v-else :model-value="data" />
         </div>
         <div v-else-if="!editing" class="hub-empty">
           <h3>{{ section === "backup" ? "备份与恢复" : "暂无记录" }}</h3>
@@ -813,7 +820,7 @@ onMounted(async () => {
             <h3>资源详情</h3>
             <button class="hub-button" @click="detail = null">收起</button>
           </div>
-          <PanelFields :model-value="detail" readonly />
+          <PanelDetails :model-value="detail" />
         </section>
       </template>
     </section>

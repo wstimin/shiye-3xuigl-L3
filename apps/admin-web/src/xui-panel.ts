@@ -235,7 +235,11 @@ export function visibleOperation(item: PanelOperation) {
 }
 export function unwrapPanelResult(value: unknown): unknown {
   if (value && typeof value === "object" && "obj" in value)
-    return (value as PanelRecord).obj;
+    value = (value as PanelRecord).obj;
+  // Some panel versions serialize the whole result as well as nested config fields.
+  if (typeof value === 'string' && /^\s*[\[{]/.test(value)) {
+    try { return JSON.parse(value); } catch { return value; }
+  }
   return value;
 }
 export function xuiClientFormValue(value: unknown): PanelRecord {

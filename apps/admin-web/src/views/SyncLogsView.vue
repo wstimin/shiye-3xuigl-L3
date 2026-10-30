@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import PanelFields from '../components/PanelFields.vue';
+import PanelDetails from '../components/PanelDetails.vue';
+import { detailSummary } from '../panel-presentation';
 import { decodePanelValue } from '../panel-fields';
 import { computed, onMounted, reactive, ref } from 'vue';
 import 'element-plus/es/components/alert/style/css';
@@ -158,7 +159,7 @@ function shortDetail(value: unknown) {
     labelValue('原因', object.message || object.cause)
   ].filter(Boolean);
   if (parts.length) return parts.join('，');
-  const text = formatDetail(value).replace(/\s+/g, ' ');
+  const text = detailSummary(value);
   return text.length > 110 ? `${text.slice(0, 110)}...` : text;
 }
 
@@ -257,7 +258,7 @@ onMounted(loadLogs);
         <el-tag :type="statusType(selectedLog.status)">{{ statusLabel(selectedLog.status) }}</el-tag>
       </div>
       <el-alert v-if="selectedLog.message" :title="readableMessage(selectedLog)" :type="selectedLog.status === 'failed' ? 'warning' : 'info'" show-icon :closable="false" />
-      <PanelFields :model-value="decodePanelValue(selectedLog.detail)" readonly />
+      <PanelDetails :model-value="decodePanelValue(selectedLog.detail)" />
     </div>
     <template #footer>
       <el-button @click="detailDialogVisible = false">关闭</el-button>

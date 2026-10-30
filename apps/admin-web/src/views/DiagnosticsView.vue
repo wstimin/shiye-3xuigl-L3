@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import PanelFields from '../components/PanelFields.vue';
+import PanelDetails from '../components/PanelDetails.vue';
 import { decodePanelValue } from '../panel-fields';
 import type { Component } from 'vue';
 import 'element-plus/es/components/alert/style/css';
@@ -430,8 +430,8 @@ onMounted(() => loadDiagnostics(false));
           <div v-for="item in selectedCheck.meta || []" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></div>
         </div>
         <div class="diagnostics-json-block">
-          <span>原始详情</span>
-          <PanelFields :model-value="decodePanelValue(selectedCheck.detail)" readonly />
+          <span>检查详情</span>
+          <PanelDetails :model-value="decodePanelValue(selectedCheck.detail)" />
         </div>
       </template>
       <template #footer><el-button @click="detailVisible = false">关闭</el-button></template>
@@ -450,8 +450,8 @@ onMounted(() => loadDiagnostics(false));
           <p>{{ selectedLog.message || '没有附加消息' }}</p>
         </div>
         <div class="diagnostics-json-block">
-          <span>原始详情</span>
-          <PanelFields :model-value="decodePanelValue(selectedLog.detail)" readonly />
+          <span>检查详情</span>
+          <PanelDetails :model-value="decodePanelValue(selectedLog.detail)" />
         </div>
       </template>
       <template #footer><el-button @click="logVisible = false">关闭</el-button></template>

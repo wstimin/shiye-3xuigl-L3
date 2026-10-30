@@ -2,6 +2,7 @@
 import { useRoute } from 'vue-router';
 import SocksNodesView from './SocksNodesView.vue';
 import PanelFields from '../components/PanelFields.vue';
+import PanelDetails from '../components/PanelDetails.vue';
 import { decodePanelValue, type FieldSchema } from '../panel-fields';
 import { computed, onMounted, reactive, ref } from 'vue';
 import 'element-plus/es/components/alert/style/css';
@@ -645,5 +646,5 @@ onMounted(loadResources);
       <el-button type="primary" :loading="saving" :disabled="!routeForm.serverId || !routeForm.name.trim() || !routeForm.ruleText.trim()" @click="saveRoute"><CloudUpload :size="15" />{{ routeForm.pushRemote ? '保存并写入面板' : '仅保存本地' }}</el-button>
     </template>
   </el-dialog>
-  <el-dialog :model-value="Boolean(outboundDetail)" title="出站详情" width="min(860px, 94vw)" @update:model-value="outboundDetail = null"><PanelFields v-if="outboundDetail" :model-value="decodePanelValue(outboundDetail.normalizedConfig)" readonly /></el-dialog>
+  <el-dialog :model-value="Boolean(outboundDetail)" title="出站详情" width="min(860px, 94vw)" @update:model-value="outboundDetail = null"><PanelDetails v-if="outboundDetail" :model-value="decodePanelValue(outboundDetail.normalizedConfig)" /></el-dialog>
 </template>
