@@ -25,14 +25,14 @@ test('frontend entrypoints avoid unused stores and full Element Plus installatio
   assert.doesNotMatch(userMain, /createPinia|pinia/);
   assert.equal(adminMain.includes('app.use(ElLoading).use(router)'), true);
   for (const source of [adminMain, userMain]) {
-    assert.match(source, /router\.isReady\(\)\.then\(\(\) => app\.mount\('#app'\)\)/);
-    assert.equal(source.indexOf('router.isReady()'), source.lastIndexOf('router.isReady()'));
+    assert.match(source, /app\.mount\('#app'\)/);
+    assert.doesNotMatch(source, /router\.isReady\(\)/);
   }
 });
 
 test('frontend builds keep stable vendor chunks', () => {
   assert.match(adminVite, /manualChunks/);
-  assert.equal(adminVite.includes("return 'ui-vendor'"), false);
+  assert.equal(adminVite.includes("return 'ui-vendor'"), true);
   assert.match(adminVite, /return 'vue-vendor'/);
   assert.match(userVite, /manualChunks/);
   assert.match(userVite, /return 'qrcode-vendor'/);

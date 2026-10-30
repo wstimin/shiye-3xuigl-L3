@@ -103,7 +103,7 @@ async function loadNodes() {
   try {
     const [socksResult, serviceResult, serverResult] = await Promise.all([
       api<SocksNode[]>('/api/admin/socks-nodes'),
-      api<ServiceNode[]>('/api/admin/service-nodes'),
+      api<ServiceNode[]>('/api/admin/service-nodes?snapshot=1'),
       api<PanelServer[]>('/api/admin/panel-servers')
     ]);
     nodes.value = socksResult;

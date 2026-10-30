@@ -9,7 +9,8 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './modules/app.module.js';
 import { HttpExceptionFilter } from './shared/http-exception.filter.js';
 import { ResponseInterceptor } from './shared/response.interceptor.js';
-import { setHtmlNoStore, setStaticAssetHeaders } from './web-cache.js';
+import { setHtmlNoStore } from './web-cache.js';
+import { serveStaticAssets } from './web-assets.js';
 import { maintenanceActive, beginMaintenanceOperation } from './shared/maintenance-state.js';
 
 async function bootstrap() {
@@ -44,11 +45,10 @@ function serveWebApps(server: express.Express) {
   const rootDir = findRuntimeRoot();
   const userWebDir = join(rootDir, 'dist/user-web');
   const adminWebDir = join(rootDir, 'dist/admin-web');
-  const staticOptions = { index: false, setHeaders: setStaticAssetHeaders };
-  const adminStatic = express.static(adminWebDir, staticOptions);
+  const adminStatic = serveStaticAssets(adminWebDir);
 
   if (existsSync(userWebDir)) {
-    server.use(express.static(userWebDir, staticOptions));
+    server.use(serveStaticAssets(userWebDir));
   }
 
   if (existsSync(adminWebDir)) {

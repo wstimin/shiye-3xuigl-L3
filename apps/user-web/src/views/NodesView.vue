@@ -6,6 +6,7 @@ import { useRoute } from 'vue-router';
 import { ArrowUpRight, ChevronDown, Copy, Network, QrCode, RefreshCw, Search, X } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { readUserNodes } from '../node-loading';
 import { notifyError, notifySuccess } from '../notify';
 import { createNodeQrImage } from '../node-qr';
 import { formatTraffic } from '../traffic';
@@ -59,7 +60,8 @@ const trafficPercent = (node: UserNode) => {
 };
 
 function totalAndRemainingTrafficText(node: UserNode) {
-  if (node.trafficStatus !== 'live') return '获取失败';
+  if (node.trafficStatus === 'cached') return `已同步使用 ${formatTraffic(Number(node.usedTrafficBytes || 0))}${loading.value ? ' · 更新中' : ''}`;
+  if (node.trafficStatus !== 'live') return loading.value ? '正在更新用量' : '用量暂不可用';
   if (node.officialTrafficUnlimited === true) return '总流量 无限，剩余流量 无限';
   return hasFiniteTrafficQuota(node)
     ? `总流量 ${formatTraffic(node.officialTrafficTotalBytes as number)}，剩余流量 ${formatTraffic(node.officialTrafficRemainingBytes as number)}`
@@ -75,16 +77,17 @@ function hasBytes(value?: number | null) {
 }
 
 function trafficStateText(node: UserNode) {
+  if (loading.value) return '正在更新面板用量，先显示最近同步的服务记录。';
   if (node.trafficStatus === 'cached') return node.trafficError || '官方实时流量获取失败，当前显示上次成功同步的数据。';
   if (node.trafficStatus === 'error') return node.trafficError || '官方实时流量暂不可用，请联系管理员检查面板连接。';
   return '';
 }
 
-async function loadNodes() {
+async function loadNodes(initial = false) {
   loading.value = true;
   error.value = '';
   try {
-    nodes.value = await api<UserNode[]>('/api/user/nodes');
+    nodes.value = await readUserNodes<UserNode>(initial ? value => { nodes.value = value; } : undefined);
     for (const node of nodes.value) {
       if (![1, 3, 6, 12].includes(monthsByNode.value[node.id] || 0)) monthsByNode.value[node.id] = 1;
     }
@@ -228,12 +231,12 @@ function daysLeft(diffMs: number) {
   return Math.max(Math.ceil(diffMs / 24 / 60 / 60 / 1000), 0);
 }
 
-onMounted(loadNodes);
+onMounted(() => loadNodes(true));
 </script>
 
 <template>
   <div class="user-page connections-page" :aria-busy="loading">
-    <header class="page-heading"><div><span class="eyebrow">连接与有效期</span><h1>连接服务</h1><p>所有连接集中管理。展开服务，获取链接、扫码导入或续费。</p></div><button class="button secondary" :disabled="loading" @click="loadNodes"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新服务</button></header>
+    <header class="page-heading"><div><span class="eyebrow">连接与有效期</span><h1>连接服务</h1><p>所有连接集中管理。展开服务，获取链接、扫码导入或续费。</p></div><button class="button secondary" :disabled="loading" @click="loadNodes()"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新服务</button></header>
     <div v-if="message" class="user-feedback success" role="status">{{ message }}</div><div v-if="error" class="user-feedback error" role="alert">{{ error }}</div>
     <section class="surface connections-surface">
       <header class="connections-toolbar"><div class="connection-totals"><strong>{{ nodes.length }} <span>项服务</span></strong><span class="live-dot">{{ activeCount }} 项启用</span><span v-if="expiringCount" class="attention-text">{{ expiringCount }} 项即将到期</span></div><label class="search-field"><Search :size="16" /><input v-model="searchQuery" type="search" aria-label="搜索服务" placeholder="搜索名称、协议或状态" /></label></header>
@@ -242,7 +245,7 @@ onMounted(loadNodes);
         <details v-for="node in filteredNodes" :id="'service-' + node.id" :key="node.id" class="node-entry" :open="String(route.query.node || '') === node.id">
           <summary class="node-summary">
             <div class="service-identity"><span class="protocol-symbol">{{ node.serviceNode.protocol.slice(0, 1).toLowerCase() }}</span><div><strong>{{ node.serviceNode.name }}</strong><small>{{ node.serviceNode.server.name }} · {{ node.serviceNode.protocol.toLowerCase() }}</small></div></div>
-            <div class="summary-usage"><strong>{{ node.trafficStatus === 'live' ? node.officialTrafficUnlimited ? '无限流量' : hasFiniteTrafficQuota(node) ? formatTraffic(Number(node.officialTrafficRemainingBytes)) + ' 剩余' : '额度未返回' : '用量暂不可用' }}</strong><small>{{ Number(node.serviceNode.priceMonthly).toFixed(2) }} 元 / 月</small></div>
+            <div class="summary-usage"><strong>{{ node.trafficStatus === 'live' ? node.officialTrafficUnlimited ? '无限流量' : hasFiniteTrafficQuota(node) ? formatTraffic(Number(node.officialTrafficRemainingBytes)) + ' 剩余' : '额度未返回' : loading ? '更新中…' : '用量暂不可用' }}</strong><small>{{ Number(node.serviceNode.priceMonthly).toFixed(2) }} 元 / 月</small></div>
             <div class="summary-expiry"><strong>{{ node.expireAt ? new Date(node.expireAt).toLocaleDateString('zh-CN') : '长期有效' }}</strong><small>{{ node.links?.length || 0 }} 个连接入口</small></div>
             <span class="status-pill" :class="nodeStatusHint(node).type"><i></i>{{ nodeStatusHint(node).label }}</span>
             <ChevronDown class="entry-chevron" :size="17" />
@@ -250,7 +253,7 @@ onMounted(loadNodes);
           <div class="node-detail">
             <section class="connection-access"><header class="detail-heading"><span class="section-number">01 / CONNECT</span><h2>连接与导入</h2><p>复制订阅链接或扫描二维码，导入支持此协议的客户端。</p></header>
               <div v-if="node.links?.length" class="link-list"><div v-for="(link, index) in node.links" :key="link" class="connection-link"><div><span class="connection-link-label">{{ /^https?:/.test(link) ? '订阅地址' : '线路 ' + (index + 1) }}</span><code :title="link">{{ link }}</code></div><div class="connection-link-actions"><button class="button small secondary" type="button" title="复制节点" @click="copyText(link)"><Copy :size="14" />复制</button><button class="button small secondary" type="button" title="显示二维码" @click="showQrCode(node, link, index)"><QrCode :size="14" /><span>二维码</span></button></div></div></div>
-              <div v-else class="user-feedback warning">{{ node.linkError || '连接信息暂不可用，请联系管理员同步此服务。' }}</div>
+              <div v-else class="user-feedback" :class="{ warning: !loading }">{{ loading ? '正在读取连接信息…' : node.linkError || '连接信息暂不可用，请联系管理员同步此服务。' }}</div>
               <div class="connection-quota"><div><span>流量与用量</span><strong>{{ totalAndRemainingTrafficText(node) }}</strong></div><span v-if="hasFiniteTrafficQuota(node)" class="progress-track"><i :style="{ width: `${trafficPercent(node)}%` }"></i></span><small v-if="trafficStateText(node)" class="attention-text">{{ trafficStateText(node) }}</small><small class="quiet-text">服务有效期：{{ node.expireAt ? formatDate(node.expireAt) : '长期有效' }}</small><small v-if="node.subId" class="quiet-text">订阅标识：{{ node.subId }}</small></div>
             </section>
             <section class="renew-box"><header class="detail-heading"><span class="section-number">02 / RENEW</span><h2>延长服务有效期</h2></header><div class="renew-price"><strong>¥{{ Number(node.serviceNode.priceMonthly).toFixed(2) }}</strong><span> / 月</span></div><p v-if="nodeStatusHint(node).type !== 'success'" class="user-feedback" :class="nodeStatusHint(node).type">{{ nodeStatusHint(node).text }}</p><form class="renew-form" @submit.prevent="renewNode(node.id)"><label :for="'renew-' + node.id">续费时长</label><select :id="'renew-' + node.id" v-model.number="monthsByNode[node.id]"><option :value="1">1 个月</option><option :value="3">3 个月</option><option :value="6">6 个月</option><option :value="12">12 个月</option></select><button class="button primary" :disabled="Boolean(renewingId)">{{ renewingId === node.id ? '续费处理中…' : '使用余额续费' }}<ArrowUpRight :size="16" /></button></form><small class="renew-note">续费延长有效期，不重置流量。请确认账户余额充足。</small></section>

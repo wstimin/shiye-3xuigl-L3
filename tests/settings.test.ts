@@ -71,7 +71,7 @@ test('saved runtime path is read from the database instead of a stale process va
 
 test('settings endpoints and frontend reads explicitly bypass caches', async () => {
   const controller = await readFile(new URL('../apps/api/src/modules/settings/settings.controller.ts', import.meta.url), 'utf8');
-  const adminApi = await readFile(new URL('../apps/admin-web/src/api.ts', import.meta.url), 'utf8');
+  const adminApi = await readFile(new URL('../apps/web-shared/api-client.ts', import.meta.url), 'utf8');
   const settingsView = await readFile(new URL('../apps/admin-web/src/views/SettingsView.vue', import.meta.url), 'utf8');
   assert.match(controller, /Cache-Control', 'no-store, no-cache, must-revalidate/);
   assert.match(adminApi, /cache: safeRead \? 'no-store'/);

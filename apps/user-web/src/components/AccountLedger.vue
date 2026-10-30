@@ -9,7 +9,7 @@ const difference = (entry: BalanceEntry) => Number(entry.afterBalance) - Number(
 </script>
 <template>
   <section class="surface ledger-panel" aria-label="余额明细">
-    <header class="section-heading"><div><span class="section-number">ACCOUNT ACTIVITY</span><h2>余额明细</h2></div><span class="quiet-text">最近 {{ limit }} 条</span></header>
+    <header class="section-heading"><h2>余额明细</h2><span class="quiet-text">最近 {{ limit }} 条</span></header>
     <div v-if="visible.length" class="ledger-list">
       <article v-for="entry in visible" :key="entry.id" class="ledger-row">
         <span class="ledger-icon" :class="difference(entry) >= 0 ? 'income' : 'expense'"><ArrowDownLeft v-if="difference(entry) >= 0" :size="17" /><ArrowUpRight v-else :size="17" /></span>

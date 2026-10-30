@@ -21,8 +21,8 @@ export const router = createRouter({
   routes: Object.entries(viewLoaders).map(([path, component]) => ({ path, component }))
 });
 
-router.beforeEach(() => {
-  cancelPendingReadRequests();
+router.beforeEach((_to, from) => {
+  if (from.matched.length) cancelPendingReadRequests();
   routeLoading.value = true;
   routeLoadError.value = '';
   return true;

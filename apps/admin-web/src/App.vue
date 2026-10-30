@@ -130,11 +130,11 @@ function reloadPage() {
   window.location.reload();
 }
 
-onMounted(async () => {
+onMounted(() => {
   stopSessionExpired = onSessionExpired(handleSessionExpired);
   window.addEventListener(brandingUpdatedEvent, handleBrandingUpdated);
-  await loadBranding();
-  await loadMe();
+  void loadBranding();
+  void loadMe();
 });
 
 onUnmounted(() => {

@@ -84,7 +84,7 @@ test('user and admin load the same theme palette rather than independent color o
   assert.ok(readFileSync('apps/user-web/src/main.ts', 'utf8').includes("import '../../web-shared/theme.css'"));
   assert.ok(themeStyles.includes(':root[data-theme="dark"]'));
   const html = readFileSync('apps/user-web/index.html', 'utf8');
-  assert.ok(html.includes('background: #f7f5f2'));
+  assert.ok(html.includes('background: #f7f8fa'));
   assert.ok(html.includes('name="color-scheme" content="light dark"'));
 });
 

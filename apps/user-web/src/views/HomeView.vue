@@ -5,6 +5,7 @@ import { ArrowRight, ArrowUpRight, CalendarClock, CircleCheck, Network, RefreshC
 import AccountLedger, { type BalanceEntry } from '../components/AccountLedger.vue';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
+import { readUserNodes } from '../node-loading';
 import { formatTraffic } from '../traffic';
 
 type DashboardNode = { expireAt?: string | null };
@@ -51,22 +52,21 @@ const remainingTrafficBytes = computed(() => finiteTrafficNodes.value.reduce((to
 const totalTrafficBytes = computed(() => finiteTrafficNodes.value.reduce((total, node) => total + Number(node.officialTrafficTotalBytes), 0));
 const previewNodes = computed(() => nodes.value.slice(0, 3));
 const trafficSummary = computed(() => {
+  if (loading.value) return '正在更新面板用量，先显示最近同步的服务记录';
   if (unavailableTrafficCount.value) return `${unavailableTrafficCount.value} 个节点流量暂不可用`;
   if (unknownQuotaCount.value) return `${unknownQuotaCount.value} 个节点未返回流量额度`;
   if (hasUnlimitedTraffic.value) return '总流量无限，剩余流量无限';
   return `总流量 ${formatTraffic(totalTrafficBytes.value)}，剩余流量 ${formatTraffic(remainingTrafficBytes.value)}`;
 });
 
-async function loadDashboard() {
+async function loadDashboard(initial = false) {
   loading.value = true;
   error.value = '';
   try {
-    const [dashboardResult, nodeResult] = await Promise.all([
-      api<UserDashboard>('/api/user/me'),
-      api<UserNode[]>('/api/user/nodes')
+    await Promise.all([
+      api<UserDashboard>('/api/user/me').then(value => { dashboard.value = value; }),
+      readUserNodes<UserNode>(initial ? value => { nodes.value = value; } : undefined).then(value => { nodes.value = value; })
     ]);
-    dashboard.value = dashboardResult;
-    nodes.value = nodeResult;
   } catch (caught) {
     error.value = readableError(caught, '加载失败');
   } finally {
@@ -102,33 +102,34 @@ function formatDate(value?: string | null, compact = false) {
 }
 
 function nodeTrafficText(node: UserNode) {
-  if (node.trafficStatus !== 'live') return '获取失败';
+  if (node.trafficStatus === 'cached') return `已同步使用 ${formatTraffic(Number(node.usedTrafficBytes || 0))}${loading.value ? ' · 更新中' : ''}`;
+  if (node.trafficStatus !== 'live') return loading.value ? '正在更新用量' : '用量暂不可用';
   if (node.officialTrafficUnlimited === true) return '总流量 无限，剩余流量 无限';
   if (!hasFiniteTrafficQuota(node)) return '额度未返回';
   return `总流量 ${formatTraffic(Number(node.officialTrafficTotalBytes))}，剩余流量 ${formatTraffic(Number(node.officialTrafficRemainingBytes))}`;
 }
 
-onMounted(loadDashboard);
+onMounted(() => loadDashboard(true));
 </script>
 
 <template>
   <div class="user-page overview-page" :aria-busy="loading">
-    <header class="page-heading"><div><span class="eyebrow">账户总览</span><h1>我的服务中心</h1><p>{{ dashboard?.customer.name || '你好' }}，欢迎回来。你的连接服务和账户动态都在这里。</p></div><button class="button secondary" :disabled="loading" @click="loadDashboard"><RefreshCw :size="15" :class="{ spinning: loading }" />{{ loading ? '正在更新' : '刷新数据' }}</button></header>
+    <header class="page-heading"><div><span class="eyebrow">账户总览</span><h1>我的服务中心</h1><p>{{ dashboard?.customer.name || '你好' }}，欢迎回来。你的连接服务和账户动态都在这里。</p></div><button class="button secondary" :disabled="loading" @click="loadDashboard()"><RefreshCw :size="15" :class="{ spinning: loading }" />{{ loading ? '正在更新' : '刷新数据' }}</button></header>
     <div v-if="error" class="user-feedback error" role="alert">{{ error }}</div>
     <section class="account-summary" aria-label="账户与服务摘要">
       <article><span><WalletCards :size="17" />可用余额</span><strong>¥{{ dashboard ? Number(dashboard.customer.balance).toFixed(2) : '—' }}</strong><RouterLink class="text-link" to="/finance">充值与兑换 <ArrowRight :size="14" /></RouterLink></article>
       <article><span><Network :size="17" />连接服务</span><strong>{{ activeNodes.length }} <small>/ {{ nodes.length }} 项可用</small></strong><p>按各项服务状态统计</p></article>
-      <article><span><CircleCheck :size="17" />剩余流量</span><strong :title="trafficSummary">{{ unavailableTrafficCount ? '暂不可用' : unknownQuotaCount ? '额度待更新' : hasUnlimitedTraffic ? '无限流量' : formatTraffic(remainingTrafficBytes) }}</strong><p>{{ unavailableTrafficCount || unknownQuotaCount ? trafficSummary : hasUnlimitedTraffic ? '包含无限流量服务' : '总额度 ' + formatTraffic(totalTrafficBytes) }}</p></article>
+      <article><span><CircleCheck :size="17" />剩余流量</span><strong :title="trafficSummary">{{ loading ? '更新中…' : unavailableTrafficCount ? '暂不可用' : unknownQuotaCount ? '额度待更新' : hasUnlimitedTraffic ? '无限流量' : formatTraffic(remainingTrafficBytes) }}</strong><p>{{ unavailableTrafficCount || unknownQuotaCount ? trafficSummary : hasUnlimitedTraffic ? '包含无限流量服务' : '总额度 ' + formatTraffic(totalTrafficBytes) }}</p></article>
       <article><span><CalendarClock :size="17" />最近到期</span><strong class="summary-date">{{ nearestExpireValue ? formatDate(nearestExpireValue, true) : '未设置' }}</strong><p>以各项服务有效期为准</p></article>
     </section>
     <div class="overview-layout">
       <div class="overview-primary">
         <section class="surface services-panel">
-          <header class="section-heading"><div><span class="section-number">服务列表</span><h2>正在使用的服务 <span class="count-badge">{{ nodes.length }}</span></h2></div><RouterLink class="text-link" to="/nodes">管理全部 <ArrowUpRight :size="15" /></RouterLink></header>
+          <header class="section-heading"><div><h2>正在使用的服务 <span class="count-badge">{{ nodes.length }}</span></h2></div><RouterLink class="text-link" to="/nodes">管理全部 <ArrowUpRight :size="15" /></RouterLink></header>
           <div class="service-table-head" aria-hidden="true"><span>服务名称</span><span>流量信息</span><span>有效期 / 状态</span><span></span></div>
           <article v-for="node in previewNodes" :key="node.id" class="service-row">
             <div class="service-identity"><span class="protocol-symbol">{{ node.serviceNode.protocol.slice(0, 1).toLowerCase() }}</span><div><strong>{{ node.serviceNode.name }}</strong><small>{{ node.serviceNode.server.name }} · {{ node.serviceNode.protocol.toLowerCase() }}</small></div></div>
-            <div class="service-usage"><strong>{{ node.trafficStatus === 'live' ? node.officialTrafficUnlimited ? '无限流量' : hasFiniteTrafficQuota(node) ? formatTraffic(Number(node.officialTrafficRemainingBytes)) + ' 剩余' : '额度未返回' : '用量暂不可用' }}</strong><small :title="node.trafficError || ''">{{ nodeTrafficText(node) }}</small></div>
+            <div class="service-usage"><strong>{{ node.trafficStatus === 'live' ? node.officialTrafficUnlimited ? '无限流量' : hasFiniteTrafficQuota(node) ? formatTraffic(Number(node.officialTrafficRemainingBytes)) + ' 剩余' : '额度未返回' : loading ? '更新中…' : '用量暂不可用' }}</strong><small :title="node.trafficError || ''">{{ nodeTrafficText(node) }}</small></div>
             <div class="service-validity"><strong>{{ node.expireAt ? formatDate(node.expireAt, true) : '长期有效' }}</strong><span class="status-pill" :class="isNodeAvailable(node) ? 'success' : 'danger'"><i></i>{{ isNodeAvailable(node) ? '正常可用' : '当前不可用' }}</span></div>
             <RouterLink class="round-link" :to="{ path: '/nodes', query: { node: node.id } }" :aria-label="'管理 ' + node.serviceNode.name"><ArrowUpRight :size="18" /></RouterLink>
           </article>

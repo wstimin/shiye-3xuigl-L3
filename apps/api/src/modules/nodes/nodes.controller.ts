@@ -45,7 +45,7 @@ export class NodesController {
   @Get('admin/service-nodes')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  serviceNodes() { return this.nodes.listServiceNodes(); }
+  serviceNodes(@Query('snapshot') snapshot?: string) { return this.nodes.listServiceNodes(snapshot === '1'); }
 
   @Post('admin/service-nodes')
   @UseGuards(AuthGuard)
@@ -107,7 +107,7 @@ export class NodesController {
   @Get('user/nodes')
   @UseGuards(AuthGuard)
   @Roles('user')
-  userNodes(@CurrentUser() user: SessionUser) { return this.nodes.listUserNodes(user.customerId || ''); }
+  userNodes(@CurrentUser() user: SessionUser, @Query('snapshot') snapshot?: string) { return this.nodes.listUserNodes(user.customerId || '', snapshot === '1'); }
 
   @Post('admin/customers/:id/nodes')
   @UseGuards(AuthGuard)

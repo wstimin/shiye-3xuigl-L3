@@ -132,7 +132,11 @@ async function loadCustomers(resetPage = false) {
   try {
     const params = customerQueryParams();
     const [customerResult, nodeResult] = await Promise.all([
-      api<PageResult<Customer>>(`/api/admin/customers?${params.toString()}`),
+      api<PageResult<Customer>>(`/api/admin/customers?${params.toString()}`).then(result => {
+        customers.value = result.items; customerTotal.value = result.total;
+        customerPage.page = result.page; customerPage.pageSize = result.pageSize;
+        loading.value = false; return result;
+      }),
       api<ServiceNode[]>('/api/admin/service-nodes')
     ]);
     customers.value = customerResult.items;

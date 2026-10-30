@@ -144,11 +144,12 @@ export class NodesService {
     return { deleted: true, id };
   }
 
-  async listServiceNodes() {
+  async listServiceNodes(snapshot = false) {
     const nodes = await this.prisma.serviceNode.findMany({
       orderBy: { createdAt: 'desc' },
       include: { server: { select: { id: true, name: true, baseUrl: true, enabled: true, provider: true } } }
     });
+    if (snapshot) return nodes;
     const nodeIds = nodes.map((node) => node.id);
     const [tasks, trafficSnapshots] = await Promise.all([
       this.pendingTasks('service-node', nodeIds),
@@ -893,12 +894,24 @@ export class NodesService {
     }
   }
 
-  async listUserNodes(customerId: string) {
+  async listUserNodes(customerId: string, snapshot = false) {
     const nodes = await this.prisma.customerNode.findMany({
       where: { customerId },
       orderBy: { createdAt: 'desc' },
       include: { serviceNode: { include: { server: { select: { id: true, name: true, baseUrl: true } } } } }
     });
+    if (snapshot) return nodes.map(node => ({
+      ...node,
+      usedTrafficBytes: Math.max(Number(node.usedTrafficGb), 0) * 1024 ** 3,
+      trafficStatus: 'cached',
+      trafficError: null,
+      officialTrafficTotalBytes: null,
+      officialTrafficRemainingBytes: null,
+      officialTrafficUnlimited: null,
+      links: Array.isArray(jsonObject(node.config).links) ? (jsonObject(node.config).links as unknown[]).filter((link): link is string => typeof link === 'string') : [],
+      linkError: null,
+      subId: jsonObject(node.config).subId || node.xuiEmail
+    }));
     return Promise.all(nodes.map(async (node) => {
       let linkError: string | null = null;
       let trafficError: string | null = null;

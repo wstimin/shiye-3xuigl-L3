@@ -369,7 +369,7 @@ onMounted(loadDashboard);
         <div v-if="recentActivity.length" class="dashboard-activity-list">
           <div v-for="item in recentActivity" :key="item.key" class="dashboard-activity-item">
             <i :class="activityTone(item)"><component :is="activityIcon(item.type)" :size="16" /></i>
-            <div><p><strong>{{ item.title }}</strong> {{ item.description }}</p><span>{{ formatRelativeDate(item.createdAt) }}</span></div>
+            <div><strong>{{ item.title }}</strong><p>{{ item.description }}</p><time :datetime="item.createdAt">{{ formatRelativeDate(item.createdAt) }}</time></div>
           </div>
         </div>
         <div v-else class="dashboard-empty-activity">

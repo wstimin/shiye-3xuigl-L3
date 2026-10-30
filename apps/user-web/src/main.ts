@@ -9,5 +9,5 @@ installAssetRecovery();
 
 const app = createApp(App).use(router);
 
-void router.isReady().then(() => app.mount('#app'));
+app.mount('#app');
 import './workspace.css';

@@ -492,6 +492,24 @@ test('user node listing returns freshly synchronized official traffic', async ()
   assert.deepEqual(result[0].links, ['vless://example']);
 });
 
+test('user node snapshot reads only scoped local data and never calls a remote panel', async () => {
+  let scope: unknown;
+  const node = { id: 'customer-node-1', xuiEmail: 'user-1', usedTrafficGb: 2, config: { links: ['vless://saved', 42] } };
+  const service = new NodesService({ customerNode: { findMany: async ({ where }: any) => { scope = where; return [node]; } } } as any, encryption(), {} as any, testLocks());
+  const [snapshot] = await service.listUserNodes('customer-1', true);
+  assert.deepEqual(scope, { customerId: 'customer-1' });
+  assert.equal(snapshot.trafficStatus, 'cached');
+  assert.equal(snapshot.usedTrafficBytes, 2 * 1024 ** 3);
+  assert.equal(snapshot.officialTrafficRemainingBytes, null);
+  assert.deepEqual(snapshot.links, ['vless://saved']);
+});
+
+test('reference selectors can list service nodes without remote traffic reads', async () => {
+  const rows = [{ id: 'service-1', name: 'Existing service', config: { socksNodeId: 'socks-1' } }];
+  const service = new NodesService({ serviceNode: { findMany: async () => rows } } as any, encryption(), {} as any, testLocks());
+  assert.deepEqual(await service.listServiceNodes(true), rows);
+});
+
 test('user node listing falls back to stored traffic when the official read fails', async () => {
   const storedAt = new Date('2026-08-26T00:00:00Z');
   const node = {

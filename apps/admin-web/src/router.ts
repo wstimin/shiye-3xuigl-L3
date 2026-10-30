@@ -28,8 +28,8 @@ export const router = createRouter({
   routes: [{ path: '/socks-nodes', redirect: '/network-config?tab=library' }, ...Object.entries(viewLoaders).map(([path, component]) => ({ path, component }))]
 });
 
-router.beforeEach(() => {
-  cancelPendingReadRequests();
+router.beforeEach((_to, from) => {
+  if (from.matched.length) cancelPendingReadRequests();
   routeLoading.value = true;
   routeLoadError.value = '';
   return true;

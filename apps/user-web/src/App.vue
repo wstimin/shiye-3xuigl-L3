@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { ChevronRight, CircleAlert, CircleUserRound, Home, LogOut, Network, ReceiptText, ShieldCheck } from 'lucide-vue-next';
+import { ChevronRight, CircleAlert, CircleUserRound, Home, LogOut, Network, ReceiptText } from 'lucide-vue-next';
 import LoginScreen from '../../web-shared/LoginScreen.vue';
 import BrandMark from '../../web-shared/BrandMark.vue';
 import ThemeToggle from '../../web-shared/ThemeToggle.vue';
@@ -62,7 +62,7 @@ async function loadMe() {
   try {
     const session = await api<SessionUser>('/api/auth/me?entry=user');
     user.value = session.role === 'user' ? session : null;
-    if (user.value) await loadUserIdentity();
+    if (user.value) void loadUserIdentity();
     else userIdentity.value = null;
   } catch {
     user.value = null;
@@ -91,7 +91,7 @@ async function login() {
       throw new Error('当前账号不是用户账号');
     }
     user.value = session;
-    await loadUserIdentity();
+    void loadUserIdentity();
     Object.assign(loginForm, { username: '', password: '' });
   } catch {
     loginError.value = '登录失败';
@@ -129,11 +129,11 @@ function reloadPage() {
   window.location.reload();
 }
 
-onMounted(async () => {
+onMounted(() => {
   stopNotify = onNotify(pushNotice);
   stopSessionExpired = onSessionExpired(handleSessionExpired);
-  await loadBranding();
-  await loadMe();
+  void loadBranding();
+  void loadMe();
 });
 
 onUnmounted(() => {
@@ -154,7 +154,7 @@ onUnmounted(() => {
   <LoginScreen v-else-if="!user" entry="user" :brand="branding" v-model:username="loginForm.username" v-model:password="loginForm.password" :busy="loggingIn" :error="loginError" @submit="login" />
   <div v-else class="user-portal">
     <a href="#workspace-content" class="skip-link">跳到页面内容</a>
-    <aside class="portal-sidebar"><router-link to="/" class="portal-brand"><BrandMark :src="branding.logoDataUrl" :name="branding.brandName" /><span><strong>{{ branding.brandName }}</strong><small>个人服务中心</small></span></router-link><div class="portal-nav-label">我的工作区</div><nav class="portal-nav" aria-label="主导航"><router-link v-for="item in nav" :key="item.to" :to="item.to" @mouseenter="preloadRoute(item.to)" @focus="preloadRoute(item.to)"><component :is="item.icon" :size="20" /><span>{{ item.label }}</span><ChevronRight :size="14" class="nav-arrow" /></router-link></nav><div class="portal-sidebar-note"><ShieldCheck :size="22" /><strong>让连接更简单</strong><p>查看服务、管理余额，<br />每一步都清晰可见。</p></div><div class="portal-sidebar-account"><span class="user-avatar" :style="userAvatarStyle(displayName)">{{ currentUserInitial }}</span><span><strong>{{ displayName }}</strong><small>@{{ displayLoginUsername }}</small></span><button class="icon-button" title="退出登录" aria-label="退出登录" @click="logout"><LogOut :size="17" /></button></div></aside>
+    <aside class="portal-sidebar"><router-link to="/" class="portal-brand"><BrandMark :src="branding.logoDataUrl" :name="branding.brandName" /><span><strong>{{ branding.brandName }}</strong><small>个人服务中心</small></span></router-link><div class="portal-nav-label">我的工作区</div><nav class="portal-nav" aria-label="主导航"><router-link v-for="item in nav" :key="item.to" :to="item.to" @mouseenter="preloadRoute(item.to)" @focus="preloadRoute(item.to)"><component :is="item.icon" :size="20" /><span>{{ item.label }}</span><ChevronRight :size="14" class="nav-arrow" /></router-link></nav><div class="portal-sidebar-account"><span class="user-avatar" :style="userAvatarStyle(displayName)">{{ currentUserInitial }}</span><span><strong>{{ displayName }}</strong><small>@{{ displayLoginUsername }}</small></span><button class="icon-button" title="退出登录" aria-label="退出登录" @click="logout"><LogOut :size="17" /></button></div></aside>
     <div class="portal-workspace"><header class="portal-header"><div class="portal-mobile-brand"><BrandMark :src="branding.logoDataUrl" :name="branding.brandName" /><strong>{{ branding.brandName }}</strong></div><div class="portal-location"><span>个人中心</span><ChevronRight :size="14" /><strong>{{ currentPageTitle }}</strong></div><div class="portal-account"><ThemeToggle /><router-link to="/profile" class="account-entry" aria-label="账户设置"><span class="user-avatar" :style="userAvatarStyle(displayName)">{{ currentUserInitial }}</span><span>{{ displayName }}</span></router-link><button class="icon-button mobile-logout" aria-label="退出登录" @click="logout"><LogOut :size="17" /></button></div></header>
     <main id="workspace-content" class="user-main route-stage" :aria-label="currentPageTitle"><div class="route-progress" :class="{ active: routeLoading }" aria-hidden="true"><span></span></div><div v-if="routeLoadError" class="route-load-error" role="alert"><CircleAlert :size="20" /><div><strong>页面加载失败</strong><span>{{ routeLoadError }}</span></div><button type="button" @click="reloadPage">刷新重试</button></div><router-view v-else v-slot="{ Component }"><Suspense><component :is="Component" /><template #fallback><div class="route-loading-panel"><span class="loading-spinner"></span><strong>正在加载页面</strong></div></template></Suspense></router-view></main>
     <footer class="portal-footer"><span>{{ branding.brandName }} · 个人服务中心</span><span>v{{ appVersion }}</span></footer></div>

@@ -783,7 +783,7 @@ onMounted(async () => {
     <template v-if="!createServerId">
     <header v-if="!networkOnly" class="hub-heading">
       <div>
-        <div class="eyebrow">INFRASTRUCTURE / SING-BOX</div>
+        <div class="eyebrow">sing-box · 面板管理</div>
         <h1>
           {{ selected ? selected.name : "S-UI 面板"
           }}<span class="soft-badge">S-UI</span>

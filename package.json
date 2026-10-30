@@ -1,6 +1,6 @@
 {
   "name": "shiye-management-system",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "private": true,
   "description": "Shiye management system for 3x-ui and S-UI panels, user services, billing and network routing.",
   "type": "module",
@@ -15,7 +15,7 @@
     "dev:user": "npm run dev -w @shiye/user-web",
     "build:packages": "npm run build -w @shiye/shared && npm run build -w @shiye/xui-client && npm run build -w @shiye/payment-core",
     "build:info": "node scripts/generate-build-info.mjs",
-    "build": "npm run build:info && npm run build:packages && npm run build -w @shiye/api && npm run build -w @shiye/admin-web && npm run build -w @shiye/user-web",
+    "build": "npm run build:info && npm run build:packages && npm run build -w @shiye/api && npm run build -w @shiye/admin-web && npm run build -w @shiye/user-web && node scripts/compress-assets.mjs",
     "build:clean": "node scripts/clean-build.mjs",
     "typecheck": "npm run build:info && npm run build:packages && npm run typecheck:workspaces",
     "typecheck:workspaces": "npm run typecheck --workspaces --if-present",

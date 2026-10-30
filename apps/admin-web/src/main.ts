@@ -21,5 +21,5 @@ for (const component of [ElAside, ElButton, ElContainer, ElHeader, ElMain, ElTag
 
 app.use(ElLoading).use(router);
 
-void router.isReady().then(() => app.mount('#app'));
+app.mount('#app');
 import './workspace.css';

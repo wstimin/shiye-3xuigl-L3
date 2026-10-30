@@ -5,7 +5,7 @@ import SuiServersView from './SuiServersView.vue';
 import PanelFields from '../components/PanelFields.vue';
 import PanelDetails from '../components/PanelDetails.vue';
 import { decodePanelValue, type FieldSchema } from '../panel-fields';
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
 import 'element-plus/es/components/dialog/style/css';
@@ -172,7 +172,7 @@ async function loadResources() {
     const query = selectedServerId.value ? `?serverId=${encodeURIComponent(selectedServerId.value)}` : '';
     const [serverResult, nodeResult, outboundResult, routeResult] = await Promise.all([
       api<XuiServer[]>('/api/admin/xui-servers'),
-      api<ServiceNode[]>('/api/admin/service-nodes'),
+      api<ServiceNode[]>('/api/admin/service-nodes?snapshot=1'),
       api<NetworkOutbound[]>(`/api/admin/network-outbounds${query}`),
       api<NetworkRoute[]>(`/api/admin/network-routes${query}`)
     ]);
@@ -486,7 +486,8 @@ function removePendingId(source: Set<string>, id: string) {
   return next;
 }
 
-onMounted(loadResources);
+onMounted(() => { if (provider.value === 'xui') void loadResources(); });
+watch(provider, value => { if (value === 'xui') void loadResources(); });
 </script>
 
 <template>

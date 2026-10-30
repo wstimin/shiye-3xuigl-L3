@@ -32,7 +32,7 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
-          if (id.includes('element-plus') || id.includes('@element-plus') || id.includes('@vueuse') || id.includes('lodash')) return;
+          if (id.includes('element-plus') || id.includes('@element-plus') || id.includes('@vueuse') || id.includes('lodash')) return 'ui-vendor';
           if (id.includes('lucide-vue-next')) return 'icons-vendor';
           if (id.includes('/vue/') || id.includes('vue-router') || id.includes('@vue/')) return 'vue-vendor';
           return 'vendor';

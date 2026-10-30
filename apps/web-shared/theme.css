@@ -1,13 +1,14 @@
 /* Shared warm neutral palette. Component styles consume these tokens in both themes. */
 :root {
   color-scheme: light;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-family: var(--font-sans);
   font-synthesis: none;
-  --bg: #f7f5f2; --surface: #ffffff; --surface-soft: #f0ede7; --text: #2c2a26; --muted: #625d54; --border: #ddd7cc; --border-strong: #c8bfae;
+  --bg: #f7f8fa; --surface: #ffffff; --surface-soft: #f1f3f5; --text: #242930; --muted: #606975; --border: #e0e4e9; --border-strong: #bfc6ce;
   --primary: #c9a227; --primary-hover: #b8911f; --primary-strong: #806313; --primary-soft: #f6efd9; --on-primary: #211b0c;
   --success: #356d55; --success-soft: #eaf3ed; --warning: #875b14; --warning-soft: #fbf0d9; --danger: #ac3934; --danger-soft: #fbecea; --info: #4c6580; --info-soft: #edf1f6;
-  --on-status: #ffffff; --overlay: #18161099; --shadow: 0 8px 28px -18px #30261740;
-  --field-bg: #ffffff; --field-border: #8b8172; --field-hover: #655c4e; --field-placeholder: #6b6357;
+  --on-status: #ffffff; --overlay: #15191f99; --shadow: 0 8px 28px -18px #1d293940; --shadow-subtle: 0 1px 3px #1d293908;
+  --field-bg: #ffffff; --field-border: #8a94a2; --field-hover: #606c7b; --field-placeholder: #66717f;
   --app-bg: var(--bg); --panel-bg: var(--surface); --panel-soft: var(--surface-soft);
   --ui-bg: var(--bg); --ui-surface: var(--surface); --ui-surface-soft: var(--surface-soft); --ui-border: var(--border); --ui-text: var(--text); --ui-muted: var(--muted); --ui-primary: var(--primary);
   --el-color-primary: var(--primary-strong); --el-color-primary-dark-2: var(--primary-hover);
@@ -17,15 +18,15 @@
   --el-bg-color: var(--surface); --el-bg-color-page: var(--bg); --el-bg-color-overlay: var(--surface); --el-fill-color-blank: var(--surface); --el-fill-color: var(--surface-soft); --el-fill-color-light: var(--surface-soft); --el-fill-color-lighter: var(--surface-soft); --el-fill-color-extra-light: var(--surface-soft); --el-fill-color-dark: var(--border);
   --el-text-color-primary: var(--text); --el-text-color-regular: var(--text); --el-text-color-secondary: var(--muted); --el-text-color-placeholder: var(--field-placeholder); --el-text-color-disabled: var(--muted);
   --el-border-color: var(--border-strong); --el-border-color-light: var(--border); --el-border-color-lighter: var(--border); --el-border-color-extra-light: var(--border); --el-disabled-bg-color: var(--surface-soft); --el-disabled-text-color: var(--muted); --el-mask-color: var(--overlay); --el-mask-color-extra-light: var(--overlay);
-  --el-font-size-base: 15px; --el-font-size-small: 14px; --el-border-radius-base: 8px; --el-component-size: 40px; --el-component-size-small: 34px;
+  --el-font-family: var(--font-sans); --el-font-size-base: 14px; --el-font-size-small: 12px; --el-border-radius-base: 6px; --el-component-size: 36px; --el-component-size-small: 32px;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1a1916; --surface: #24221e; --surface-soft: #2e2b26; --text: #f0ebe3; --muted: #c2baad; --border: #403b33; --border-strong: #635b4d;
+  --bg: #14171b; --surface: #1d2127; --surface-soft: #272d35; --text: #edf0f4; --muted: #afb8c5; --border: #343b45; --border-strong: #626e7c;
   --primary: #e0b83a; --primary-hover: #f0c94a; --primary-strong: #e0b83a; --primary-soft: #373122; --on-primary: #211b0c;
   --success: #8bc5a8; --success-soft: #24372c; --warning: #e2bd72; --warning-soft: #3c3120; --danger: #ed958a; --danger-soft: #3e2925; --info: #aac1de; --info-soft: #29313b;
-  --on-status: #211b0c; --overlay: #090806b3; --shadow: 0 8px 28px -18px #000000b3;
-  --field-bg: #191815; --field-border: #8e8578; --field-hover: #bfb4a2; --field-placeholder: #bfb6a8;
+  --on-status: #211b0c; --overlay: #090c10b3; --shadow: 0 8px 28px -18px #000000b3; --shadow-subtle: 0 1px 3px #00000018;
+  --field-bg: #171b20; --field-border: #778595; --field-hover: #b6c2d0; --field-placeholder: #adb8c6;
 }
 .theme-control { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 9px; padding: 3px; background: var(--surface); flex-shrink: 0; }
 .theme-toggle, .theme-system { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }

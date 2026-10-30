@@ -82,3 +82,39 @@ test('route changes cancel pending page reads', async () => {
   cancelPendingReadRequests();
   await assert.rejects(() => pending, /请求已取消/);
 });
+
+test('concurrent identical reads share one fetch without caching later reads', async () => {
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return jsonResponse(200, { ok: true, data: { balance: calls } }); };
+  const [first, second] = await Promise.all([api('/api/user/me'), api('/api/user/me')]);
+  assert.deepEqual(first, second);
+  assert.equal(calls, 1);
+  await api('/api/user/me');
+  assert.equal(calls, 2);
+});
+
+test('read cancellation discards shared promises and explicit caller signals stay independent', async () => {
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return jsonResponse(200, { ok: true, data: calls }); };
+  await Promise.all([api('/api/user/me', { signal: new AbortController().signal }), api('/api/user/me')]);
+  assert.equal(calls, 2);
+  cancelPendingReadRequests();
+  await api('/api/user/me');
+  assert.equal(calls, 3);
+});
+
+test('a write prevents reuse of an older in-flight read', async () => {
+  let reads = 0, resolveOld!: (value: Response) => void;
+  globalThis.fetch = async (_path, options) => {
+    if (options?.method === 'POST') return jsonResponse(200, { ok: true });
+    reads++;
+    if (reads === 1) return new Promise(resolve => { resolveOld = resolve; });
+    return jsonResponse(200, { ok: true, data: { balance: 20 } });
+  };
+  const old = api('/api/user/me');
+  await api('/api/user/redeem-card', { method: 'POST', body: { code: 'test' } });
+  assert.deepEqual(await api('/api/user/me'), { balance: 20 });
+  assert.equal(reads, 2);
+  resolveOld(jsonResponse(200, { ok: true, data: { balance: 10 } }));
+  await old;
+});
