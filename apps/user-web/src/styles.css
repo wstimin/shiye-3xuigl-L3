@@ -169,12 +169,15 @@ button svg, a svg { flex-shrink: 0; }
 .checkout-footer small { color: var(--muted); font-size: 14px; }
 .checkout-footer strong { grid-column: 1; grid-row: 2; font-size: 27px; font-weight: 600; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 .checkout-footer > div > span { grid-row: 2; color: var(--muted); font-size: 14px; }
-.redeem-content { padding: 38px; }
-.redeem-content > .funding-intro, .card-redeem-form, .redeem-help { max-width: 480px; margin-left: auto; margin-right: auto; }
-.redeem-symbol { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 24px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--primary-soft); color: var(--primary-strong); }
-.card-redeem-form textarea { width: 100%; min-height: 108px; font-size: 14px; line-height: 1.8; }
+.redeem-content { min-height: auto; padding: 28px; }
+.redeem-content > .funding-intro, .card-redeem-form, .redeem-purchase-card { max-width: 480px; margin-left: auto; margin-right: auto; }
+.redeem-purchase-card { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 28px; padding: 16px; border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border)); border-radius: 10px; background: var(--primary-soft); }
+.redeem-purchase-icon { display: grid; place-items: center; width: 36px; height: 36px; color: var(--primary-strong); }
+.redeem-purchase-card strong { color: var(--text); font-size: 14px; font-weight: 600; }
+.redeem-purchase-card p { margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.redeem-purchase-card .button { min-height: 36px; padding: 8px 12px; white-space: nowrap; }
+.card-redeem-form input { width: 100%; height: 44px; }
 .card-redeem-form > p { margin: 12px 0 24px; font-size: 14px; }
-.redeem-help { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; margin-top: 24px; color: var(--muted); font-size: 14px; }
 .billing-notes { display: grid; gap: 18px; margin: 0; padding-left: 18px; color: var(--muted); }
 .billing-notes strong { color: var(--text); font-size: 14px; font-weight: 500; }
 .qr-box { display: grid; justify-items: center; gap: 14px; padding: 28px 0 0; text-align: center; }
@@ -344,6 +347,8 @@ button svg, a svg { flex-shrink: 0; }
  .checkout-footer > div { flex: 1 0 100%; }
  .checkout-footer > .button { width: 100%; }
  .redeem-content { padding: 28px 20px; }
+ .redeem-purchase-card { grid-template-columns: 36px minmax(0, 1fr); }
+ .redeem-purchase-card .button { grid-column: 2; justify-self: start; }
  .identity-band { gap: 14px; padding-bottom: 24px; flex-wrap: wrap; }
  .identity-band h2 { font-size: 18px; }
  .identity-band p { font-size: 14px; }

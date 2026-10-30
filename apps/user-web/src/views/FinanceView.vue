@@ -176,9 +176,13 @@ onMounted(loadFinanceData);
           <div v-if="lastOrder?.qrCode" class="qr-box payment-order-box"><strong>扫描二维码完成支付</strong><img v-if="qrImage" :src="qrImage" alt="支付二维码" /><small v-if="lastOrder.order.expiresAt">有效至 {{ new Date(lastOrder.order.expiresAt).toLocaleString('zh-CN', { hour12: false }) }}</small><code>{{ lastOrder.qrCode }}</code></div>
         </div>
         <div v-show="activeTab === 'redeem'" class="funding-content redeem-content">
-          <div class="funding-intro"><span class="redeem-symbol"><TicketCheck :size="27" /></span><h2>将卡密兑换为余额</h2><p>完整粘贴卡密。兑换成功后，余额会更新到当前账户。</p></div>
-          <form class="card-redeem-form" @submit.prevent="redeemCard"><label class="field-label" for="redeem-code">兑换卡密</label><textarea id="redeem-code" v-model="code" rows="3" placeholder="在这里粘贴完整卡密" autocomplete="off" required></textarea><p class="quiet-text">同一张卡密仅能兑换一次，请核对后提交。</p><button class="button primary wide" :disabled="redeeming || !code.trim()">{{ redeeming ? '兑换处理中…' : '确认兑换余额' }}<ArrowRight :size="17" /></button></form>
-          <div class="redeem-help"><span>还没有卡密？</span><button v-if="publicSettings.cardPurchaseUrl" class="text-link" type="button" @click="openPurchaseUrl">前往购买 <ShoppingBag :size="14" /></button><span v-else>请联系管理员获取。</span></div>
+          <aside v-if="!loading" class="redeem-purchase-card" aria-label="获取卡密">
+            <span class="redeem-purchase-icon"><ShoppingBag :size="21" /></span>
+            <div><strong>还没有卡密？</strong><p>{{ publicSettings.cardPurchaseUrl ? '先购买卡密，再回来兑换余额。' : '请联系管理员获取卡密，再在下方兑换。' }}</p></div>
+            <button v-if="publicSettings.cardPurchaseUrl" class="button primary" type="button" @click="openPurchaseUrl">前往购买<ArrowRight :size="15" /></button>
+          </aside>
+          <div class="funding-intro"><h2>将卡密兑换为余额</h2><p>完整粘贴卡密。兑换成功后，余额会更新到当前账户。</p></div>
+          <form class="card-redeem-form" @submit.prevent="redeemCard"><label class="field-label" for="redeem-code">兑换卡密</label><input id="redeem-code" v-model="code" type="text" placeholder="在这里粘贴完整卡密" autocomplete="off" autocapitalize="off" :spellcheck="false" aria-describedby="redeem-hint" required /><p id="redeem-hint" class="quiet-text">同一张卡密仅能兑换一次，请核对后提交。</p><button class="button primary wide" :disabled="redeeming || !code.trim()">{{ redeeming ? '兑换处理中…' : '确认兑换余额' }}<ArrowRight :size="17" /></button></form>
         </div>
       </section>
       <aside class="funding-rail"><section class="balance-panel balance-summary"><div class="balance-panel-top"><span class="section-number">YOUR BALANCE</span><WalletCards :size="20" /></div><span class="balance-label">当前可用余额</span><strong class="balance-figure"><span>¥</span>{{ accountBalance ? Number(accountBalance).toFixed(2) : '—' }}</strong><p>余额用于服务续费，服务有效期需在连接服务中单独管理。</p><router-link to="/nodes" class="text-link">前往服务续费 <ArrowRight :size="15" /></router-link></section><section class="rail-section"><span class="section-number">HOW IT WORKS</span><h3>关于账户余额</h3><ol class="billing-notes"><li><strong>充值与兑换</strong><p>支付完成或卡密核销成功后，金额计入余额。</p></li><li><strong>按需续费</strong><p>在连接服务中选择续费时长，使用余额支付。</p></li><li><strong>查看记录</strong><p>充值、续费和余额调整可在下方明细中查询。</p></li></ol></section></aside>
