@@ -124,7 +124,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .el-button--primary, .hub-button.primary, .login-submit { --el-button-bg-color: var(--primary); --el-button-border-color: var(--primary); --el-button-text-color: var(--on-primary); --el-button-hover-bg-color: var(--primary-hover); --el-button-hover-border-color: var(--primary-hover); --el-button-hover-text-color: var(--on-primary); --el-button-active-bg-color: var(--primary-hover); --el-button-active-border-color: var(--primary-hover); --el-button-disabled-bg-color: var(--surface-soft); --el-button-disabled-border-color: var(--border); --el-button-disabled-text-color: var(--muted); }
 .el-switch { --el-switch-on-color: var(--primary-strong); }
 .el-input__wrapper, .el-select__wrapper { box-shadow: 0 0 0 1px var(--surface-soft) inset; border-radius: 5px; }
-.el-table { --el-table-header-bg-color: #ffffff; --el-table-row-hover-bg-color: #ffffff; --el-table-border-color: var(--border); font-size: 15px; }
+.el-table { --el-table-header-bg-color: var(--surface-soft); --el-table-row-hover-bg-color: var(--surface-soft); --el-table-border-color: var(--border); font-size: 15px; }
 .el-table .cell { line-height: 1.65; overflow-wrap: anywhere; }
 .el-table th.el-table__cell { color: var(--muted); font-weight: 500; }
 .el-table td.el-table__cell, .el-table th.el-table__cell { padding: 12px 0; }
