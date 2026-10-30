@@ -9,7 +9,7 @@ function epaySign(params: Record<string, string>, key: string) {
   return createHash('md5').update(content + key, 'utf8').digest('hex');
 }
 
-test('duplicate payment notifications credit the balance only once', async () => {
+test('concurrent payment notifications lock the order before reading and credit once', async () => {
   const key = 'merchant-secret';
   const channel = { id: 'channel-1', provider: 'epay', enabled: true, configEnc: { pid: '1001', key } };
   const order: any = { id: 'order-1', tradeNo: 'RC100', customerId: 'customer-1', provider: 'epay', amount: new Prisma.Decimal(50), status: 'pending', expiresAt: new Date(Date.now() + 60_000), channel };
@@ -37,10 +37,35 @@ test('duplicate payment notifications credit the balance only once', async () =>
     },
     balanceLog: { create: async () => { balanceLogs += 1; return { id: 'balance-log' }; } }
   };
+  let lockTail = Promise.resolve();
   const prisma: any = {
     rechargeOrder: { findUnique: async () => order },
     paymentChannel: { findFirst: async () => channel },
-    $transaction: async (operation: any) => operation(tx)
+    $transaction: async (operation: any) => {
+      let unlock: (() => void) | undefined;
+      let locked = false;
+      try {
+        return await operation({
+          ...tx,
+          $queryRaw: async (sql: TemplateStringsArray, tradeNo: string) => {
+            assert.match(sql.join('?'), /SELECT id FROM recharge_orders WHERE tradeNo = \? FOR UPDATE/);
+            assert.equal(tradeNo, order.tradeNo);
+            const previous = lockTail;
+            lockTail = new Promise<void>(resolve => { unlock = resolve; });
+            await previous;
+            locked = true;
+            return [{ id: order.id }];
+          },
+          rechargeOrder: {
+            ...tx.rechargeOrder,
+            findUnique: async () => {
+              assert(locked, 'order state must be read under its database row lock');
+              return order;
+            }
+          }
+        });
+      } finally { unlock?.(); }
+    }
   };
   const service = new PaymentsService(prisma, { decrypt: (value: string) => value } as any);
   const params: Record<string, string> = {
@@ -51,7 +76,7 @@ test('duplicate payment notifications credit the balance only once', async () =>
     money: '50.00'
   };
   params.sign = epaySign(params, key);
-  assert.equal(await service.notify({ provider: 'epay', query: params, body: {} }), 'success');
+  assert.deepEqual(await Promise.all(Array.from({ length: 5 }, () => service.notify({ provider: 'epay', query: params, body: {} }))), Array(5).fill('success'));
   assert.equal(await service.notify({ provider: 'epay', query: params, body: {} }), 'success');
   assert.equal(order.status, 'paid');
   assert.equal(customer.balance.toFixed(2), '70.00');
@@ -64,6 +89,7 @@ test('payment callback with a mismatched amount does not credit balance', async 
   const order: any = { id: 'order-1', tradeNo: 'RC101', customerId: 'customer-1', provider: 'epay', amount: new Prisma.Decimal(50), status: 'pending', expiresAt: new Date(Date.now() + 60_000), channel };
   let credited = 0;
   const tx: any = {
+    $queryRaw: async () => [{ id: order.id }],
     rechargeOrder: { findUnique: async () => order },
     paymentCallback: { create: async () => ({ id: 'callback' }) },
     customer: { findUnique: async () => ({ id: 'customer-1', status: 'active', balance: new Prisma.Decimal(0) }), update: async () => { credited += 1; } },

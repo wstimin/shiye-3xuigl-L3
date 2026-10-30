@@ -407,6 +407,8 @@ export class PaymentsService {
 
   private async completeRechargeOrder(tradeNo: string, provider: PaymentProvider, detail: VerifiedNotify) {
     return this.prisma.$transaction(async (tx) => {
+      // Read payment state after concurrent notifications for this order finish.
+      await tx.$queryRaw`SELECT id FROM recharge_orders WHERE tradeNo = ${tradeNo} FOR UPDATE`;
       const order = await tx.rechargeOrder.findUnique({ where: { tradeNo } });
       if (!order) throw new NotFoundException('充值订单不存在');
 
