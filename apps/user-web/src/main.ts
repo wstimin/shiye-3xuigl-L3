@@ -1,3 +1,4 @@
+import '../../web-shared/theme.css';
 import './styles.css';
 import { createApp } from 'vue';
 import App from './App.vue';
@@ -9,3 +10,4 @@ installAssetRecovery();
 const app = createApp(App).use(router);
 
 void router.isReady().then(() => app.mount('#app'));
+import './workspace.css';

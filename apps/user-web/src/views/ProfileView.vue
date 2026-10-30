@@ -70,7 +70,7 @@ onMounted(loadProfile);
 
 <template>
   <div class="user-page settings-page" :aria-busy="loading">
-    <header class="page-heading"><div><span class="eyebrow">ACCOUNT & SECURITY</span><h1>账户设置<span class="heading-dot">.</span></h1><p>查看个人账户资料，管理登录安全。</p></div></header>
+    <header class="page-heading"><div><span class="eyebrow">个人账户</span><h1>账户设置</h1><p>查看个人账户资料，管理登录安全。</p></div></header>
     <div v-if="message" class="user-feedback success" role="status">{{ message }}</div><div v-if="error" class="user-feedback error" role="alert">{{ error }}</div>
     <section class="identity-band"><span class="profile-avatar" :style="userAvatarStyle(displayName)">{{ avatarText }}</span><div><h2>{{ displayName }}</h2><p>@{{ dashboard?.customer.loginUsername || user?.username || '—' }}<span class="footer-divider">/</span>用户账号</p></div><span class="identity-status"><ShieldCheck :size="16" />{{ dashboard?.customer.status === 'active' ? '账户正常' : '账户已停用' }}</span></section>
     <div class="settings-layout"><nav class="settings-index" aria-label="设置分区"><span class="section-number">PREFERENCES</span><a href="#account-details"><UserRound :size="16" />账户资料</a><a href="#account-security"><LockKeyhole :size="16" />登录与安全</a></nav><div class="surface settings-content">

@@ -49,14 +49,7 @@ const unknownQuotaCount = computed(() => nodes.value.filter((node) => node.traff
 const finiteTrafficNodes = computed(() => nodes.value.filter((node) => node.trafficStatus === 'live' && node.officialTrafficUnlimited !== true && hasFiniteTrafficQuota(node)));
 const remainingTrafficBytes = computed(() => finiteTrafficNodes.value.reduce((total, node) => total + Number(node.officialTrafficRemainingBytes), 0));
 const totalTrafficBytes = computed(() => finiteTrafficNodes.value.reduce((total, node) => total + Number(node.officialTrafficTotalBytes), 0));
-const trafficPercent = computed(() => totalTrafficBytes.value > 0 ? Math.min((remainingTrafficBytes.value / totalTrafficBytes.value) * 100, 100) : 0);
 const previewNodes = computed(() => nodes.value.slice(0, 3));
-const trafficHeadline = computed(() => {
-  if (unavailableTrafficCount.value) return '暂不可用';
-  if (unknownQuotaCount.value) return '额度未返回';
-  if (hasUnlimitedTraffic.value) return '无限流量 / 无限流量';
-  return `${formatTraffic(totalTrafficBytes.value)} / ${formatTraffic(remainingTrafficBytes.value)}`;
-});
 const trafficSummary = computed(() => {
   if (unavailableTrafficCount.value) return `${unavailableTrafficCount.value} 个节点流量暂不可用`;
   if (unknownQuotaCount.value) return `${unknownQuotaCount.value} 个节点未返回流量额度`;
@@ -120,17 +113,18 @@ onMounted(loadDashboard);
 
 <template>
   <div class="user-page overview-page" :aria-busy="loading">
-    <header class="page-heading"><div><span class="eyebrow">PERSONAL WORKSPACE</span><h1>服务总览<span class="heading-dot">.</span></h1><p>{{ dashboard?.customer.name || '你好' }}，欢迎回来。你的连接服务和账户动态都在这里。</p></div><button class="button secondary" :disabled="loading" @click="loadDashboard"><RefreshCw :size="15" :class="{ spinning: loading }" />{{ loading ? '正在更新' : '刷新数据' }}</button></header>
+    <header class="page-heading"><div><span class="eyebrow">账户总览</span><h1>我的服务中心</h1><p>{{ dashboard?.customer.name || '你好' }}，欢迎回来。你的连接服务和账户动态都在这里。</p></div><button class="button secondary" :disabled="loading" @click="loadDashboard"><RefreshCw :size="15" :class="{ spinning: loading }" />{{ loading ? '正在更新' : '刷新数据' }}</button></header>
     <div v-if="error" class="user-feedback error" role="alert">{{ error }}</div>
+    <section class="account-summary" aria-label="账户与服务摘要">
+      <article><span><WalletCards :size="17" />可用余额</span><strong>¥{{ dashboard ? Number(dashboard.customer.balance).toFixed(2) : '—' }}</strong><RouterLink class="text-link" to="/finance">充值与兑换 <ArrowRight :size="14" /></RouterLink></article>
+      <article><span><Network :size="17" />连接服务</span><strong>{{ activeNodes.length }} <small>/ {{ nodes.length }} 项可用</small></strong><p>按各项服务状态统计</p></article>
+      <article><span><CircleCheck :size="17" />剩余流量</span><strong :title="trafficSummary">{{ unavailableTrafficCount ? '暂不可用' : unknownQuotaCount ? '额度待更新' : hasUnlimitedTraffic ? '无限流量' : formatTraffic(remainingTrafficBytes) }}</strong><p>{{ unavailableTrafficCount || unknownQuotaCount ? trafficSummary : hasUnlimitedTraffic ? '包含无限流量服务' : '总额度 ' + formatTraffic(totalTrafficBytes) }}</p></article>
+      <article><span><CalendarClock :size="17" />最近到期</span><strong class="summary-date">{{ nearestExpireValue ? formatDate(nearestExpireValue, true) : '未设置' }}</strong><p>以各项服务有效期为准</p></article>
+    </section>
     <div class="overview-layout">
       <div class="overview-primary">
-        <section class="service-summary" aria-label="服务摘要">
-          <div class="summary-intro"><span class="summary-symbol"><Network :size="22" /></span><div><span class="quiet-text">当前服务</span><strong>{{ activeNodes.length }}<small> / {{ nodes.length }} 个可用</small></strong></div></div>
-          <div><span class="quiet-text">流量额度 / 剩余</span><strong class="summary-traffic" :title="trafficSummary">{{ trafficHeadline }}</strong><span class="progress-track"><i :style="{ width: `${trafficPercent}%` }"></i></span></div>
-          <div><span class="quiet-text">最近到期</span><strong>{{ nearestExpireValue ? formatDate(nearestExpireValue, true) : '未设置' }}</strong><small class="quiet-text">以各项服务有效期为准</small></div>
-        </section>
         <section class="surface services-panel">
-          <header class="section-heading"><div><span class="section-number">YOUR CONNECTIONS</span><h2>正在使用的服务 <span class="count-badge">{{ nodes.length }}</span></h2></div><RouterLink class="text-link" to="/nodes">管理全部 <ArrowUpRight :size="15" /></RouterLink></header>
+          <header class="section-heading"><div><span class="section-number">服务列表</span><h2>正在使用的服务 <span class="count-badge">{{ nodes.length }}</span></h2></div><RouterLink class="text-link" to="/nodes">管理全部 <ArrowUpRight :size="15" /></RouterLink></header>
           <div class="service-table-head" aria-hidden="true"><span>服务名称</span><span>流量信息</span><span>有效期 / 状态</span><span></span></div>
           <article v-for="node in previewNodes" :key="node.id" class="service-row">
             <div class="service-identity"><span class="protocol-symbol">{{ node.serviceNode.protocol.slice(0, 1).toUpperCase() }}</span><div><strong>{{ node.serviceNode.name }}</strong><small>{{ node.serviceNode.server.name }} · {{ node.serviceNode.protocol.toUpperCase() }}</small></div></div>
@@ -144,8 +138,8 @@ onMounted(loadDashboard);
         <AccountLedger :entries="dashboard?.balanceLogs || []" :limit="4" :loading="loading" />
       </div>
       <aside class="overview-rail">
-        <section class="balance-panel" aria-label="账户余额"><div class="balance-panel-top"><span class="section-number">YOUR BALANCE</span><WalletCards :size="20" /></div><span class="balance-label">账户可用余额</span><div class="balance-figure"><span>¥</span>{{ dashboard ? Number(dashboard.customer.balance).toFixed(2) : '—' }}</div><p>可用于已绑定服务的余额续费。</p><RouterLink class="button primary wide" to="/finance">充值余额 <ArrowRight :size="16" /></RouterLink><RouterLink class="balance-secondary" :to="{ path: '/finance', query: { tab: 'redeem' } }">已有卡密？直接兑换 <ArrowUpRight :size="14" /></RouterLink></section>
-        <section class="rail-section"><span class="section-number">SERVICE NOTES</span><h3>服务提醒</h3><div class="notice-item"><CalendarClock :size="18" /><div><strong>{{ nearestExpireValue ? '留意服务有效期' : '有效期信息' }}</strong><p>{{ nearestExpireValue ? '最近一项服务将于 ' + formatDate(nearestExpireValue, true) + ' 到期，可前往连接服务续费。' : '当前服务未设置到期时间，具体使用状态以服务列表为准。' }}</p></div></div><div class="rail-note">续费延长有效期，已用流量与额度保持不变。</div><RouterLink class="text-link" to="/profile">查看账户资料 <ArrowUpRight :size="15" /></RouterLink></section>
+        <section class="center-actions"><h2>常用操作</h2><RouterLink to="/nodes"><Network :size="19" />连接与续费 <ArrowUpRight :size="16" /></RouterLink><RouterLink to="/finance"><WalletCards :size="19" />充值账户余额 <ArrowUpRight :size="16" /></RouterLink><RouterLink :to="{ path: '/finance', query: { tab: 'redeem' } }"><CircleCheck :size="19" />兑换卡密 <ArrowUpRight :size="16" /></RouterLink><RouterLink to="/profile"><CircleCheck :size="19" />账户与安全 <ArrowUpRight :size="16" /></RouterLink></section>
+        <section class="rail-section"><span class="section-number">有效期提醒</span><h3>服务提醒</h3><div class="notice-item"><CalendarClock :size="18" /><div><strong>{{ nearestExpireValue ? '留意服务有效期' : '有效期信息' }}</strong><p>{{ nearestExpireValue ? '最近一项服务将于 ' + formatDate(nearestExpireValue, true) + ' 到期，可前往连接服务续费。' : '当前服务未设置到期时间，具体使用状态以服务列表为准。' }}</p></div></div><div class="rail-note">续费延长有效期，已用流量与额度保持不变。</div><RouterLink class="text-link" to="/profile">查看账户资料 <ArrowUpRight :size="15" /></RouterLink></section>
       </aside>
     </div>
   </div>

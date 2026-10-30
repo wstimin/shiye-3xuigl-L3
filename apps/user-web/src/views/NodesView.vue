@@ -233,7 +233,7 @@ onMounted(loadNodes);
 
 <template>
   <div class="user-page connections-page" :aria-busy="loading">
-    <header class="page-heading"><div><span class="eyebrow">YOUR CONNECTIONS</span><h1>连接服务<span class="heading-dot">.</span></h1><p>所有连接集中管理。展开服务，获取链接、扫码导入或续费。</p></div><button class="button secondary" :disabled="loading" @click="loadNodes"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新服务</button></header>
+    <header class="page-heading"><div><span class="eyebrow">连接与有效期</span><h1>连接服务</h1><p>所有连接集中管理。展开服务，获取链接、扫码导入或续费。</p></div><button class="button secondary" :disabled="loading" @click="loadNodes"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新服务</button></header>
     <div v-if="message" class="user-feedback success" role="status">{{ message }}</div><div v-if="error" class="user-feedback error" role="alert">{{ error }}</div>
     <section class="surface connections-surface">
       <header class="connections-toolbar"><div class="connection-totals"><strong>{{ nodes.length }} <span>项服务</span></strong><span class="live-dot">{{ activeCount }} 项启用</span><span v-if="expiringCount" class="attention-text">{{ expiringCount }} 项即将到期</span></div><label class="search-field"><Search :size="16" /><input v-model="searchQuery" type="search" aria-label="搜索服务" placeholder="搜索名称、协议或状态" /></label></header>

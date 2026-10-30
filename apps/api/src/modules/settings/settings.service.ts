@@ -32,7 +32,7 @@ export class SettingsService {
     ]);
     const value = settingObject<BrandSettings>(customRow?.value ?? defaultRow?.value);
     return {
-      brandName: value.brandName || process.env.APP_NAME || '十夜管理系统',
+      brandName: value.brandName || '十夜服务中心',
       logoDataUrl: value.logoDataUrl || ''
     };
   }

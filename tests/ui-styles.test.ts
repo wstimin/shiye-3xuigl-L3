@@ -8,14 +8,18 @@ const userStyles = readFileSync('apps/user-web/src/styles.css', 'utf8');
 const financeView = readFileSync('apps/admin-web/src/views/FinanceView.vue', 'utf8');
 const adminMain = readFileSync('apps/admin-web/src/main.ts', 'utf8');
 const adminHtml = readFileSync('apps/admin-web/index.html', 'utf8');
+const themeStyles = readFileSync('apps/web-shared/theme.css', 'utf8');
 
-test('admin bootstrap canvas matches the light workspace background', () => {
-  const workspaceBackground = adminStyles.match(/--bg:\s*(#[\da-f]{6})/i)?.[1];
+test('bootstrap supports both themes before application code loads', () => {
+  const workspaceBackground = themeStyles.match(/--bg:\s*(#[\da-f]{6})/i)?.[1];
   assert.ok(workspaceBackground);
   const canvasBackground = adminHtml.match(/html, body, #app\s*\{[^}]*background:\s*(#[\da-f]{6})/i)?.[1];
   assert.equal(canvasBackground, workspaceBackground);
   assert.ok(adminHtml.includes(`name="theme-color" content="${workspaceBackground}"`));
-  assert.ok(adminHtml.includes('name="color-scheme" content="light"'));
+  assert.ok(adminHtml.includes('name="color-scheme" content="light dark"'));
+  assert.ok(adminHtml.includes('localStorage.getItem("shiye:theme")'));
+  assert.ok(adminHtml.includes('prefers-color-scheme: dark'));
+  assert.ok(adminHtml.includes('html[data-theme="dark"]'));
 });
 
 test('runtime-generated UI classes keep their visual rules', () => {
@@ -72,17 +76,16 @@ test('user pages remove decorative overlays while retaining functional modal bac
   assert.equal(userStyles.includes('.user-nav-backdrop'), false);
   assert.equal(userStyles.includes('.user-sidebar'), false);
   assert.equal(userStyles.includes('.user-stat-grid'), false);
-  assert.equal(userStyles.includes('--panel-bg: #ffffff;'), true);
+  assert.equal(themeStyles.includes('--panel-bg: var(--surface)'), true);
 });
 
-test('user and admin workspaces share the Professional color tokens', () => {
-  for (const token of ['--primary', '--text']) {
-    const pattern = new RegExp(token + ':\\s*(#[0-9a-f]{6})', 'i');
-    assert.equal(userStyles.match(pattern)?.[1], adminStyles.match(pattern)?.[1], token);
-  }
+test('user and admin load the same theme palette rather than independent color overrides', () => {
+  assert.ok(adminMain.includes("import '../../web-shared/theme.css'"));
+  assert.ok(readFileSync('apps/user-web/src/main.ts', 'utf8').includes("import '../../web-shared/theme.css'"));
+  assert.ok(themeStyles.includes(':root[data-theme="dark"]'));
   const html = readFileSync('apps/user-web/index.html', 'utf8');
-  assert.ok(html.includes('background: #f5f6f8'));
-  assert.ok(html.includes('name="color-scheme" content="light"'));
+  assert.ok(html.includes('background: #f7f5f2'));
+  assert.ok(html.includes('name="color-scheme" content="light dark"'));
 });
 
 test('user stylesheet has no repeated selectors in the same media context', () => {

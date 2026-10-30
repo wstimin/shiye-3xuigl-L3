@@ -1,0 +1,34 @@
+/* Shared warm neutral palette. Component styles consume these tokens in both themes. */
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-synthesis: none;
+  --bg: #f7f5f2; --surface: #ffffff; --surface-soft: #f0ede7; --text: #2c2a26; --muted: #625d54; --border: #ddd7cc; --border-strong: #c8bfae;
+  --primary: #c9a227; --primary-hover: #b8911f; --primary-strong: #806313; --primary-soft: #f6efd9; --on-primary: #211b0c;
+  --success: #356d55; --success-soft: #eaf3ed; --warning: #875b14; --warning-soft: #fbf0d9; --danger: #ac3934; --danger-soft: #fbecea; --info: #4c6580; --info-soft: #edf1f6;
+  --overlay: #18161099; --shadow: 0 8px 28px -18px #30261740;
+  --app-bg: var(--bg); --panel-bg: var(--surface); --panel-soft: var(--surface-soft);
+  --ui-bg: var(--bg); --ui-surface: var(--surface); --ui-surface-soft: var(--surface-soft); --ui-border: var(--border); --ui-text: var(--text); --ui-muted: var(--muted); --ui-primary: var(--primary);
+  --el-color-primary: var(--primary-strong); --el-color-primary-dark-2: var(--primary-hover);
+  --el-color-primary-light-3: color-mix(in srgb, var(--primary) 80%, var(--surface)); --el-color-primary-light-5: color-mix(in srgb, var(--primary) 50%, var(--surface)); --el-color-primary-light-7: color-mix(in srgb, var(--primary) 30%, var(--surface)); --el-color-primary-light-8: var(--primary-soft); --el-color-primary-light-9: var(--primary-soft);
+  --el-color-success: var(--success); --el-color-warning: var(--warning); --el-color-danger: var(--danger); --el-color-info: var(--muted);
+  --el-color-success-light-8: var(--success-soft); --el-color-success-light-9: var(--success-soft); --el-color-warning-light-8: var(--warning-soft); --el-color-warning-light-9: var(--warning-soft); --el-color-danger-light-8: var(--danger-soft); --el-color-danger-light-9: var(--danger-soft); --el-color-info-light-8: var(--surface-soft); --el-color-info-light-9: var(--surface-soft);
+  --el-bg-color: var(--surface); --el-bg-color-page: var(--bg); --el-bg-color-overlay: var(--surface); --el-fill-color-blank: var(--surface); --el-fill-color: var(--surface-soft); --el-fill-color-light: var(--surface-soft); --el-fill-color-lighter: var(--surface-soft); --el-fill-color-extra-light: var(--surface-soft); --el-fill-color-dark: var(--border);
+  --el-text-color-primary: var(--text); --el-text-color-regular: var(--text); --el-text-color-secondary: var(--muted); --el-text-color-placeholder: var(--muted); --el-text-color-disabled: var(--muted);
+  --el-border-color: var(--border-strong); --el-border-color-light: var(--border); --el-border-color-lighter: var(--border); --el-border-color-extra-light: var(--border); --el-disabled-bg-color: var(--surface-soft); --el-disabled-text-color: var(--muted); --el-mask-color: var(--overlay); --el-mask-color-extra-light: var(--overlay);
+  --el-font-size-base: 15px; --el-font-size-small: 14px; --el-border-radius-base: 8px; --el-component-size: 40px; --el-component-size-small: 34px;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1916; --surface: #24221e; --surface-soft: #2e2b26; --text: #f0ebe3; --muted: #c2baad; --border: #403b33; --border-strong: #635b4d;
+  --primary: #e0b83a; --primary-hover: #f0c94a; --primary-strong: #e0b83a; --primary-soft: #373122; --on-primary: #211b0c;
+  --success: #8bc5a8; --success-soft: #24372c; --warning: #e2bd72; --warning-soft: #3c3120; --danger: #ed958a; --danger-soft: #3e2925; --info: #aac1de; --info-soft: #29313b;
+  --overlay: #090806b3; --shadow: 0 8px 28px -18px #000000b3;
+}
+.theme-control { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 9px; padding: 3px; background: var(--surface); flex-shrink: 0; }
+.theme-toggle, .theme-system { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
+.theme-toggle:hover, .theme-system:hover, .theme-system[aria-pressed="true"] { background: var(--surface-soft); color: var(--primary-strong); }
+.brand-emblem { display: inline-grid; place-items: center; width: 42px; height: 42px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--primary-strong); overflow: hidden; flex-shrink: 0; }
+.brand-emblem img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.brand-emblem svg { width: 32px; height: 32px; }
+@media (max-width: 600px) { .theme-toggle span { display: none; } .theme-toggle, .theme-system { padding: 7px; } }

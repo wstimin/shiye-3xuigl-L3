@@ -24,6 +24,7 @@ import {
   Upload,
   X
 } from 'lucide-vue-next';
+import BrandMark from '../../../web-shared/BrandMark.vue';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
 import { notifyError } from '../notify';
@@ -50,7 +51,7 @@ type SettingsModule = {
 
 const defaultRuntime: RuntimeSettings = { adminPath: '/admin', activeAdminPath: '/admin', restartRequired: false };
 const settingsModules: SettingsModule[] = [
-  { id: 'brand', title: '品牌与外观', description: '系统名称、Logo 与品牌展示', endpoint: '/api/admin/settings', method: 'PUT', tone: 'indigo', icon: Palette },
+  { id: 'brand', title: '品牌与外观', description: '品牌名称、Logo 与品牌展示', endpoint: '/api/admin/settings', method: 'PUT', tone: 'indigo', icon: Palette },
   { id: 'business', title: '业务入口', description: '用户端卡密购买地址', endpoint: '/api/admin/settings', method: 'PUT', tone: 'emerald', icon: Link2 },
   { id: 'runtime', title: '访问与运行', description: '管理后台访问路径', endpoint: '/api/admin/settings', method: 'PUT', tone: 'cyan', icon: Route },
   { id: 'security', title: '账号安全', description: '管理员登录密码', endpoint: '/api/change-password', method: 'POST', tone: 'rose', icon: LockKeyhole }
@@ -63,7 +64,7 @@ const savingBusiness = ref(false);
 const savingRuntime = ref(false);
 const changingPassword = ref(false);
 const error = ref('');
-const brandForm = reactive<BrandSettings>({ brandName: '十夜管理系统', logoDataUrl: '' });
+const brandForm = reactive<BrandSettings>({ brandName: '十夜服务中心', logoDataUrl: '' });
 const businessForm = reactive<BusinessSettings>({ cardPurchaseUrl: '' });
 const runtimeForm = reactive<RuntimeSettings>({ ...defaultRuntime });
 const passwordForm = reactive({ currentPassword: '', newPassword: '' });
@@ -114,7 +115,7 @@ function fetchSettings() {
 }
 
 function applySettings(settings: AdminSettings) {
-  const brand = settings.brand || { brandName: '十夜管理系统', logoDataUrl: '' };
+  const brand = settings.brand || { brandName: '十夜服务中心', logoDataUrl: '' };
   const business = settings.business || { cardPurchaseUrl: '' };
   const runtime = settings.runtime || defaultRuntime;
   Object.assign(brandForm, brand);
@@ -440,19 +441,16 @@ onMounted(loadSettings);
           <div class="settings-form-section">
             <div class="settings-section-heading"><div><strong>品牌信息</strong><span>保存后同步更新管理端、用户端和登录页的品牌展示。</span></div></div>
             <el-form :model="brandForm" label-position="top">
-              <el-form-item label="系统名称" required>
-                <el-input v-model="brandForm.brandName" maxlength="80" show-word-limit placeholder="请输入系统名称" />
+              <el-form-item label="品牌名称" required>
+                <el-input v-model="brandForm.brandName" maxlength="80" show-word-limit placeholder="例如：十夜服务中心" />
               </el-form-item>
-              <el-form-item label="系统 Logo">
+              <el-form-item label="品牌头像">
                 <div class="settings-logo-uploader">
-                  <div class="settings-logo-preview">
-                    <img v-if="brandForm.logoDataUrl" :src="brandForm.logoDataUrl" alt="系统 Logo" />
-                    <span v-else>{{ brandForm.brandName.trim().slice(0, 1) || '十' }}</span>
-                  </div>
+                  <div class="settings-logo-preview"><BrandMark :src="brandForm.logoDataUrl" :name="brandForm.brandName" /></div>
                   <div class="settings-logo-actions">
                     <label class="settings-file-button">
                       <Upload :size="16" />
-                      <span>上传 Logo</span>
+                      <span>上传品牌头像</span>
                       <input type="file" accept="image/*" @change="onLogoSelected" />
                     </label>
                     <el-button v-if="brandForm.logoDataUrl" @click="brandForm.logoDataUrl = ''"><X :size="15" />清除图片</el-button>
@@ -465,10 +463,7 @@ onMounted(loadSettings);
 
           <div class="settings-brand-preview-card">
             <span class="settings-preview-label">品牌预览</span>
-            <div class="settings-brand-preview-mark">
-              <img v-if="brandForm.logoDataUrl" :src="brandForm.logoDataUrl" alt="品牌预览" />
-              <span v-else>{{ brandForm.brandName.trim().slice(0, 1) || '十' }}</span>
-            </div>
+            <BrandMark :src="brandForm.logoDataUrl" :name="brandForm.brandName" />
             <strong>{{ brandForm.brandName.trim() || '未命名系统' }}</strong>
             <small>管理控制台</small>
             <div class="settings-preview-status"><i></i>品牌配置预览</div>

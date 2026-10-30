@@ -304,50 +304,6 @@ onMounted(loadDashboard);
 
     <el-alert v-if="error" class="dashboard-alert" :title="error" type="error" show-icon :closable="false" />
 
-    <section class="engine-grid" aria-label="面板工作区">
-      <router-link to="/xui-servers" class="engine-card"><span class="engine-icon">X</span><div><strong>3x-ui <small>Xray Core</small></strong><p>{{ overview?.servers.xui ?? 0 }} 个面板 · 节点、用户与续费管理</p></div><span class="engine-arrow">↗</span></router-link>
-      <router-link to="/sui-servers" class="engine-card"><span class="engine-icon sing">S</span><div><strong>S-UI <small>sing-box</small></strong><p>{{ overview?.servers.sui ?? 0 }} 个面板 · 客户端、网络与核心控制</p></div><span class="engine-arrow">↗</span></router-link>
-    </section>
-
-    <section class="dashboard-command-center" :class="`is-${operationalTone}`" aria-label="业务运行态势">
-      <div class="dashboard-command-score">
-        <div class="dashboard-command-ring" :style="{ '--score': `${operationalScore * 3.6}deg` }">
-          <div><strong>{{ operationalScore }}</strong><span>态势分</span></div>
-        </div>
-        <span class="dashboard-command-pulse"><i></i>{{ operationalLabel }}</span>
-      </div>
-      <div class="dashboard-command-copy">
-        <div class="dashboard-command-title">
-          <div><span>实时业务中枢</span><h2>业务运行态势</h2></div>
-          <span class="dashboard-command-badge">{{ operationalLabel }}</span>
-        </div>
-        <p>{{ operationalDescription }}</p>
-        <div class="dashboard-command-meta">
-          <span>已配置资源 <strong>{{ networkTotal + socksTotal + paymentChannels }}</strong></span>
-          <span>启用自动任务 <strong>{{ enabledJobCount }} / 2</strong></span>
-          <span>待支付订单 <strong>{{ pendingOrders }}</strong></span>
-        </div>
-      </div>
-      <div class="dashboard-command-signals">
-        <div>
-          <span><Router :size="14" />网络资源</span><strong>{{ networkRate }}%</strong>
-          <i><b :style="{ width: `${networkRate}%` }"></b></i>
-        </div>
-        <div>
-          <span><Link2 :size="14" />绑定节点</span><strong>{{ customerNodeRate }}%</strong>
-          <i><b :style="{ width: `${customerNodeRate}%` }"></b></i>
-        </div>
-        <div>
-          <span><Activity :size="14" />SOCKS 出站</span><strong>{{ socksRate }}%</strong>
-          <i><b :style="{ width: `${socksRate}%` }"></b></i>
-        </div>
-        <div>
-          <span><CircleDollarSign :size="14" />支付通道</span><strong>{{ paymentChannelRate }}%</strong>
-          <i><b :style="{ width: `${paymentChannelRate}%` }"></b></i>
-        </div>
-      </div>
-    </section>
-
     <section class="dashboard-stat-grid" aria-label="核心业务统计">
       <article class="dashboard-stat-card purple">
         <div class="dashboard-stat-head"><span>用户账户</span><i><Users :size="18" /></i></div>
@@ -375,6 +331,8 @@ onMounted(loadDashboard);
       </article>
     </section>
 
+    <section class="runtime-overview" aria-label="业务运行态势"><div><strong>业务运行状态 <span class="runtime-state">{{ operationalLabel }}</span></strong><p>{{ operationalDescription }}</p></div><div><small>资源启用率</small><strong>{{ networkRate }}%</strong></div><div><small>绑定节点启用率</small><strong>{{ customerNodeRate }}%</strong></div><div><small>自动任务</small><strong>{{ enabledJobCount }} / 2</strong></div><div><small>SOCKS / 支付启用率</small><strong>{{ socksRate }}% / {{ paymentChannelRate }}%</strong></div></section>
+    <section class="dashboard-workspaces" aria-label="面板工作区"><router-link to="/xui-servers" class="dashboard-workspace-link"><span>X</span><div><strong>3x-ui 工作区</strong><p>{{ overview?.servers.xui ?? 0 }} 个面板 · Xray Core</p></div><span>管理面板 ↗</span></router-link><router-link to="/sui-servers" class="dashboard-workspace-link"><span>S</span><div><strong>S-UI 工作区</strong><p>{{ overview?.servers.sui ?? 0 }} 个面板 · sing-box</p></div><span>管理面板 ↗</span></router-link></section>
     <section class="dashboard-middle-grid">
       <article class="dashboard-section-card">
         <header class="dashboard-section-head">

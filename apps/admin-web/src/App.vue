@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ArrowRight, CircleAlert, ClipboardList, CreditCard, GitBranch, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
+import { ArrowRight, ChevronRight, CircleAlert, ClipboardList, CreditCard, GitBranch, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
+import BrandMark from '../../web-shared/BrandMark.vue';
+import ThemeToggle from '../../web-shared/ThemeToggle.vue';
+import { applyBranding } from '../../web-shared/branding';
 import { api, onSessionExpired } from './api';
 import { preloadRoute, routeLoadError, routeLoading } from './router';
 
 type SessionUser = { role: string; username: string };
 type Branding = { brandName: string; logoDataUrl: string };
 
-const fallbackBrandName = '十夜管理后台';
+const fallbackBrandName = '十夜服务中心';
 const brandingUpdatedEvent = 'shiye:branding-updated';
 const appVersion = __SHIYE_BUILD_INFO__.version;
 const navSections = [
@@ -50,6 +53,7 @@ const branding = reactive<Branding>({ brandName: fallbackBrandName, logoDataUrl:
 const loginForm = reactive({ username: '', password: '' });
 const route = useRoute();
 let stopSessionExpired: (() => void) | undefined;
+const activeSection = computed(() => navSections.find(section => section.items.some(item => item.to === route.path || item.to === '/xui-servers' && route.path === '/xui-native')) || navSections[0]!);
 const currentRouteLabel = computed(() => route.path === '/xui-native' ? '3x-ui 面板管理' : navSections.flatMap(section => section.items).find(item => item.to === route.path)?.label || '');
 
 watch(() => route.path, () => {
@@ -105,31 +109,7 @@ async function logout() {
   user.value = null;
 }
 
-function applyBrowserBranding(settings: Branding) {
-  document.title = settings.brandName || fallbackBrandName;
-  const icon = ensureFaviconElement();
-  icon.type = settings.logoDataUrl ? '' : 'image/svg+xml';
-  icon.href = settings.logoDataUrl || createTextFavicon(settings.brandName || fallbackBrandName);
-}
-
-function ensureFaviconElement() {
-  const existing = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-  if (existing) return existing;
-  const link = document.createElement('link');
-  link.rel = 'icon';
-  document.head.appendChild(link);
-  return link;
-}
-
-function createTextFavicon(name: string) {
-  const initial = Array.from(name.trim())[0] || '十';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0f172a"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-size="32" font-family="Arial, sans-serif" font-weight="700" fill="#ffffff">${escapeSvg(initial)}</text></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
-function escapeSvg(value: string) {
-  return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] || char);
-}
+function applyBrowserBranding(settings: Branding) { applyBranding(settings, fallbackBrandName); }
 
 function handleSessionExpired() {
   if (!user.value) return;
@@ -166,13 +146,11 @@ onUnmounted(() => {
   <div v-if="checking" class="boot-screen">正在检查登录状态</div>
 
   <div v-else-if="!user" class="login-screen admin-login-screen">
+    <div class="login-theme"><ThemeToggle /></div>
     <div class="login-layout">
       <section class="login-intro" aria-labelledby="admin-login-title">
         <div class="intro-brand-row">
-          <div class="intro-brand-mark">
-            <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
-            <span v-else>{{ branding.brandName.slice(0, 1) }}</span>
-          </div>
+          <BrandMark :src="branding.logoDataUrl" :name="branding.brandName" />
           <div class="intro-brand-copy">
             <strong>{{ branding.brandName }}</strong>
             <span><i></i>运维控制台运行中</span>
@@ -203,10 +181,7 @@ onUnmounted(() => {
       <main class="login-area">
         <form class="login-panel refined-login" autocomplete="on" @submit.prevent="login">
           <div class="login-card-brand">
-            <div class="login-brand">
-              <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
-              <span v-else>{{ branding.brandName.slice(0, 1) }}</span>
-            </div>
+            <BrandMark :src="branding.logoDataUrl" :name="branding.brandName" />
             <div><strong>{{ branding.brandName }}</strong><span>管理端</span></div>
           </div>
 
@@ -244,59 +219,21 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <el-container v-else class="shell overview-shell" :class="{ 'mobile-nav-open': mobileNavOpen }">
+  <div v-else class="shell overview-shell" :class="{ 'mobile-nav-open': mobileNavOpen, 'overview-home': route.path === '/'  }">
+    <a class="skip-link" href="#admin-content">跳到页面内容</a>
+    <header class="workspace-header">
+      <router-link to="/" class="workspace-brand"><BrandMark :src="branding.logoDataUrl" :name="branding.brandName" /><span><strong>{{ branding.brandName }}</strong><small>管理控制台</small></span></router-link>
+      <nav class="workspace-sections" aria-label="工作区分组"><router-link v-for="section in navSections" :key="section.label" :to="section.items[0]!.to" :class="{ selected: activeSection === section }">{{ section.label }}</router-link></nav>
+      <div class="workspace-tools"><ThemeToggle /><span class="admin-identity"><UserRound :size="17" />{{ user.username }}</span><button class="icon-button" aria-label="退出登录" title="退出登录" @click="logout"><LogOut :size="17" /></button></div>
+    </header>
     <button v-if="mobileNavOpen" class="mobile-nav-backdrop" type="button" aria-label="关闭导航" @click="mobileNavOpen = false"></button>
-    <el-aside width="220px" class="sidebar" aria-label="管理后台导航">
-      <div class="brand">
-        <img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="Logo" />
-        <span v-else class="brand-mark">{{ branding.brandName.slice(0, 1) }}</span>
-        <strong>{{ branding.brandName }}</strong>
-        <button class="mobile-nav-close" type="button" aria-label="关闭导航" title="关闭导航" @click="mobileNavOpen = false"><X :size="18" /></button>
-      </div>
-      <nav class="sidebar-scroll">
-        <section v-for="section in navSections" :key="section.label" class="nav-section">
-          <div class="nav-section-title">{{ section.label }}</div>
-          <router-link v-for="item in section.items" :key="item.to" :to="item.to" class="nav-item" :title="item.label" @mouseenter="preloadRoute(item.to)" @focus="preloadRoute(item.to)">
-            <component :is="item.icon" :size="18" />
-            <span>{{ item.label }}</span>
-          </router-link>
-        </section>
-      </nav>
-      <div class="sidebar-footer">
-        <div class="sidebar-user-card">
-          <span class="sidebar-user-avatar">{{ user.username.slice(0, 1).toUpperCase() }}</span>
-          <div class="sidebar-user">
-            <strong>{{ user.username }}</strong>
-            <span>超级管理员</span>
-          </div>
-        </div>
-        <el-button text class="logout-button" @click="logout"><LogOut :size="16" />退出登录</el-button>
-        <div class="sidebar-version" aria-label="当前版本">Version {{ appVersion }}</div>
-      </div>
-    </el-aside>
-    <el-container class="admin-workspace">
-      <el-header class="topbar">
-        <div class="topbar-heading">
-          <button class="mobile-nav-toggle" type="button" aria-label="打开导航" title="打开导航" @click="mobileNavOpen = true"><Menu :size="19" /></button>
-          <strong>工作空间</strong>
-          <span v-if="currentRouteLabel">/ <b>{{ currentRouteLabel }}</b></span>
-        </div>
-        <div class="topbar-user-badge"><i></i>{{ user.username }} · 管理员</div>
-      </el-header>
-      <el-main class="route-stage">
-        <div class="route-progress" :class="{ active: routeLoading }" aria-hidden="true"><span></span></div>
-        <div v-if="routeLoadError" class="route-load-error" role="alert">
-          <CircleAlert :size="20" />
-          <div><strong>页面加载失败</strong><span>{{ routeLoadError }}</span></div>
-          <button type="button" @click="reloadPage">刷新重试</button>
-        </div>
-        <router-view v-else v-slot="{ Component }">
-          <Suspense>
-            <component :is="Component" />
-            <template #fallback><div class="route-loading-panel"><span></span><strong>正在加载页面</strong></div></template>
-          </Suspense>
-        </router-view>
-      </el-main>
-    </el-container>
-  </el-container>
+    <aside class="sidebar" aria-label="管理后台导航">
+      <div class="context-label"><span>{{ activeSection.label }}</span><button class="mobile-nav-close" aria-label="关闭导航" @click="mobileNavOpen = false"><X :size="18" /></button></div>
+      <nav class="sidebar-scroll"><section v-for="section in navSections" :key="section.label" class="nav-section" :class="{ 'context-active': activeSection === section }"><div class="nav-section-title">{{ section.label }}</div><router-link v-for="item in section.items" :key="item.to" :to="item.to" class="nav-item" :class="{ 'router-link-active': route.path === '/xui-native' && item.to === '/xui-servers' }" @mouseenter="preloadRoute(item.to)" @focus="preloadRoute(item.to)"><component :is="item.icon" :size="19" /><span>{{ item.label }}</span><ArrowRight :size="14" class="nav-arrow" /></router-link></section></nav>
+      <div class="workspace-note"><ShieldCheck :size="19" /><strong>统一服务管理</strong><span>面板、业务与网络<br />集中协作，清晰可控。</span><small>v{{ appVersion }}</small></div>
+    </aside>
+    <div class="admin-workspace"><div class="topbar"><button class="mobile-nav-toggle" type="button" aria-label="打开导航" @click="mobileNavOpen = true"><Menu :size="20" /></button><span>{{ activeSection.label }}</span><ChevronRight :size="14" /><strong>{{ currentRouteLabel }}</strong><router-link to="/diagnostics" class="workspace-status"><i></i>运行诊断</router-link></div>
+      <main id="admin-content" class="route-stage"><div class="route-progress" :class="{ active: routeLoading }" aria-hidden="true"><span></span></div><div v-if="routeLoadError" class="route-load-error" role="alert"><CircleAlert :size="20" /><div><strong>页面加载失败</strong><span>{{ routeLoadError }}</span></div><button type="button" @click="reloadPage">刷新重试</button></div><router-view v-else v-slot="{ Component }"><Suspense><component :is="Component" /><template #fallback><div class="route-loading-panel"><span></span><strong>正在加载页面</strong></div></template></Suspense></router-view></main>
+    </div>
+  </div>
 </template>

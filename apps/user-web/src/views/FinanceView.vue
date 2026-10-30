@@ -161,7 +161,7 @@ onMounted(loadFinanceData);
 
 <template>
   <div class="user-page finance-page" :aria-busy="loading">
-    <header class="page-heading"><div><span class="eyebrow">BILLING & BALANCE</span><h1>账单与余额<span class="heading-dot">.</span></h1><p>为账户充值，用余额延续你的连接服务。</p></div><span class="page-heading-note">每一笔余额变动，都有记录可查。</span></header>
+    <header class="page-heading"><div><span class="eyebrow">账户资金</span><h1>账单与余额</h1><p>为账户充值，用余额延续你的连接服务。</p></div><span class="page-heading-note">每一笔余额变动，都有记录可查。</span></header>
     <p v-if="message" class="user-feedback success" role="status">{{ message }}</p><p v-if="error" class="user-feedback error" role="alert">{{ error }}</p>
     <div class="funding-layout">
       <section class="surface funding-workspace">

@@ -2,6 +2,9 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { ArrowRight, ChevronRight, CircleAlert, CircleUserRound, Home, LockKeyhole, LogOut, Network, ReceiptText, ShieldCheck, UserRound } from 'lucide-vue-next';
+import BrandMark from '../../web-shared/BrandMark.vue';
+import ThemeToggle from '../../web-shared/ThemeToggle.vue';
+import { applyBranding } from '../../web-shared/branding';
 import { api, onSessionExpired } from './api';
 import { userAvatarStyle, userInitial } from './avatar';
 import { onNotify, type NotifyPayload } from './notify';
@@ -11,7 +14,7 @@ type SessionUser = { role: string; username: string };
 type Branding = { brandName: string; logoDataUrl: string };
 type UserIdentity = { customer: { name: string; loginUsername: string } };
 
-const fallbackBrandName = '十夜用户中心';
+const fallbackBrandName = '十夜服务中心';
 const appVersion = __SHIYE_BUILD_INFO__.version;
 const nav = [
   { to: '/', label: '服务总览', icon: Home },
@@ -102,31 +105,7 @@ async function logout() {
   userIdentity.value = null;
 }
 
-function applyBrowserBranding(settings: Branding) {
-  document.title = settings.brandName || fallbackBrandName;
-  const icon = ensureFaviconElement();
-  icon.type = settings.logoDataUrl ? '' : 'image/svg+xml';
-  icon.href = settings.logoDataUrl || createTextFavicon(settings.brandName || fallbackBrandName);
-}
-
-function ensureFaviconElement() {
-  const existing = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-  if (existing) return existing;
-  const link = document.createElement('link');
-  link.rel = 'icon';
-  document.head.appendChild(link);
-  return link;
-}
-
-function createTextFavicon(name: string) {
-  const initial = Array.from(name.trim())[0] || '十';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#fece14"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-size="32" font-family="Arial, sans-serif" font-weight="700" fill="#111827">${escapeSvg(initial)}</text></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
-function escapeSvg(value: string) {
-  return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] || char);
-}
+function applyBrowserBranding(settings: Branding) { applyBranding(settings, fallbackBrandName); }
 
 function handleSessionExpired() {
   if (!user.value) return;
@@ -173,13 +152,13 @@ onUnmounted(() => {
   <div v-if="checking" class="boot-screen"><span class="loading-spinner"></span>正在打开个人服务中心</div>
   <section v-else-if="!user" class="login-screen">
     <header class="public-header">
-      <span class="brand-symbol"><img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="" /><span v-else>{{ branding.brandName.slice(0, 1) }}</span></span>
-      <strong>{{ branding.brandName }}</strong><span class="public-header-note">个人服务中心</span>
+      <BrandMark :src="branding.logoDataUrl" :name="branding.brandName" />
+      <strong>{{ branding.brandName }}</strong><span class="public-header-note">个人服务中心</span><ThemeToggle />
     </header>
     <main class="login-stage">
-      <div class="login-caption"><span class="eyebrow">YOUR PERSONAL WORKSPACE</span><h1>连接、账户、服务。<br />在这里，轻松管理。</h1><p>登录后查看可用服务、获取连接信息，并管理账户余额。</p></div>
+      <div class="login-caption"><span class="eyebrow">PERSONAL SERVICE CENTER</span><h1>每一项服务，<br />都井然有序。</h1><p>登录后查看可用服务、获取连接信息，并管理账户余额。</p></div>
       <form class="login-panel" autocomplete="on" @submit.prevent="login">
-        <div class="login-heading"><span class="section-number">01 / SIGN IN</span><h2>登录你的账户</h2><p>使用管理员为你开通的账号。</p></div>
+        <div class="login-heading"><span class="section-number">欢迎回来</span><h2>登录你的账户</h2><p>使用管理员为你开通的账号。</p></div>
         <p v-if="loginError" class="user-feedback error" role="alert"><CircleAlert :size="16" />{{ loginError }}</p>
         <label class="login-form-group"><span>登录账号</span><span class="login-field"><UserRound :size="17" /><input v-model="loginForm.username" name="shiye-user-username" placeholder="输入登录账号" autocomplete="username" required /></span></label>
         <label class="login-form-group"><span>登录密码</span><span class="login-field"><LockKeyhole :size="17" /><input v-model="loginForm.password" name="shiye-user-passcode" type="password" placeholder="输入登录密码" autocomplete="current-password" required /></span></label>
@@ -191,18 +170,9 @@ onUnmounted(() => {
   </section>
   <div v-else class="user-portal">
     <a href="#workspace-content" class="skip-link">跳到页面内容</a>
-    <header class="portal-header">
-      <div class="portal-header-inner">
-        <router-link to="/" class="portal-brand" aria-label="返回服务总览"><span class="brand-symbol"><img v-if="branding.logoDataUrl" :src="branding.logoDataUrl" alt="" /><span v-else>{{ branding.brandName.slice(0, 1) }}</span></span><span><strong>{{ branding.brandName }}</strong><small>个人服务中心</small></span></router-link>
-        <nav class="portal-nav" aria-label="主导航"><router-link v-for="item in nav" :key="item.to" :to="item.to" @mouseenter="preloadRoute(item.to)" @focus="preloadRoute(item.to)"><component :is="item.icon" :size="17" /><span>{{ item.label }}</span></router-link></nav>
-        <div class="portal-account"><router-link to="/profile" class="account-entry"><span class="user-avatar" :style="userAvatarStyle(displayName)">{{ currentUserInitial }}</span><span>{{ displayName }}</span><ChevronRight :size="14" /></router-link><button class="icon-button" type="button" title="退出登录" aria-label="退出登录" @click="logout"><LogOut :size="17" /></button></div>
-      </div>
-    </header>
-    <main id="workspace-content" class="user-main route-stage" :aria-label="currentPageTitle">
-      <div class="route-progress" :class="{ active: routeLoading }" aria-hidden="true"><span></span></div>
-      <div v-if="routeLoadError" class="route-load-error" role="alert"><CircleAlert :size="20" /><div><strong>页面加载失败</strong><span>{{ routeLoadError }}</span></div><button type="button" @click="reloadPage">刷新重试</button></div>
-      <router-view v-else v-slot="{ Component }"><Suspense><component :is="Component" /><template #fallback><div class="route-loading-panel"><span class="loading-spinner"></span><strong>正在加载页面</strong></div></template></Suspense></router-view>
-    </main>
-    <footer class="portal-footer"><span>{{ branding.brandName }} <span class="footer-divider">/</span> 个人服务中心</span><span>@{{ displayLoginUsername }}<span class="footer-divider">·</span>v{{ appVersion }}</span></footer>
+    <aside class="portal-sidebar"><router-link to="/" class="portal-brand"><BrandMark :src="branding.logoDataUrl" :name="branding.brandName" /><span><strong>{{ branding.brandName }}</strong><small>个人服务中心</small></span></router-link><div class="portal-nav-label">我的工作区</div><nav class="portal-nav" aria-label="主导航"><router-link v-for="item in nav" :key="item.to" :to="item.to" @mouseenter="preloadRoute(item.to)" @focus="preloadRoute(item.to)"><component :is="item.icon" :size="20" /><span>{{ item.label }}</span><ChevronRight :size="14" class="nav-arrow" /></router-link></nav><div class="portal-sidebar-note"><ShieldCheck :size="22" /><strong>让连接更简单</strong><p>查看服务、管理余额，<br />每一步都清晰可见。</p></div><div class="portal-sidebar-account"><span class="user-avatar" :style="userAvatarStyle(displayName)">{{ currentUserInitial }}</span><span><strong>{{ displayName }}</strong><small>@{{ displayLoginUsername }}</small></span><button class="icon-button" title="退出登录" aria-label="退出登录" @click="logout"><LogOut :size="17" /></button></div></aside>
+    <div class="portal-workspace"><header class="portal-header"><div class="portal-mobile-brand"><BrandMark :src="branding.logoDataUrl" :name="branding.brandName" /><strong>{{ branding.brandName }}</strong></div><div class="portal-location"><span>个人中心</span><ChevronRight :size="14" /><strong>{{ currentPageTitle }}</strong></div><div class="portal-account"><ThemeToggle /><router-link to="/profile" class="account-entry" aria-label="账户设置"><span class="user-avatar" :style="userAvatarStyle(displayName)">{{ currentUserInitial }}</span><span>{{ displayName }}</span></router-link><button class="icon-button mobile-logout" aria-label="退出登录" @click="logout"><LogOut :size="17" /></button></div></header>
+    <main id="workspace-content" class="user-main route-stage" :aria-label="currentPageTitle"><div class="route-progress" :class="{ active: routeLoading }" aria-hidden="true"><span></span></div><div v-if="routeLoadError" class="route-load-error" role="alert"><CircleAlert :size="20" /><div><strong>页面加载失败</strong><span>{{ routeLoadError }}</span></div><button type="button" @click="reloadPage">刷新重试</button></div><router-view v-else v-slot="{ Component }"><Suspense><component :is="Component" /><template #fallback><div class="route-loading-panel"><span class="loading-spinner"></span><strong>正在加载页面</strong></div></template></Suspense></router-view></main>
+    <footer class="portal-footer"><span>{{ branding.brandName }} · 个人服务中心</span><span>v{{ appVersion }}</span></footer></div>
   </div>
 </template>

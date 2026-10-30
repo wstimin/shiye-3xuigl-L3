@@ -21,6 +21,13 @@ function settingsFixture(initial: SettingRow[] = []) {
   return { rows, service: new SettingsService(prisma as never) };
 }
 
+test('unconfigured public brand does not expose the operating system service name', async () => {
+  const previous = process.env.APP_NAME;
+  process.env.APP_NAME = 'shiye-api';
+  try { assert.equal((await settingsFixture().service.publicBranding()).brandName, '十夜服务中心'); }
+  finally { if (previous === undefined) delete process.env.APP_NAME; else process.env.APP_NAME = previous; }
+});
+
 test('system settings remain available after saving and creating a fresh service instance', async () => {
   const { rows, service } = settingsFixture();
   await service.updateSettings({
