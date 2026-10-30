@@ -28,6 +28,9 @@
   --on-status: #211b0c; --overlay: #090c10b3; --shadow: 0 8px 28px -18px #000000b3; --shadow-subtle: 0 1px 3px #00000018;
   --field-bg: #171b20; --field-border: #778595; --field-hover: #b6c2d0; --field-placeholder: #adb8c6;
 }
+:root .el-segmented { --el-segmented-item-selected-bg-color: var(--primary); --el-segmented-item-selected-color: var(--on-primary); }
+:root .el-checkbox-button { --el-checkbox-button-checked-bg-color: var(--primary); --el-checkbox-button-checked-border-color: var(--primary); --el-checkbox-button-checked-text-color: var(--on-primary); }
+:root .el-checkbox { --el-checkbox-checked-bg-color: var(--primary); --el-checkbox-checked-input-border-color: var(--primary); --el-checkbox-checked-icon-color: var(--on-primary); }
 .theme-control { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 9px; padding: 3px; background: var(--surface); flex-shrink: 0; }
 .theme-toggle, .theme-system { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
 .theme-toggle:hover, .theme-system:hover, .theme-system[aria-pressed="true"] { background: var(--surface-soft); color: var(--primary-strong); }
