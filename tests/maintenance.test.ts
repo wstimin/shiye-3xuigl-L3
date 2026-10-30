@@ -16,10 +16,10 @@ test('uploaded files are privately snapshotted without overwriting existing file
   await writeFile(join(root, 'upload'), 'backup bytes');
   await snapshotUpload(join(root, 'upload'), join(root, 'private'));
   assert.equal(await readFile(join(root, 'private'), 'utf8'), 'backup bytes');
-  await assert.rejects(snapshotUpload(join(root, 'upload'), join(root, 'private')));
+  for (let i = 0; i < 10; i++) await assert.rejects(snapshotUpload(join(root, 'upload'), join(root, 'private')), { code: 'EEXIST' });
   await writeFile(join(root, 'empty'), '');
-  await assert.rejects(snapshotUpload(join(root, 'empty'), join(root, 'invalid')));
-  await assert.rejects(snapshotUpload(root, join(root, 'directory')));
+  await assert.rejects(snapshotUpload(join(root, 'empty'), join(root, 'invalid')), /上传文件无效/);
+  await assert.rejects(snapshotUpload(root, join(root, 'directory')), /上传文件无效|EISDIR/);
 }));
 
 test('release comparison uses numeric versions and rejects malformed versions', () => {
