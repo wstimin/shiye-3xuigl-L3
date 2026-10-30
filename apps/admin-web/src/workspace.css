@@ -26,7 +26,7 @@
 .workspace-tools { display: flex; gap: 20px; align-items: center; margin-left: auto; }
 .workspace-status { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .workspace-status i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
-.overview-shell .route-stage { position: relative; min-width: 0; padding: 28px 32px 48px; max-width: 1680px; margin: 0 auto; }
+.overview-shell .route-stage { position: relative; min-width: 0; padding: 20px 24px 32px; max-width: 1680px; margin: 0 auto; }
 .route-progress { position: absolute; top: 0; left: 0; right: 0; height: 2px; overflow: hidden; opacity: 0; }
 .route-progress.active { opacity: 1; }
 .route-progress span { display: block; width: 40%; height: 100%; background: var(--primary); animation: progress 1.2s linear infinite; }
@@ -40,15 +40,15 @@
 .settings-logo-preview .brand-emblem svg { width: 54px; height: 54px; }
 .settings-brand-preview-card > .brand-emblem { width: 80px; height: 80px; margin: 20px auto; }
 .settings-brand-preview-card > .brand-emblem svg { width: 56px; height: 56px; }
-.runtime-overview { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 20px 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.runtime-overview { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .runtime-overview > div { display: grid; gap: 4px; }
 .runtime-overview > div:first-child { flex: 1; min-width: 220px; }
 .runtime-overview p, .runtime-overview small { font-size: 14px; color: var(--muted); }
 .runtime-overview strong { font-size: 16px; }
 .runtime-state { color: var(--primary-strong); font-size: 14px; }
-.dashboard-page { gap: 24px; }
-.dashboard-workspaces { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-.dashboard-workspace-link { display: flex; align-items: center; gap: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.dashboard-page { gap: 16px; }
+.dashboard-workspaces { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dashboard-workspace-link { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
 .dashboard-workspace-link > div { display: grid; gap: 4px; flex: 1; }
 .dashboard-workspace-link small, .dashboard-workspace-link p { color: var(--muted); font-size: 14px; }
 .dashboard-workspace-link > span:first-child { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 12px; color: var(--primary-strong); font-size: 22px; }

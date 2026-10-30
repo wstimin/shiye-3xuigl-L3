@@ -13,7 +13,7 @@ import {
 } from "../panel-fields";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from 'vue-router';
-const props = defineProps<{ createServerId?: string }>();
+const props = defineProps<{ createServerId?: string; networkOnly?: boolean; networkResource?: 'outbounds' | 'config' }>();
 const createProtocol = ref('');
 watch(createProtocol, value => { if (value) editorRecord.value = { ...(editorRecord.value as Row), type: value }; });
 const emit = defineEmits<{ saved: []; close: []; busy: [value: boolean]; protocolSelected: [value: boolean] }>();
@@ -63,6 +63,8 @@ const busy = ref(false);
 const error = ref("");
 const search = ref("");
 const resource = ref("clients");
+watch(() => props.networkResource, value => { if (props.networkOnly && value) resource.value = value; });
+const syncingId = ref('');
 const data = ref<unknown>(null);
 const status = ref<Row | null>(null);
 const checkedAt = ref("");
@@ -400,11 +402,31 @@ async function testConnection(server: ServerConnection) {
 }
 function enter(server: ServerConnection) {
   selected.value = server;
-  resource.value = "clients";
+  resource.value = props.networkOnly ? props.networkResource || 'outbounds' : 'clients';
   search.value = "";
   status.value = null;
   checkedAt.value = "";
   void refresh();
+}
+async function syncPanel(server: ServerConnection) {
+  busy.value = true;
+  syncingId.value = server.id;
+  try {
+    const result = await api<{ synced: boolean; results: { synced: boolean; error?: string }[] }>(`/api/admin/sui-servers/${server.id}/sync`, { method: 'POST' });
+    const counts = await Promise.all(['inbounds', 'clients', 'outbounds'].map(async key => {
+      const response = await api<Record<string, Row[]>>(`/api/admin/sui-servers/${server.id}/resources/${key}`);
+      if (!Array.isArray(response[key])) throw new Error('远端资源读取失败，请刷新重试');
+      return response[key].length;
+    }));
+    if (selected.value?.id === server.id) await refresh();
+    if (!result.synced) ElMessage.warning(result.results.filter(item => !item.synced).map(item => item.error || '同步失败').join('；'));
+    else if (!error.value) ElMessage.success(`已读取 ${counts[0]} 个入站、${counts[1]} 个客户端、${counts[2]} 个出站；同步 ${result.results.length} 个业务客户端`);
+  } catch (cause) { ElMessage.error(message(cause)); }
+  finally { busy.value = false; syncingId.value = ''; }
+}
+function selectNetworkPanel(event: Event) {
+  const panel = servers.value.find(item => item.id === (event.target as HTMLSelectElement).value);
+  if (panel) enter(panel);
 }
 function back() {
   readVersion++;
@@ -730,12 +752,12 @@ async function control(
 }
 onMounted(async () => {
   await loadServers();
-  const panel = servers.value.find(item => item.id === (props.createServerId || route.query.serverId));
+  const panel = servers.value.find(item => item.id === (props.createServerId || route.query.serverId)) || (props.networkOnly ? servers.value.find(item => item.enabled) : undefined);
   if (!panel) {
     if (props.createServerId && !error.value) error.value = '未找到所选面板，请关闭后重新选择。';
     return;
   }
-  resource.value = props.createServerId ? 'inbounds' : resources.some(item => item.id === route.query.resource) ? String(route.query.resource) : 'clients';
+  resource.value = props.createServerId ? 'inbounds' : props.networkOnly ? props.networkResource || 'outbounds' : resources.some(item => item.id === route.query.resource) ? String(route.query.resource) : 'clients';
   await nextTick();
   selected.value = panel;
   await refresh();
@@ -751,7 +773,7 @@ onMounted(async () => {
 <template>
   <div class="panel-hub" :class="{ 'inbound-create-inline': createServerId }">
     <template v-if="!createServerId">
-    <header class="hub-heading">
+    <header v-if="!networkOnly" class="hub-heading">
       <div>
         <div class="eyebrow">INFRASTRUCTURE / SING-BOX</div>
         <h1>
@@ -767,6 +789,7 @@ onMounted(async () => {
         </p>
       </div>
       <div class="hub-actions">
+        <button v-if="selected" class="hub-button" :disabled="busy || loading || !selected.enabled" @click="syncPanel(selected)"><RefreshCw :size="16" :class="{ spinning: syncingId === selected.id }" />同步面板</button>
         <router-link v-if="route.query.from === 'services'" class="hub-button" to="/nodes"><ArrowLeft :size="16" />返回服务入站</router-link>
         <button
           v-if="selected"
@@ -790,6 +813,11 @@ onMounted(async () => {
         </button>
       </div>
     </header>
+    <div v-else class="sui-network-toolbar">
+      <label>S-UI 面板<select aria-label="选择 S-UI 面板" :value="selected?.id || ''" :disabled="busy || loading" @change="selectNetworkPanel"><option value="" disabled>请选择面板</option><option v-for="server in servers" :key="server.id" :value="server.id" :disabled="!server.enabled">{{ server.name }}</option></select></label>
+      <span v-if="checkedAt" class="muted-text">最近读取 {{ checkedAt }}</span>
+      <div class="hub-actions"><button class="hub-button" :disabled="busy || loading" @click="selected ? refresh() : loadServers()"><RefreshCw :size="16" :class="{ spinning: loading }" />刷新资源</button><button v-if="selected" class="hub-button" :disabled="busy || loading || !selected.enabled" @click="syncPanel(selected)"><RefreshCw :size="16" :class="{ spinning: syncingId === selected.id }" />同步面板</button></div>
+    </div>
     <div v-if="error" class="hub-alert error" role="alert">
       <CircleAlert :size="18" /><span>{{ error }}</span
       ><button class="hub-button" @click="selected ? refresh() : loadServers()">
@@ -797,7 +825,7 @@ onMounted(async () => {
       </button>
     </div>
     <template v-if="!selected">
-      <div class="hub-summary">
+      <div v-if="!networkOnly" class="hub-summary">
         <article>
           <span>已接入面板</span
           ><strong>{{ servers.length }}<small>个</small></strong
@@ -869,6 +897,11 @@ onMounted(async () => {
                   <div class="hub-actions">
                     <button
                       class="hub-link"
+                      :disabled="!server.enabled || busy"
+                      @click="syncPanel(server)"
+                    ><RefreshCw :size="14" :class="{ spinning: syncingId === server.id }" />同步面板</button>
+                    <button
+                      class="hub-link"
                       :disabled="busy"
                       @click="testConnection(server)"
                     >
@@ -904,7 +937,7 @@ onMounted(async () => {
           </table>
         </div>
       </section>
-      <aside class="hub-guide">
+      <aside v-if="!networkOnly" class="hub-guide">
         <ShieldCheck :size="22" />
         <div>
           <strong>连接前，准备好这两项</strong>
@@ -923,7 +956,7 @@ onMounted(async () => {
       </aside>
     </template>
     <template v-else>
-      <div class="hub-summary">
+      <div v-if="!networkOnly" class="hub-summary">
         <article>
           <span>sing-box 核心</span
           ><strong>{{
@@ -947,7 +980,7 @@ onMounted(async () => {
         </article>
       </div>
       <section class="hub-card">
-        <div class="hub-resource-nav" role="tablist" aria-label="面板资源">
+        <div v-if="!networkOnly" class="hub-resource-nav" role="tablist" aria-label="面板资源">
           <button
             v-for="item in resources"
             :key="item.id"
@@ -1127,11 +1160,11 @@ onMounted(async () => {
           </p>
         </div>
         <footer class="hub-table-footer">
-          <span>数据来自 {{ selected.name }} · 接入业务后可绑定用户并续费</span
+          <span>数据来自 {{ selected.name }} · {{ networkOnly ? '出站与路由保存后直接写入当前面板' : '接入业务后可绑定用户并续费' }}</span
           ><span v-if="checkedAt">更新于 {{ checkedAt }}</span>
         </footer>
       </section>
-      <section class="hub-control">
+      <section v-if="!networkOnly" class="hub-control">
         <div>
           <h2>核心运行控制</h2>
           <p>操作将直接发送到远端面板，可能影响在线连接。</p>

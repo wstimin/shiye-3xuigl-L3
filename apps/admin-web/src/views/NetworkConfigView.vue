@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
 import SocksNodesView from './SocksNodesView.vue';
+import SuiServersView from './SuiServersView.vue';
 import PanelFields from '../components/PanelFields.vue';
 import PanelDetails from '../components/PanelDetails.vue';
 import { decodePanelValue, type FieldSchema } from '../panel-fields';
@@ -110,6 +111,7 @@ const serviceNodes = ref<ServiceNode[]>([]);
 const outbounds = ref<NetworkOutbound[]>([]);
 const routes = ref<NetworkRoute[]>([]);
 const activeTab = ref<'outbounds' | 'routes' | 'library'>(useRoute().query.tab === 'library' ? 'library' : 'outbounds');
+const provider = ref<'xui' | 'sui'>(useRoute().query.provider === 'sui' ? 'sui' : 'xui');
 const loading = ref(false);
 const saving = ref(false);
 const previewing = ref(false);
@@ -499,16 +501,20 @@ onMounted(loadResources);
     <header class="operations-page-header page-head">
       <div class="page-head-main">
         <h1>网络规则</h1>
-        <p>管理 3x-ui 出站与路由，复用 SOCKS 中转模板。sing-box 规则在 S-UI 工作区管理。</p>
+        <p>选择面板类型，在此管理出站、路由规则和 SOCKS 中转模板。</p>
       </div>
-      <div class="page-actions">
+      <div v-if="provider === 'xui'" class="page-actions">
         <el-button v-if="activeTab !== 'library'" :loading="loading" @click="loadResources"><RefreshCw :size="15" />刷新</el-button>
         <el-button v-if="activeTab === 'outbounds'" type="primary" @click="openImportDialog"><ArrowDownToLine :size="15" />导入出站</el-button>
         <el-button v-else-if="activeTab === 'routes'" type="primary" @click="openRouteDialog"><Plus :size="15" />创建路由</el-button>
       </div>
     </header>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
+    <div class="status-segment network-provider-switch" role="group" aria-label="面板类型">
+      <button :class="{ active: provider === 'xui' }" :aria-pressed="provider === 'xui'" @click="provider = 'xui'">3x-ui</button>
+      <button :class="{ active: provider === 'sui' }" :aria-pressed="provider === 'sui'" @click="provider = 'sui'">S-UI</button>
+    </div>
+    <el-alert v-if="error && provider === 'xui'" :title="error" type="error" show-icon :closable="false" class="page-alert" />
 
     <el-tabs v-model="activeTab" class="network-tabs">
       <el-tab-pane label="面板出站" name="outbounds" />
@@ -516,6 +522,7 @@ onMounted(loadResources);
       <el-tab-pane label="SOCKS 中转模板" name="library" />
     </el-tabs>
     <SocksNodesView v-if="activeTab === 'library'" embedded />
+    <SuiServersView v-else-if="provider === 'sui'" network-only :network-resource="activeTab === 'routes' ? 'config' : 'outbounds'" />
     <template v-else>
     <div class="metric-grid operations-stat-grid">
       <article class="metric operations-stat-card"><span class="operations-stat-icon tone-indigo"><Network :size="18" /></span><div><span>出站记录</span><strong>{{ outbounds.length }}</strong><small>{{ managedOutboundCount }} 个由本系统托管</small></div></article>

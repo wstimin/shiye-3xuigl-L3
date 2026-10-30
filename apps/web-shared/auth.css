@@ -38,12 +38,12 @@
 .auth-label { display: flex; align-items: center; justify-content: space-between; font-size: 14px; font-weight: 500; }
 .auth-password-label { margin-top: 12px; }
 .auth-password-label svg { color: var(--muted); }
-.auth-input { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 15px; border: 1px solid var(--border-strong); border-radius: 10px; color: var(--muted); background: var(--surface); transition: border-color 140ms ease, box-shadow 140ms ease; }
+.auth-input { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 15px; border: 1px solid var(--field-border); border-radius: 10px; color: var(--muted); background: var(--field-bg); transition: border-color 140ms ease, box-shadow 140ms ease; }
 .auth-input:focus-within { border-color: var(--primary-strong); box-shadow: 0 0 0 3px var(--primary-soft); }
 .auth-input input { width: 100%; min-width: 0; min-height: 50px; padding: 12px 0; border: 0; outline: 0; border-radius: 0; color: var(--text); background: transparent; font: inherit; font-size: 16px; box-shadow: none; }
 .auth-input input:focus-visible { outline: 0; }
-.auth-input input::placeholder { color: var(--muted); opacity: .85; }
-.auth-input input:-webkit-autofill { -webkit-box-shadow: 0 0 0 1000px var(--surface) inset; -webkit-text-fill-color: var(--text); }
+.auth-input input::placeholder { color: var(--field-placeholder); opacity: 1; }
+.auth-input input:-webkit-autofill { -webkit-box-shadow: 0 0 0 1000px var(--field-bg) inset; -webkit-text-fill-color: var(--text); }
 .auth-reveal { display: grid; place-items: center; width: 32px; height: 36px; padding: 4px; flex-shrink: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
 .auth-reveal:hover { color: var(--text); background: var(--surface-soft); }
 .auth-submit { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 52px; padding: 14px 18px; border: 1px solid var(--primary); border-radius: 10px; background: var(--primary); color: var(--on-primary); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; transition: background-color 140ms ease, transform 140ms ease-out; }
