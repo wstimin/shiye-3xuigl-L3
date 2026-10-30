@@ -91,7 +91,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .overview-shell .runtime-labelled-button { width: auto; padding: 0 8px; font-size: 15px; }
 .runtime-inline-copy { padding: 3px; border: 0; background: transparent; color: var(--muted); }
 .danger, .danger-action, .runtime-icon-button.danger { color: var(--danger); }
-.xui-status-chip, .node-status-chip, .customer-status-chip, .status-pill, .customer-expiry-chip, .payment-status-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 3px 8px; color: var(--success); background: var(--surface-soft); border-radius: 4px; font-size: 15px; font-weight: 500; }
+.xui-status-chip, .node-status-chip, .customer-status-chip, .status-pill, .customer-expiry-chip, .payment-status-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 3px 8px; color: var(--success); background: var(--surface-soft); border-radius: 4px; font-size: 15px; font-weight: 500; white-space: nowrap; }
 .xui-status-chip:is(.is-unknown, .is-untested, .is-pending, .is-syncing), .node-status-chip.is-pending { color: var(--primary-strong); background: var(--primary-soft); }
 .xui-status-chip.is-disabled, .node-status-chip.is-disabled, .customer-status-chip.is-disabled, .status-pill.off { color: var(--muted); background: var(--surface-soft); }
 .xui-status-chip:is(.is-error, .is-failed) { color: var(--danger); background: var(--surface-soft); }
@@ -237,6 +237,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .hub-table tbody tr:hover { background: var(--surface); }
 .hub-connections { min-width: 760px; }
 .hub-table .hub-actions { flex-wrap: nowrap; gap: 14px; }
+.hub-table .hub-actions > * { flex-shrink: 0; white-space: nowrap; }
 .table-empty { text-align: center; color: var(--muted); }
 .hub-alert, .hub-guide, .settings-runtime-notice { border: 1px solid var(--border-strong); border-radius: 6px; padding: 12px 16px; display: flex; align-items: flex-start; gap: 10px; background: var(--surface-soft); color: var(--primary-strong); font-size: 15px; }
 .hub-alert.error { border-color: var(--border-strong); color: var(--danger); background: var(--surface); }
