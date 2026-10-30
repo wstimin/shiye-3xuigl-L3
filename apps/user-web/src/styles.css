@@ -44,7 +44,7 @@ button svg, a svg { flex-shrink: 0; }
 .heading-dot { color: var(--primary-strong); margin-left: 2px; }
 .page-heading p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
 .page-heading-note { color: var(--muted); font-size: 12px; }
-.footer-divider { margin: 0 9px; opacity: .6; }
+.footer-divider { margin: 0 9px; }
 .overview-layout, .funding-layout { display: grid; grid-template-columns: minmax(0, 1fr) 292px; gap: 28px; align-items: start; }
 .funding-rail { min-width: 0; display: grid; gap: 24px; }
 .progress-track { display: block; height: 4px; overflow: hidden; border-radius: 4px; background: var(--surface-soft); }

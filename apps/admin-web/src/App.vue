@@ -61,6 +61,12 @@ watch(() => route.path, () => {
   mobileNavOpen.value = false;
 });
 
+watch(user, session => {
+  if (session) window.setTimeout(() => {
+    if (user.value) for (const path of ['/customers', '/nodes', '/xui-servers']) preloadRoute(path);
+  }, 800);
+});
+
 async function loadBranding() {
   try {
     const payload = await api<{ settings: Branding }>('/api/public/branding');

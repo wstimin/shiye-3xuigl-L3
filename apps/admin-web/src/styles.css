@@ -127,6 +127,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .el-table th.el-table__cell { color: var(--muted); font-weight: 500; }
 .el-table td.el-table__cell, .el-table th.el-table__cell { padding: 12px 0; }
 .customer-management-page .el-pagination.is-background .btn-next, .operations-page .el-pagination.is-background .btn-next { background: var(--surface); }
+.el-pagination.is-background .el-pager li.is-active:not(.is-disabled) { background: var(--primary); color: var(--on-primary); }
 .el-tag { font-weight: 400; }
 .el-dropdown-menu__item { gap: 8px; font-size: 14px; }
 .el-dialog { --el-dialog-border-radius: 10px; --el-dialog-padding-primary: 24px; color: var(--text); max-width: calc(100vw - 32px); }

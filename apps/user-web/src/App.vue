@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ChevronRight, CircleAlert, CircleUserRound, Home, LogOut, Network, ReceiptText } from 'lucide-vue-next';
 import LoginScreen from '../../web-shared/LoginScreen.vue';
@@ -43,6 +43,12 @@ const currentUserInitial = computed(() => userInitial(displayName.value));
 let noticeId = 0;
 let stopNotify: (() => void) | undefined;
 let stopSessionExpired: (() => void) | undefined;
+
+watch(user, session => {
+  if (session) window.setTimeout(() => {
+    if (user.value) for (const item of nav) preloadRoute(item.to);
+  }, 800);
+});
 
 async function loadBranding() {
   try {
