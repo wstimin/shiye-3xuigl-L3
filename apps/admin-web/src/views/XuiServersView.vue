@@ -16,18 +16,15 @@ import 'element-plus/es/components/input/style/css';
 import 'element-plus/es/components/option/style/css';
 import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/switch/style/css';
-import 'element-plus/es/components/tooltip/style/css';
-import { ElAlert, ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElForm, ElFormItem, ElInput, ElMessage, ElMessageBox, ElOption, ElSelect, ElSwitch, ElTooltip } from 'element-plus';
+import { ElAlert, ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElForm, ElFormItem, ElInput, ElMessage, ElMessageBox, ElOption, ElSelect, ElSwitch } from 'element-plus';
 import {
   Activity,
   CheckCircle2,
   Clipboard,
-  CloudCog,
   Edit3,
   FileKey2,
   KeyRound,
   MoreHorizontal,
-  Network,
   Plus,
   RefreshCw,
   Search,
@@ -39,7 +36,6 @@ import {
 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
-import { entityInitial } from '../entity-avatar';
 import { notifyError } from '../notify';
 
 type XuiServer = {
@@ -681,74 +677,22 @@ onMounted(loadServers);
       <el-button v-if="hasActiveFilters" class="xui-reset-filter" text @click="resetFilters">重置</el-button>
     </div>
 
-    <div v-loading="loading" class="xui-panel-grid">
-      <div class="xui-directory-head" aria-hidden="true"><span>面板 / 连接状态</span><span>访问地址</span><span>连接配置</span><span>管理操作</span></div>
-      <article v-for="server in filteredServers" :key="server.id" class="xui-panel-card entity-runtime-card" :class="connectionStatus(server).className === 'is-online' ? 'runtime-state-online' : connectionStatus(server).className === 'is-error' ? 'runtime-state-error' : server.enabled ? 'runtime-state-unknown' : 'runtime-state-disabled'">
-        <header class="xui-panel-card-header">
-          <div class="xui-panel-identity">
-            <span class="xui-panel-icon entity-name-avatar">{{ entityInitial(server.name, '面') }}</span>
-            <div>
-              <strong :title="server.name">{{ server.name }}</strong>
-              <span>3x-ui · {{ credentialLabel(server) }}</span>
-            </div>
-          </div>
-          <span class="xui-status-chip" :class="connectionStatus(server).className"><i></i>{{ connectionStatus(server).label }}</span>
-        </header>
-
-        <div class="xui-panel-meta runtime-metric-grid">
-          <div class="runtime-metric tone-indigo"><span>访问凭据</span><strong>{{ credentialLabel(server) }}</strong></div>
-          <div class="runtime-metric" :class="hasTlsConfig(server) ? 'tone-emerald' : 'tone-neutral'"><span>TLS 证书</span><strong>{{ hasTlsConfig(server) ? '已配置' : '未配置' }}</strong></div>
-          <div class="runtime-metric tone-amber"><span>入站数量</span><strong>{{ connectionTests[server.id]?.state === 'success' ? (connectionTests[server.id]?.inboundCount ?? 0) : '未测试' }}</strong></div>
-        </div>
-
-        <div class="runtime-info-line runtime-endpoint-line xui-runtime-info">
-          <span class="runtime-endpoint-value"><Network :size="13" /><strong :title="serverEndpoint(server)">{{ serverEndpoint(server) }}</strong></span>
-          <el-tooltip content="复制面板地址" placement="top">
-            <button type="button" class="runtime-inline-copy xui-copy-button" aria-label="复制面板地址" @click="copyServerAddress(server)"><Clipboard :size="12" /></button>
-          </el-tooltip>
-        </div>
-
-        <div class="runtime-summary-line xui-panel-summary">
-          <div class="xui-panel-tags">
-            <span v-if="server.hasToken" class="xui-panel-tag token">Token</span>
-            <span v-if="server.hasPassword" class="xui-panel-tag password">密码</span>
-            <span v-if="server.config?.tlsServerName" class="xui-panel-tag tls" :title="server.config.tlsServerName">TLS {{ server.config.tlsServerName }}</span>
-            <span class="xui-panel-tag reality">Reality {{ hasRealityCandidate(server) ? '候选已配置' : '自动探测' }}</span>
-            <span class="xui-panel-tag tls">{{ compatibilityLabel(server) }}</span>
-            <span v-if="connectionTests[server.id]?.state === 'success'" class="xui-panel-tag inbound">入站 {{ connectionTests[server.id]?.inboundCount ?? 0 }}</span>
-          </div>
-          <span class="runtime-summary-note" :title="[server.username || '未保存登录账号', server.config?.shareHost || '使用面板域名分享', server.remark].filter(Boolean).join(' · ')"><KeyRound :size="12" />{{ server.username || '未保存登录账号' }} · {{ server.config?.shareHost || '使用面板域名分享' }}<template v-if="server.remark"> · {{ server.remark }}</template></span>
-        </div>
-
-        <footer class="xui-panel-actions runtime-card-footer">
-          <router-link class="hub-link" :to="{ path: '/xui-native', query: { serverId: server.id } }">管理此面板</router-link>
-          <div class="runtime-action-group">
-          <el-tooltip content="测试连接" placement="top">
-            <el-button class="runtime-icon-button runtime-labelled-button" :loading="testingIds.has(server.id)" aria-label="测试连接" @click="testSaved(server)"><Wifi :size="15" /><span>测试</span></el-button>
-          </el-tooltip>
-          <el-tooltip content="同步节点" placement="top">
-          <el-button
-            class="xui-sync-button runtime-icon-button runtime-labelled-button"
-            :loading="syncingIds.has(server.id)"
-            :disabled="!server.enabled"
-            aria-label="同步节点"
-            @click="syncServer(server)"
-          ><RefreshCw :size="15" /><span>同步</span></el-button>
-          </el-tooltip>
-          <el-tooltip content="编辑连接" placement="top">
-            <el-button class="runtime-icon-button" aria-label="编辑连接" @click="editServer(server)"><Edit3 :size="15" /></el-button>
-          </el-tooltip>
-          <el-tooltip :content="server.enabled ? '停用连接' : '启用连接'" placement="top">
-            <el-switch
-              class="runtime-toggle-switch"
-              :model-value="server.enabled"
-              :loading="togglingIds.has(server.id)"
-              :disabled="togglingIds.has(server.id)"
-              @change="(enabled: boolean | string | number) => toggleServerEnabled(server, Boolean(enabled))"
-            />
-          </el-tooltip>
+    <div v-loading="loading" class="hub-card hub-table-wrap">
+      <table class="hub-table hub-connections resource-table" aria-label="3x-ui 面板连接列表">
+        <thead><tr><th>面板</th><th>访问地址</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="server in filteredServers" :key="server.id">
+            <td><div class="hub-entity"><span class="hub-avatar"><Server :size="20" /></span><div><strong :title="server.name">{{ server.name }}</strong><small>{{ compatibilityLabel(server) }} · {{ credentialLabel(server) }}</small><small v-if="server.remark">{{ server.remark }}</small></div></div></td>
+            <td><span :title="serverEndpoint(server)">{{ serverEndpoint(server) }}</span> <button class="hub-link" aria-label="复制面板地址" @click="copyServerAddress(server)"><Clipboard :size="14" /></button><small class="resource-note">{{ server.username || '未保存登录账号' }} · {{ server.config?.shareHost || '使用面板主机分享' }}</small></td>
+            <td><span class="xui-status-chip" :class="connectionStatus(server).className"><i></i>{{ connectionStatus(server).label }}</span><small class="resource-note">{{ server.enabled ? '已启用' : '已停用' }}<template v-if="connectionTests[server.id]?.state === 'success'"> · 入站 {{ connectionTests[server.id]?.inboundCount ?? 0 }}</template></small><small class="resource-note">TLS {{ hasTlsConfig(server) ? '已配置' : '未配置' }} · Reality {{ hasRealityCandidate(server) ? '候选已配置' : '自动探测' }}</small></td>
+            <td><div class="hub-actions">
+              <el-button link :loading="syncingIds.has(server.id)" :disabled="!server.enabled" aria-label="同步面板" @click="syncServer(server)"><RefreshCw :size="14" />同步面板</el-button>
+              <el-button link :loading="testingIds.has(server.id)" aria-label="测试连接" @click="testSaved(server)">测试连接</el-button>
+              <router-link class="hub-link" :to="{ path: '/xui-native', query: { serverId: server.id } }">管理</router-link>
+              <button class="icon-button" aria-label="编辑连接" @click="editServer(server)"><Edit3 :size="16" /></button>
+              <el-switch :model-value="server.enabled" :aria-label="server.enabled ? '停用连接' : '启用连接'" :loading="togglingIds.has(server.id)" :disabled="togglingIds.has(server.id)" @change="(enabled: boolean | string | number) => toggleServerEnabled(server, Boolean(enabled))" />
           <el-dropdown trigger="click" @command="(command: string) => handleServerCommand(server, command)">
-            <el-button class="xui-more-button runtime-icon-button" aria-label="更多面板操作"><MoreHorizontal :size="16" /></el-button>
+            <el-button class="icon-button" aria-label="更多面板操作"><MoreHorizontal :size="16" /></el-button>
             <template #dropdown>
               <el-dropdown-menu class="xui-action-menu">
                 <el-dropdown-item command="test" :disabled="testingIds.has(server.id)"><Wifi :size="14" />测试连接</el-dropdown-item>
@@ -762,15 +706,11 @@ onMounted(loadServers);
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          </div>
-        </footer>
-      </article>
-
-      <div v-if="!filteredServers.length && !loading" class="xui-empty-state">
-        <CloudCog :size="28" />
-        <strong>{{ servers.length ? '没有符合筛选条件的面板连接' : '暂无面板连接' }}</strong>
-        <span>{{ servers.length ? '调整筛选条件后再查看' : '使用右上角按钮添加真实 3x-ui 面板连接' }}</span>
-      </div>
+            </div></td>
+          </tr>
+          <tr v-if="!filteredServers.length && !loading"><td colspan="4" class="table-empty">{{ servers.length ? '没有符合筛选条件的面板连接' : '暂无面板连接，请使用右上角按钮添加' }}</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <footer class="xui-list-footer">显示 {{ filteredServers.length }} / {{ servers.length }} 个真实面板连接</footer>

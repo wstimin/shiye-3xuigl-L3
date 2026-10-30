@@ -875,7 +875,7 @@ onMounted(async () => {
           ><span class="empty-note">支持自定义路径 · 凭据加密存储</span>
         </div>
         <div v-else class="hub-table-wrap">
-          <table class="hub-table hub-connections">
+          <table class="hub-table hub-connections resource-table" aria-label="S-UI 面板连接列表">
             <thead>
               <tr>
                 <th>面板</th>

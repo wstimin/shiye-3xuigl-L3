@@ -20,7 +20,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 ::selection { background: var(--primary-soft); color: var(--text); }
 
 /* Shared page hierarchy */
-.operations-page, .dashboard-page, .panel-hub, .customer-management-page, .node-management-page, .xui-management-page, .socks-management-page { display: grid; gap: 16px; min-width: 0; }
+.operations-page, .dashboard-page, .panel-hub, .customer-management-page, .node-management-page, .xui-management-page, .socks-management-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 .page-head, .customer-page-header, .node-page-header, .xui-page-header, .socks-page-header, .dashboard-welcome, .hub-heading, .diagnostics-page-header { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .page-head p, .customer-page-header p, .node-page-header p, .xui-page-header p, .socks-page-header p, .dashboard-welcome p, .hub-heading p, .diagnostics-page-header p { margin-top: 6px; color: var(--muted); font-size: 15px; }
 .page-actions, .customer-page-actions, .node-page-actions, .xui-page-actions, .socks-page-actions, .hub-actions, .quick-actions, .batch-actions, .table-toolbar-actions, .record-action-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -64,11 +64,11 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .entity-runtime-card, .entity-card, .template-card { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .entity-runtime-card { display: flex; flex-direction: column; gap: 10px; }
 .entity-runtime-card:hover { border-color: var(--border); }
-.xui-panel-card-header, .route-node-card-header, .customer-card-header, .entity-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.xui-panel-identity, .route-node-identity, .customer-card-identity, .hub-entity { display: flex; gap: 10px; align-items: center; min-width: 0; }
-.xui-panel-identity > div, .route-node-identity > div, .customer-card-identity > div, .hub-entity > div { display: grid; min-width: 0; gap: 2px; }
-.xui-panel-identity strong, .route-node-identity strong, .customer-card-identity strong, .hub-entity strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.xui-panel-identity div > span, .route-node-identity small, .customer-card-identity span, .hub-entity small { color: var(--muted); font-size: 15px; }
+.route-node-card-header, .customer-card-header, .entity-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.route-node-identity, .customer-card-identity, .hub-entity { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.route-node-identity > div, .customer-card-identity > div, .hub-entity > div { display: grid; min-width: 0; gap: 2px; }
+.route-node-identity strong, .customer-card-identity strong, .hub-entity strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-node-identity small, .customer-card-identity span, .hub-entity small { color: var(--muted); font-size: 15px; }
 .entity-name-avatar, .customer-card-avatar, .hub-avatar { width: 38px; height: 38px; flex-shrink: 0; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--primary-soft); color: var(--primary-strong); font-size: 15px; font-weight: 600; }
 .runtime-metric-grid, .entity-card-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 8px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); gap: 12px; }
 .runtime-metric { display: grid; gap: 3px; min-width: 0; }
@@ -95,8 +95,8 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .xui-status-chip:is(.is-unknown, .is-untested, .is-pending, .is-syncing), .node-status-chip.is-pending { color: var(--primary-strong); background: var(--primary-soft); }
 .xui-status-chip.is-disabled, .node-status-chip.is-disabled, .customer-status-chip.is-disabled, .status-pill.off { color: var(--muted); background: var(--surface-soft); }
 .xui-status-chip:is(.is-error, .is-failed) { color: var(--danger); background: var(--surface-soft); }
-.xui-panel-tags, .route-node-tags, .tag-stack { display: flex; flex-wrap: wrap; gap: 5px; }
-.xui-panel-tag, .route-node-tag { background: var(--surface-soft); color: var(--muted); border: 1px solid var(--border); padding: 1px 5px; font-size: 15px; border-radius: 3px; }
+.route-node-tags, .tag-stack { display: flex; flex-wrap: wrap; gap: 5px; }
+.route-node-tag { background: var(--surface-soft); color: var(--muted); border: 1px solid var(--border); padding: 1px 5px; font-size: 15px; border-radius: 3px; }
 .customer-card-meta, .customer-card-remark, .customer-service-line { font-size: 15px; color: var(--muted); }
 .customer-expiry-chip.danger { color: var(--danger); background: var(--surface-soft); }
 .customer-expiry-chip.warning { color: var(--primary-strong); background: var(--primary-soft); }
@@ -104,17 +104,6 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .network-tabs .el-tabs__header { margin-bottom: 0; }
 
 /* Panel directory: compact rows instead of dashboard tiles */
-.xui-panel-grid { display: grid; gap: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; }
-.xui-directory-head { display: grid; grid-template-columns: 1.25fr 1fr 1fr 240px; gap: 20px; padding: 12px 20px; color: var(--muted); font-size: 15px; background: var(--surface); border-bottom: 1px solid var(--border); }
-.xui-panel-grid .xui-panel-card { display: grid; grid-template-columns: 1.25fr 1fr 1fr 240px; align-items: center; gap: 10px 16px; padding: 14px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
-.xui-panel-grid .xui-panel-card:last-child { border-bottom: 0; }
-.xui-panel-card-header { flex-wrap: wrap; }
-.xui-panel-card .runtime-metric-grid { border: 0; padding: 0; gap: 8px; }
-.xui-panel-card .xui-runtime-info { grid-column: 2; grid-row: 1; }
-.xui-panel-card .xui-panel-meta { grid-column: 3; grid-row: 1; }
-.xui-panel-card .xui-panel-actions { grid-column: 4; grid-row: 1; border: 0; padding: 0; flex-direction: column; align-items: flex-end; gap: 8px; }
-.xui-panel-card .xui-panel-summary { grid-column: 1 / -1; padding-top: 10px; border-top: 1px dashed var(--border); justify-content: space-between; }
-.xui-panel-card .xui-status-chip { margin-left: 48px; }
 
 /* Element Plus integration */
 :root .el-button { gap: 6px; font-weight: 500; --button-tone: var(--primary-strong); --el-button-disabled-text-color: var(--muted); --el-button-disabled-bg-color: var(--surface-soft); --el-button-disabled-border-color: var(--border-strong); }
@@ -244,6 +233,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .hub-alert, .hub-guide, .settings-runtime-notice { border: 1px solid var(--border-strong); border-radius: 6px; padding: 12px 16px; display: flex; align-items: flex-start; gap: 10px; background: var(--surface-soft); color: var(--primary-strong); font-size: 15px; }
 .hub-alert.error { border-color: var(--border-strong); color: var(--danger); background: var(--surface); }
 .hub-guide h3 { margin-bottom: 6px; }
+.hub-guide > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .hub-resource-nav { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border); }
 .hub-resource-nav button { padding: 12px 14px; border: 0; background: transparent; color: var(--muted); white-space: nowrap; display: flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
 .hub-resource-nav button.active { border-bottom-color: var(--border-strong); color: var(--primary-strong); font-weight: 600; }
@@ -480,11 +470,6 @@ input::placeholder, textarea::placeholder { color: var(--field-placeholder); opa
 @media (max-width: 1200px) {
   .overview-shell .route-stage { padding: 24px; }
   .metric-grid, .customer-stat-grid, .node-stat-grid, .xui-stat-grid, .socks-stat-grid, .dashboard-stat-grid, .diagnostics-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .xui-directory-head { grid-template-columns: 1.25fr 1fr 180px; }
-  .xui-directory-head > span:nth-child(3) { display: none; }
-  .xui-panel-grid .xui-panel-card { grid-template-columns: 1.25fr 1fr 180px; }
-  .xui-panel-card .xui-panel-meta { grid-row: 2; grid-column: 1 / 3; }
-  .xui-panel-card .xui-panel-actions { grid-column: 3; grid-row: 1 / 3; }
   .diagnostics-check-grid { grid-template-columns: 1fr 1fr; }
   .settings-console-layout { grid-template-columns: 200px minmax(0, 1fr); }
   .runtime-card-footer { flex-wrap: wrap; }
@@ -518,12 +503,6 @@ input::placeholder, textarea::placeholder { color: var(--field-placeholder); opa
   .customer-search-field, .node-search-field, .xui-search-field, .socks-search-field, .network-search-field { flex-basis: 100%; max-width: none; }
   .overview-shell .customer-filter-select, .overview-shell .customer-balance-filter, .overview-shell .node-filter-select, .overview-shell .node-server-filter, .overview-shell .xui-filter-select, .overview-shell .socks-filter-select { width: calc(50% - 4px); flex-basis: calc(50% - 4px); }
   .filter-bar > .el-input, .filter-bar > .el-select { width: 100%; }
-  .xui-directory-head { display: none; }
-  .xui-panel-grid .xui-panel-card { grid-template-columns: 1fr; gap: 14px; padding: 16px; }
-  .xui-panel-card .xui-panel-meta, .xui-panel-card .xui-runtime-info, .xui-panel-card .xui-panel-actions, .xui-panel-card .xui-panel-summary { grid-row: auto; grid-column: 1; }
-  .xui-panel-card .xui-panel-actions { flex-direction: row; align-items: center; }
-  .xui-panel-card .xui-status-chip { margin-left: 0; }
-  .xui-panel-card-header { flex-wrap: nowrap; }
   .hub-summary { gap: 8px; }
   .hub-summary article { padding: 12px; }
   .hub-summary article > strong { font-size: 20px; }
