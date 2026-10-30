@@ -220,7 +220,8 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .hub-table-wrap { width: 100%; overflow: auto; }
 .resource-table { min-width: 720px; }
 .resource-table td { white-space: nowrap; }
-.resource-table .hub-entity > div { max-width: 240px; }
+.resource-table .hub-entity > div { max-width: 240px; grid-template-columns: minmax(0, 1fr); }
+.resource-table .hub-entity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .resource-note { display: block; color: var(--muted); margin-top: 3px; font-size: 13px; overflow-wrap: anywhere; white-space: normal; max-width: 240px; }
 .hub-table { border-collapse: collapse; width: 100%; text-align: left; font-size: 15px; }
 .hub-table th { font-weight: 500; color: var(--muted); background: var(--surface); padding: 12px 14px; white-space: nowrap; }
