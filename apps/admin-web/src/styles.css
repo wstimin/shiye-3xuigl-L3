@@ -290,9 +290,11 @@ input::placeholder, textarea::placeholder { color: var(--field-placeholder); opa
 .dashboard-activity-list { display: grid; gap: 0; }
 .dashboard-activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .dashboard-activity-item > i { background: var(--primary-soft); color: var(--primary-strong); padding: 7px; border-radius: 6px; font-style: normal; }
+.dashboard-activity-item > i.rose { background: var(--danger-soft); color: var(--danger); }
+.dashboard-activity-item > i.amber { background: var(--warning-soft); color: var(--warning); }
 .dashboard-activity-item > div { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .dashboard-activity-item strong { color: var(--text); font-size: 13px; font-weight: 600; }
-.dashboard-activity-item p { color: var(--muted); font-size: 13px; line-height: 1.65; }
+.dashboard-activity-item p { color: var(--muted); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
 .dashboard-activity-item small, .dashboard-activity-item time, .dashboard-activity-item div > span { color: var(--muted); font-size: 12px; }
 .dashboard-empty-activity { padding: 40px 20px; color: var(--muted); text-align: center; }
 .dashboard-job-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }

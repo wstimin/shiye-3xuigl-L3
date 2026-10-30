@@ -280,6 +280,14 @@ function activityIcon(type: BusinessActivity['type']) {
   return { payment: CircleDollarSign, renewal: RefreshCw, card: TicketCheck, sync: Activity }[type];
 }
 
+function activityDescription(item: BusinessActivity) {
+  if (item.type !== 'sync') return item.description;
+  const source = item.description.slice(0, item.description.indexOf('：') + 1);
+  if (item.status === 'failed' || item.status === 'error') return `${source}任务未完成，请查看同步日志中的失败原因。`;
+  if (item.status === 'partial') return `${source}部分项目未完成，请查看同步日志中的处理结果。`;
+  return `${source}任务已执行，详细结果可在同步日志中查看。`;
+}
+
 onMounted(loadDashboard);
 </script>
 
@@ -365,11 +373,12 @@ onMounted(loadDashboard);
       <article class="dashboard-section-card">
         <header class="dashboard-section-head">
           <h2>最近业务动态 <span>真实记录</span></h2>
+          <router-link to="/sync-logs">查看日志 ↗</router-link>
         </header>
         <div v-if="recentActivity.length" class="dashboard-activity-list">
           <div v-for="item in recentActivity" :key="item.key" class="dashboard-activity-item">
             <i :class="activityTone(item)"><component :is="activityIcon(item.type)" :size="16" /></i>
-            <div><strong>{{ item.title }}</strong><p>{{ item.description }}</p><time :datetime="item.createdAt">{{ formatRelativeDate(item.createdAt) }}</time></div>
+            <div><strong>{{ item.title }}</strong><p>{{ activityDescription(item) }}</p><time :datetime="item.createdAt">{{ formatRelativeDate(item.createdAt) }}</time></div>
           </div>
         </div>
         <div v-else class="dashboard-empty-activity">
