@@ -1,6 +1,6 @@
 import express, { type RequestHandler } from 'express';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { setStaticAssetHeaders } from './web-cache.js';
 
 export function serveStaticAssets(directory: string): RequestHandler {
@@ -12,7 +12,7 @@ export function serveStaticAssets(directory: string): RequestHandler {
     const path = join(directory, request.path);
     const compressed = path + (encoding === 'br' ? '.br' : '.gz');
     if (!['br', 'gzip'].includes(String(encoding)) || !existsSync(compressed)) return fallback(request, response, next);
-    response.type(path);
+    response.type(extname(path));
     response.setHeader('Content-Encoding', String(encoding));
     setStaticAssetHeaders(response, path);
     response.sendFile(compressed, error => { if (error) next(error); });
