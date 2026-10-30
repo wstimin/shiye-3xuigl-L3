@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import { SuiService } from '../apps/api/src/modules/sui/sui.service.js';
 import { NodesService } from '../apps/api/src/modules/nodes/nodes.service.js';
 import { testLocks } from './test-locks.js';
+import { parseOutboundInput } from '../apps/api/src/modules/xui/outbound-import.js';
+
+test('structured SOCKS template import preserves special-character credentials and IPv6', () => {
+  const server = { address: '2001:db8::5', port: 1080, users: [{ user: 'user+@:%中文', pass: 'p@ss:#/% 空格' }] };
+  const [imported] = parseOutboundInput(JSON.stringify({ protocol: 'socks', settings: { servers: [server] } }), 'xray_json');
+  assert.deepEqual(imported.outbound.settings, { servers: [server] });
+});
 
 test('S-UI copies SOCKS5 templates idempotently, seals credentials and skips unsupported outbounds', async () => {
   const saved: any[] = [];

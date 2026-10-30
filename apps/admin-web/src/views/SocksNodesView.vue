@@ -184,10 +184,8 @@ async function applyTemplate() {
     if (server.provider === 'sui') {
       await api(`/api/admin/sui-servers/${server.id}/save`, { method: 'POST', body: { object: 'outbounds', action: 'new', data: { type: 'socks', tag: applyName.value.trim(), server: node.host, server_port: node.port, version: '5', ...(node.username ? { username: node.username, password } : {}) } } });
     } else {
-      const url = new URL('socks://127.0.0.1');
-      url.hostname = node.host.includes(':') ? `[${node.host.replace(/^\[|\]$/g, '')}]` : node.host;
-      url.port = String(node.port); url.username = node.username || ''; url.password = password || '';
-      const result = await api<OperationResult>('/api/admin/network-outbounds/import', { method: 'POST', body: { serverId: server.id, name: applyName.value.trim(), input: url.toString(), format: 'socks', strategy: 'target_panel', ownership: 'managed', conflict: 'reject', createRoute: false, inboundTags: [] } });
+      const outbound = { protocol: 'socks', settings: { servers: [{ address: node.host.replace(/^\[|\]$/g, ''), port: node.port, ...(node.username ? { users: [{ user: node.username, pass: password }] } : {}) }] } };
+      const result = await api<OperationResult>('/api/admin/network-outbounds/import', { method: 'POST', body: { serverId: server.id, name: applyName.value.trim(), input: JSON.stringify(outbound), format: 'xray_json', strategy: 'target_panel', ownership: 'managed', conflict: 'reject', createRoute: false, inboundTags: [] } });
       if (result.state && result.state !== 'success') throw new Error(result.message || '出站创建尚未完成，请先核对面板状态');
     }
     ElMessage.success('出站已创建，可在路由规则中选择并关联入站');
