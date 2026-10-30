@@ -60,6 +60,16 @@ export async function fileHash(path) {
   for await (const part of createReadStream(path)) hash.update(part);
   return hash.digest('hex');
 }
+export async function snapshotUpload(input, output) {
+  const fd = openSync(input, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile() || info.size < 1 || info.size > MAX_BACKUP_BYTES) throw new Error('上传文件无效或过大');
+    let bytes = 0;
+    const limit = new Transform({ transform(part, _encoding, done) { bytes += part.length; done(bytes > MAX_BACKUP_BYTES ? new Error('上传文件过大') : null, part); } });
+    await pipeline(createReadStream(input, { fd, autoClose: false }), limit, createWriteStream(output, { flags: 'wx', mode: 0o600 }));
+  } finally { closeSync(fd); }
+}
 export async function packBackup(sqlPath, output, metadata) {
   const header = { ...metadata, format: 'shiye-backup-1', sqlSize: statSync(sqlPath).size, sqlSha256: await fileHash(sqlPath) };
   const json = Buffer.from(JSON.stringify(header));

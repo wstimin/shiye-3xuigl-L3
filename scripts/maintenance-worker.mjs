@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { JOB_ID, compareVersions, readJson, writeJson, updateProgress, latestRelease, fileHash, packBackup, unpackBackup, parseEnv, migrationEnv, serializeEnv } from './maintenance-core.mjs';
+import { JOB_ID, compareVersions, readJson, writeJson, updateProgress, latestRelease, fileHash, snapshotUpload, packBackup, unpackBackup, parseEnv, migrationEnv, serializeEnv } from './maintenance-core.mjs';
 
 const config = readJson(process.argv[2] || '/etc/shiye-maintenance.json');
 const root = config.dataDir;
@@ -99,9 +99,8 @@ async function backup(dir) {
 }
 async function inspect(dir, id) {
   const source = join(root, 'uploads', id);
-  if (!lstatSync(source).isFile() || lstatSync(source).isSymbolicLink()) throw new Error('上传文件无效');
   // Keep an immutable private copy before validation; the web process owns uploads.
-  copyFileSync(source, join(dir, 'upload.shiye')); chmodSync(join(dir, 'upload.shiye'), 0o600); unlinkSync(source);
+  await snapshotUpload(source, join(dir, 'upload.shiye')); unlinkSync(source);
   progress('verify', 40, '正在校验备份完整性');
   const header = await unpackBackup(join(dir, 'upload.shiye'), join(dir, 'source.sql'));
   migrationEnv(header.env, env());

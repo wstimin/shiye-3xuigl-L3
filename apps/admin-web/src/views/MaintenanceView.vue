@@ -17,7 +17,7 @@ const connectionUnknown = computed(() => offlineSince.value > 0 && Date.now() - 
 const taskTitle = computed(() => ({ update: '网站更新', backup: '生成迁移备份', inspect: '校验迁移备份', restore: '恢复网站' })[job.value?.kind || 'update']);
 const percent = computed(() => Math.min(100, Math.max(0, job.value?.progress || 0)));
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—';
-const sizeLabel = (bytes?: number) => bytes ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : '—';
+const sizeLabel = (bytes?: number) => bytes ? bytes < 1024 ** 2 ? `${Math.max(1, Math.ceil(bytes / 1024))} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB` : '—';
 const message = (value: unknown) => value instanceof Error ? value.message : '操作失败，请稍后重试';
 
 function arm(next: Job) {

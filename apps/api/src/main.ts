@@ -35,7 +35,8 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT || 3388);
   const host = process.env.HOST || '0.0.0.0';
-  await app.listen(port, host);
+  const server = await app.listen(port, host);
+  server.requestTimeout = 15 * 60_000;
   console.log(`Shiye API listening on http://${host}:${port}`);
 }
 

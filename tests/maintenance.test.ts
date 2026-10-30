@@ -4,13 +4,23 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { compareVersions, validateRelease, packBackup, unpackBackup, migrationEnv, parseEnv, serializeEnv, updateProgress, writeJson } from '../scripts/maintenance-core.mjs';
+import { compareVersions, validateRelease, snapshotUpload, packBackup, unpackBackup, migrationEnv, parseEnv, serializeEnv, updateProgress, writeJson } from '../scripts/maintenance-core.mjs';
 import { MaintenanceService } from '../apps/api/src/modules/maintenance/maintenance.service.js';
 import { maintenanceBackground, maintenanceOperations } from '../apps/api/src/shared/maintenance-state.js';
 
 const secrets = { ENCRYPTION_KEY: 'source-encryption', CARD_HASH_SECRET: 'source-card-hash', JWT_SECRET: 'source-jwt', SESSION_SECRET: 'source-session', DEFAULT_ADMIN_USERNAME: 'original-admin', DEFAULT_ADMIN_PASSWORD: 'original-password' };
 async function fixture(fn: (root: string) => Promise<void>) { const root = await mkdtemp(join(tmpdir(), 'shiye-maintenance-')); try { await fn(root); } finally { await rm(root, { recursive: true, force: true }); } }
 const release = () => ({ tag_name: 'v1.10.0', assets: [{ name: 'shiye-3xuigl.zip', size: 100, digest: 'sha256:' + 'a'.repeat(64), browser_download_url: 'https://github.com/wstimin/shiye-3xuigl-L3/releases/download/v1.10.0/shiye-3xuigl.zip' }] });
+
+test('uploaded files are privately snapshotted without overwriting existing files', async () => fixture(async root => {
+  await writeFile(join(root, 'upload'), 'backup bytes');
+  await snapshotUpload(join(root, 'upload'), join(root, 'private'));
+  assert.equal(await readFile(join(root, 'private'), 'utf8'), 'backup bytes');
+  await assert.rejects(snapshotUpload(join(root, 'upload'), join(root, 'private')));
+  await writeFile(join(root, 'empty'), '');
+  await assert.rejects(snapshotUpload(join(root, 'empty'), join(root, 'invalid')));
+  await assert.rejects(snapshotUpload(root, join(root, 'directory')));
+}));
 
 test('release comparison uses numeric versions and rejects malformed versions', () => {
   assert.equal(compareVersions('1.10.0', '1.9.9'), 1); assert.equal(compareVersions('v1.2.0', '1.2.0'), 0); assert.equal(compareVersions('1.1.9', '1.2.0'), -1);
