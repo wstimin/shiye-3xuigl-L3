@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { randomUuid } from '@shiye/shared';
 import RemarkTemplate from './RemarkTemplate.vue';
-import { nativeInboundSettings, nativeInboundStream, xrayTransportDefaults, mapEntry } from '../xray-inbound-fields';
+import RealityProbe from './RealityProbe.vue';
+import { nativeInboundSettings, nativeInboundStream, xrayTransportDefaults, mapEntry, inboundFieldGroups } from '../xray-inbound-fields';
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { ArrowUp, ArrowDown, Plus, Trash2 } from "lucide-vue-next";
@@ -35,6 +36,9 @@ const props = withDefaults(
     presets?: Record<string, PanelRecord>;
     required?: boolean;
     fileFields?: string[];
+    compact?: boolean;
+    panelServerId?: string;
+    omit?: string[];
   }>(),
   {
     field: "",
@@ -77,8 +81,9 @@ const keys = computed(() =>
       ...Object.keys((isObject.value ? props.modelValue : {}) || {}),
       ...Object.keys(schema.value.properties || {}),
     ]),
-  ].filter((key) => !["__proto__", "prototype", "constructor"].includes(key)),
+  ].filter((key) => !["__proto__", "prototype", "constructor", ...(props.omit || [])].includes(key)),
 );
+const fieldGroups = computed(() => props.compact ? inboundFieldGroups(keys.value, record.value, props.field) : [{ advanced: false, keys: keys.value }]);
 const items = computed(() =>
   Array.isArray(props.modelValue) ? props.modelValue : [],
 );
@@ -192,10 +197,10 @@ function changeKey(key: string, value: unknown) {
       };
     if (value === "reality" && !next.realitySettings)
       next.realitySettings = {
-        dest: "",
+        target: "",
         serverNames: [],
         privateKey: "",
-        shortIds: [],
+        shortIds: [randomUuid().replace(/-/g, '').slice(0, 16)],
       };
   }
   if (props.field === "streamSettings" && key === "network") {
@@ -270,7 +275,7 @@ async function readConfig(event: Event) {
 </script>
 
 <template>
-  <PanelFields v-if="serialized" :model-value="serialized" :schema="{ ...schema, type: Array.isArray(serialized) ? 'array' : 'object' }" :field="field" :readonly="readonly" :disabled="disabled" :choices="choices" :immutable="immutable" :presets="presets" :required="required" :file-fields="fileFields" @update:model-value="emit('update:modelValue', encodePanelValue($event, modelValue, field))" />
+  <PanelFields v-if="serialized" :model-value="serialized" :schema="{ ...schema, type: Array.isArray(serialized) ? 'array' : 'object' }" :field="field" :readonly="readonly" :disabled="disabled" :choices="choices" :immutable="immutable" :presets="presets" :required="required" :file-fields="fileFields" :compact="compact" :panel-server-id="panelServerId" :omit="omit" @update:model-value="emit('update:modelValue', encodePanelValue($event, modelValue, field))" />
   <div v-else-if="isObject && !readonly && ['headers', 'portMap', 'hosts'].includes(field)" class="panel-map-editor">
     <div v-for="key in keys" :key="key" class="panel-map-row"><input :value="key" :aria-label="field === 'portMap' ? '来源端口' : '项目名称'" :disabled="disabled" @change="renameMapEntry(key, $event)" /><PanelFields :model-value="record[key]" :field="key" :disabled="disabled" @update:model-value="changeKey(key, $event)" /><button type="button" class="hub-link danger" :disabled="disabled" @click="emit('update:modelValue', Object.fromEntries(Object.entries(record).filter(([name]) => name !== key)))">删除</button></div>
     <div class="panel-map-row"><input v-model="mapKey" :aria-label="field === 'portMap' ? '新增来源端口' : '新增项目名称'" :placeholder="field === 'portMap' ? '来源端口，例如 8080' : '输入项目名称'" :disabled="disabled" /><button type="button" class="hub-button" :disabled="disabled || !mapKey.trim()" @click="addMapEntry">添加{{ field === 'portMap' ? '端口映射' : '项目' }}</button></div>
@@ -280,8 +285,12 @@ async function readConfig(event: Event) {
     class="panel-fields"
     :class="{ 'is-readonly': readonly }"
   >
+    <RealityProbe v-if="compact && !readonly && field === 'realitySettings' && panelServerId" :server-id="panelServerId" :model-value="record" :disabled="disabled" @update:model-value="emit('update:modelValue', $event)" />
+    <component v-for="group in fieldGroups" :key="String(group.advanced)" :is="group.advanced ? 'details' : 'div'" :class="group.advanced ? 'panel-advanced' : 'panel-fields panel-field-group'">
+    <summary v-if="group.advanced">高级设置 <small>{{ group.keys.length }} 项 · 按需调整</small></summary>
+    <div :class="group.advanced ? 'panel-fields' : 'panel-field-group'">
     <div
-      v-for="key in keys"
+      v-for="key in group.keys"
       :key="key"
       class="panel-field"
       :class="{
@@ -312,9 +321,13 @@ async function readConfig(event: Event) {
         :presets="presets"
         :file-fields="fileFields"
         :required="schema.required?.includes(key)"
+        :compact="compact"
+        :panel-server-id="panelServerId"
         @update:model-value="changeKey(key, $event)"
       />
     </div>
+    </div>
+    </component>
     <span v-if="!keys.length" class="muted-text">{{
       readonly ? "暂无设置" : "此项无需额外填写"
     }}</span>
@@ -337,6 +350,8 @@ async function readConfig(event: Event) {
         :choices="choices"
         :immutable="immutable"
         :presets="presets"
+        :compact="compact"
+        :panel-server-id="panelServerId"
         @update:model-value="changeItem(index, $event)"
       />
       <button
@@ -466,4 +481,10 @@ async function readConfig(event: Event) {
 .panel-map-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; }
 .panel-map-row > input { flex: 1; min-width: 120px; }
 .panel-map-row > :nth-child(2) { flex: 1; min-width: 120px; }
+.panel-field-group { display: contents; }
+.panel-advanced, .panel-fields > .reality-probe { grid-column: 1 / -1; min-width: 0; }
+.panel-advanced { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.panel-advanced > summary { cursor: pointer; color: var(--text); font-weight: 600; }
+.panel-advanced > summary small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+.panel-advanced[open] > summary { margin-bottom: 18px; }
 </style>

@@ -13,7 +13,7 @@ import PanelFields from "../components/PanelFields.vue";
 import PanelDetails from '../components/PanelDetails.vue';
 import PanelConfig from '../components/PanelConfig.vue';
 import PanelOverview from '../components/PanelOverview.vue';
-import { xrayInboundProtocols, wireguardKeys } from '../xray-inbound-fields';
+import { xrayInboundProtocols, wireguardKeys, nativeInboundSettings, nativeInboundStream } from '../xray-inbound-fields';
 import { api } from "../api";
 import {
   clonePanelValue,
@@ -38,7 +38,14 @@ import {
 
 type Panel = { id: string; name: string };
 const props = defineProps<{ createServerId?: string }>();
-const emit = defineEmits<{ saved: []; busy: [value: boolean] }>();
+const createProtocol = ref('');
+function selectCreateProtocol(event: Event) {
+  createProtocol.value = (event.target as HTMLSelectElement).value;
+  const current = draft.value as PanelRecord;
+  draft.value = { ...current, protocol: createProtocol.value, settings: nativeInboundSettings(createProtocol.value) || {}, streamSettings: nativeInboundStream(createProtocol.value, (current.streamSettings || {}) as PanelRecord) };
+}
+const emit = defineEmits<{ saved: []; busy: [value: boolean]; protocolSelected: [value: boolean] }>();
+watch(createProtocol, value => emit('protocolSelected', Boolean(value)), { immediate: true });
 const route = useRoute();
 const panels = ref<Panel[]>([]);
 const serverId = ref(props.createServerId || String(route.query.serverId || ""));
@@ -647,6 +654,8 @@ onMounted(async () => {
           class="panel-task-form hub-form"
           @submit.prevent="execute"
         >
+          <label v-if="createServerId">入站协议<select :value="createProtocol" aria-label="新建入站协议" :disabled="running || !prepared" @change="selectCreateProtocol"><option value="" disabled>请选择协议</option><option v-for="protocol in bodySchema.properties?.protocol?.enum || xrayInboundProtocols" :key="String(protocol)" :value="String(protocol)">{{ String(protocol).toUpperCase() }}</option></select></label>
+          <template v-if="!createServerId || createProtocol">
           <header v-if="!createServerId" class="panel-task-heading">
             <Settings2 :size="18" />
             <h3>{{ operationLabel(operation) }}</h3>
@@ -706,6 +715,9 @@ onMounted(async () => {
                 : ['id', 'uuid', 'createdAt', 'updatedAt', 'up', 'down']
             "
             :file-fields="operation.path.endsWith('/import') ? ['data'] : []"
+            :compact="/\/inbounds\/(add|update)/.test(operation.path)"
+            :panel-server-id="serverId"
+            :omit="createServerId ? ['protocol'] : []"
             :disabled="running"
           />
           <label v-if="binaryField"
@@ -730,6 +742,7 @@ onMounted(async () => {
               }}
             </button>
           </footer>
+          </template>
         </form>
         <div v-if="download" class="hub-empty">
           <Download :size="28" />

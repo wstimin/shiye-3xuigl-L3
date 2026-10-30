@@ -24,7 +24,7 @@ export const nativeExecuteSchema = z.object({
 });
 
 const readPosts =
-  /\/(lastOnline|onlines|onlinesByGuid|clientIpsByGuid|activeInbounds|ips|traffic|allTraffics|logs|xraylogs|xray|balancerStatus|routeTest|testOutbound|testOutbounds|validateRegex|tgBotCapabilities|testSmtp|testTgBot|testDiscord|parse|renewalPreview)\/?$/;
+  /\/(lastOnline|onlines|onlinesByGuid|clientIpsByGuid|activeInbounds|ips|traffic|allTraffics|logs|xraylogs|xray|balancerStatus|routeTest|testOutbound|testOutbounds|validateRegex|tgBotCapabilities|testSmtp|testTgBot|testDiscord|parse|renewalPreview|scanRealityTarget|scanRealityTargets)\/?$/;
 const readSettings = new Set([
   "/panel/api/setting/all",
   "/panel/api/setting/defaultSettings",

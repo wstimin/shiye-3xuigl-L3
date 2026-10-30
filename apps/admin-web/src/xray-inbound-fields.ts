@@ -1,5 +1,23 @@
 import type { PanelRecord } from './panel-fields';
 
+export function inboundFieldGroups(keys: string[], record: PanelRecord, field: string) {
+  const common: Record<string, string[]> = {
+    '': ['remark', 'protocol', 'port', 'listen', 'enable', 'settings', 'streamSettings'],
+    settings: ['clients', 'accounts', 'method', 'password', 'auth', 'secretKey', 'peers', 'server', 'rewriteAddress', 'portMap', 'address', 'fakeTlsDomain'],
+    streamSettings: ['network', 'security', `${String(record.network || 'tcp')}Settings`, `${String(record.security)}Settings`],
+    realitySettings: ['target', 'dest', 'serverNames', 'privateKey', 'shortIds'],
+    tlsSettings: ['serverName', 'certificates', 'alpn'],
+  };
+  const visible = field === 'streamSettings' ? keys.filter(key => !/Settings$/.test(key) || common.streamSettings!.includes(key)) : keys;
+  const primary = common[field];
+  if (!primary) return [{ advanced: false, keys: visible }];
+  return [{ advanced: false, keys: visible.filter(key => primary.includes(key)) }, { advanced: true, keys: visible.filter(key => !primary.includes(key)) }].filter(group => group.keys.length);
+}
+
+export function applyRealityTarget(settings: PanelRecord, target: string, serverName: string): PanelRecord {
+  return { ...settings, ...('dest' in settings && !('target' in settings) ? { dest: target } : { target }), serverNames: [serverName], ...(settings.settings && typeof settings.settings === 'object' ? { settings: { ...settings.settings as PanelRecord, serverName } } : {}) };
+}
+
 // The panel's declared enum takes precedence; these match the current official inbound editor.
 export const xrayInboundProtocols = ['vless', 'vmess', 'trojan', 'shadowsocks', 'http', 'mixed', 'wireguard', 'hysteria', 'tunnel', 'mtproto', 'amneziawg', 'tuic', 'masque'];
 export const xrayTransportDefaults: Record<string, PanelRecord> = {

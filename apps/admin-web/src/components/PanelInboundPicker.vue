@@ -11,16 +11,22 @@ const props = defineProps<{ panels: PanelConnection[]; linked: LinkedInbound[] }
 const emit = defineEmits<{ connected: [] }>();
 const XuiCreateForm = defineAsyncComponent(() => import('../views/XuiNativeView.vue'));
 const SuiCreateForm = defineAsyncComponent(() => import('../views/SuiServersView.vue'));
-const creating = ref<PanelConnection | null>(null), createBusy = ref(false), createAttempt = ref(0);
+const createOpen = ref(false), createServerId = ref(''), createBusy = ref(false), createAttempt = ref(0);
+const protocolSelected = ref(false);
+watch([createServerId, createAttempt], () => { protocolSelected.value = false; });
+const creating = computed(() => props.panels.find(panel => panel.id === createServerId.value));
+function openCreate() { createServerId.value = ''; createBusy.value = false; createOpen.value = true; }
 function closeCreate(done?: () => void) {
   if (createBusy.value) return;
-  creating.value = null;
+  createOpen.value = false;
   done?.();
 }
 async function created() {
-  creating.value = null;
+  const id = createServerId.value;
+  createOpen.value = false;
   createBusy.value = false;
-  await load();
+  if (serverId.value === id) await load();
+  else serverId.value = id;
 }
 const serverId = ref(''), loading = ref(false), saving = ref(false), error = ref('');
 const inbounds = ref<PanelInbound[]>([]), clients = ref<PanelRecord[]>([]), search = ref('');
@@ -74,7 +80,7 @@ watch(() => props.linked, () => { if (panel.value) inbounds.value = inbounds.val
 
 <template>
   <section class="hub-card inbound-workspace" aria-labelledby="panel-inbounds-title">
-    <header class="hub-toolbar"><div><h2 id="panel-inbounds-title">面板全部入站</h2><p>直接选择 3x-ui 或 S-UI，查看完整入站并接入业务。</p></div><div class="hub-actions"><select v-model="serverId" class="panel-select" aria-label="入站来源面板" :disabled="saving"><option value="" disabled>选择面板</option><option v-for="item in panels" :key="item.id" :value="item.id">{{ item.provider === 'sui' ? 'S-UI' : '3x-ui' }} · {{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option></select><button type="button" class="hub-button" :disabled="loading || saving || !panel" @click="load"><RefreshCw :size="15" />读取入站</button><button v-if="panel" type="button" class="hub-button primary" :disabled="saving" @click="createBusy = false; creating = { ...panel }"><Plus :size="15" />新建入站</button></div></header>
+    <header class="hub-toolbar"><div><h2 id="panel-inbounds-title">面板全部入站</h2><p>直接选择 3x-ui 或 S-UI，查看完整入站并接入业务。</p></div><div class="hub-actions"><select v-model="serverId" class="panel-select" aria-label="入站来源面板" :disabled="saving"><option value="" disabled>选择面板</option><option v-for="item in panels" :key="item.id" :value="item.id">{{ item.provider === 'sui' ? 'S-UI' : '3x-ui' }} · {{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option></select><button type="button" class="hub-button" :disabled="loading || saving || !panel" @click="load"><RefreshCw :size="15" />读取入站</button><button type="button" class="hub-button primary" :disabled="saving || !panels.length" @click="openCreate"><Plus :size="15" />新建入站</button></div></header>
     <div v-if="error" class="hub-alert error" role="alert">{{ error }}</div>
     <div v-if="loading" class="hub-empty" role="status">正在读取全部远端入站…</div>
     <template v-else-if="panel">
@@ -88,10 +94,12 @@ watch(() => props.linked, () => { if (panel.value) inbounds.value = inbounds.val
       <label v-if="panel.provider !== 'sui'" class="hub-checkbox"><input v-model="takeover" type="checkbox" :disabled="saving" />允许业务托管：后续续费、停用和删除操作可同步远端入站</label>
       <p v-if="reason" class="form-error">{{ reason }}</p><footer><span>接入已有资源，不新建远端入站或客户端。</span><button class="hub-button primary" :disabled="saving || !name.trim() || Boolean(reason) || (panel.provider === 'sui' && !client)">{{ saving ? '接入中…' : '确认接入业务' }}</button></footer>
     </form>
-    <ElDialog :model-value="Boolean(creating)" title="新建入站" width="880px" top="5vh" class="inbound-create-dialog" append-to-body destroy-on-close :close-on-click-modal="false" :show-close="!createBusy" :before-close="closeCreate" @closed="createBusy = false">
+    <ElDialog :model-value="createOpen" title="新建入站" width="880px" top="5vh" class="inbound-create-dialog" append-to-body destroy-on-close :close-on-click-modal="false" :show-close="!createBusy" :before-close="closeCreate" @closed="createBusy = false">
+      <ol class="create-steps" aria-label="新建入站步骤"><li :class="{ active: !creating }">1 · 选择面板</li><li :class="{ active: creating && !protocolSelected }">2 · 选择协议</li><li :class="{ active: protocolSelected }">3 · 填写配置</li></ol>
+      <label class="hub-form create-panel-select">目标面板<select v-model="createServerId" aria-label="新建入站目标面板" :disabled="createBusy"><option value="" disabled>请选择面板</option><option v-for="item in panels" :key="item.id" :value="item.id" :disabled="!item.enabled">{{ item.provider === 'sui' ? 'S-UI' : '3x-ui' }} · {{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option></select></label>
       <template v-if="creating">
         <div class="create-panel-context"><div><strong>{{ creating.provider === 'sui' ? 'S-UI' : '3x-ui' }} · {{ creating.name }}</strong><p>入站将创建到此面板，保存后可在当前列表中接入业务。</p></div><button type="button" class="hub-link" :disabled="createBusy" @click="createAttempt++">重新加载表单</button></div>
-        <component :is="creating.provider === 'sui' ? SuiCreateForm : XuiCreateForm" :key="creating.id + ':' + createAttempt" :create-server-id="creating.id" @busy="createBusy = $event" @saved="created" @close="closeCreate()" />
+        <component :is="creating.provider === 'sui' ? SuiCreateForm : XuiCreateForm" :key="creating.id + ':' + createAttempt" :create-server-id="creating.id" @busy="createBusy = $event" @protocol-selected="protocolSelected = $event" @saved="created" @close="closeCreate()" />
       </template>
     </ElDialog>
   </section>
@@ -107,11 +115,17 @@ watch(() => props.linked, () => { if (panel.value) inbounds.value = inbounds.val
 .inbound-connect-form small { color: var(--muted); font-size: 13px; line-height: 1.7; }
 .inbound-connect-form footer { display: flex; align-items: center; gap: 16px; justify-content: space-between; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .hub-toolbar .panel-select { max-width: 280px; }
+.create-steps { display: flex; flex-wrap: wrap; gap: 20px; list-style: none; padding: 0; margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+.create-steps .active { color: var(--primary); font-weight: 600; }
+.create-panel-select { margin-bottom: 20px; }
 .create-panel-context { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 .create-panel-context strong { color: var(--text); }
 .create-panel-context p { margin: 8px 0 0; font-size: 14px; line-height: 1.7; color: var(--muted); }
 .create-panel-context button { flex-shrink: 0; }
-@media(max-width: 600px) { .create-panel-context { flex-direction: column; } }
+@media(max-width: 600px) { .create-steps { display: flex; flex-wrap: wrap; gap: 20px; list-style: none; padding: 0; margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+.create-steps .active { color: var(--primary); font-weight: 600; }
+.create-panel-select { margin-bottom: 20px; }
+.create-panel-context { flex-direction: column; } }
 @media(max-width: 600px) { .hub-toolbar { align-items: stretch; flex-direction: column; } .hub-toolbar .panel-select { max-width: 100%; width: 100%; } .hub-toolbar .hub-actions { flex-wrap: wrap; } .inbound-connect-form { padding: 16px; } }
 @media(max-width: 600px) {
   .hub-table, .hub-table tbody { display: block; width: 100%; }

@@ -157,14 +157,11 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .node-dialog-section > header, .xui-dialog-section > header, .socks-dialog-section > header, .dialog-section-head, .payment-section-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 18px; }
 .node-dialog-section h3, .xui-dialog-section h3, .socks-dialog-section h3 { font-size: 15px; }
 .node-dialog-section header p, .xui-dialog-section header p, .socks-dialog-section header p { color: var(--muted); font-size: 15px; margin-top: 4px; }
-.node-dialog-intro, .xui-dialog-intro, .socks-dialog-intro, .customer-dialog-intro, .payment-form-notice, .node-transport-note { padding: 12px 14px; background: var(--surface-soft); border: 1px solid var(--border-strong); border-radius: 6px; color: var(--primary-strong); font-size: 15px; margin-bottom: 12px; display: flex; gap: 10px; }
+.node-dialog-intro, .socks-dialog-intro, .customer-dialog-intro, .payment-form-notice, .node-transport-note { padding: 12px 14px; background: var(--surface-soft); border: 1px solid var(--border-strong); border-radius: 6px; color: var(--primary-strong); font-size: 15px; margin-bottom: 12px; display: flex; gap: 10px; }
 .node-switch-item, .xui-switch-item, .socks-switch-item, .network-switch-item, .xui-enabled-control, .socks-switch-row { display: flex; align-items: center; gap: 10px; }
 .node-switch-item span, .xui-switch-item span, .socks-switch-item span, .network-switch-item span { font-size: 15px; color: var(--muted); }
 .password-field-stack, .date-picker-stack { display: grid; gap: 8px; width: 100%; }
 .node-dialog-form .el-select, .xui-dialog-form .el-select, .socks-dialog-form .el-select, .network-dialog-form .el-select, .dialog-form-grid .el-select { width: 100%; }
-.xui-connection-grid { grid-template-columns: 1fr 1fr 100px; }
-.xui-connection-name, .xui-connection-remark, .xui-connection-path, .xui-connection-enabled { grid-column: 1 / -1; }
-.xui-connection-host { grid-column: 2; }
 .json-preview, .network-preview { padding: 16px; border-radius: 6px; background: var(--surface); color: var(--text); border: 1px solid var(--border); overflow: auto; }
 .node-action-grid { display: grid; gap: 16px; }
 .node-action-group { display: grid; gap: 8px; }
@@ -521,8 +518,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
   .dashboard-stat-card { padding: 14px; }
   .dashboard-stat-card > strong { font-size: 25px; }
   .dashboard-stat-card p { min-height: 30px; }
-  .dialog-form-grid, .node-dialog-grid, .xui-dialog-grid, .socks-dialog-grid, .network-dialog-grid, .payment-form-grid, .payment-advanced-grid, .xui-connection-grid, .hub-form-grid, .settings-password-grid { grid-template-columns: 1fr; }
-  .xui-connection-host, .xui-connection-port, .xui-connection-protocol { grid-column: 1; }
+  .dialog-form-grid, .node-dialog-grid, .xui-dialog-grid, .socks-dialog-grid, .network-dialog-grid, .payment-form-grid, .payment-advanced-grid, .hub-form-grid, .settings-password-grid { grid-template-columns: 1fr; }
   .el-dialog { --el-dialog-padding-primary: 18px; margin-top: 5vh; }
   .hub-overlay { padding: 12px; }
   .hub-dialog { padding: 20px; max-height: calc(100dvh - 24px); }

@@ -14,7 +14,10 @@ import {
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from 'vue-router';
 const props = defineProps<{ createServerId?: string }>();
-const emit = defineEmits<{ saved: []; close: []; busy: [value: boolean] }>();
+const createProtocol = ref('');
+watch(createProtocol, value => { if (value) editorRecord.value = { ...(editorRecord.value as Row), type: value }; });
+const emit = defineEmits<{ saved: []; close: []; busy: [value: boolean]; protocolSelected: [value: boolean] }>();
+watch(createProtocol, value => emit('protocolSelected', Boolean(value)), { immediate: true });
 const route = useRoute();
 import {
   Activity,
@@ -1260,7 +1263,8 @@ onMounted(async () => {
             </button>
           </footer>
         </form>
-        <form v-else class="hub-form" @submit.prevent="saveResource">
+        <label v-if="createServerId && editor" class="hub-form" style="margin-bottom: 20px">入站协议<select v-model="createProtocol" aria-label="新建入站协议" :disabled="busy"><option value="" disabled>请选择协议</option><option v-for="protocol in editorSchema.properties?.type?.enum" :key="String(protocol)" :value="String(protocol)">{{ String(protocol).toUpperCase() }}</option></select></label>
+        <form v-if="!connectionDialog && (!createServerId || createProtocol)" class="hub-form" @submit.prevent="saveResource">
           <template v-if="resource === 'clients'">
             <div class="hub-form-grid">
               <label
@@ -1334,6 +1338,7 @@ onMounted(async () => {
           <PanelFields
             v-else
             v-model="editorRecord"
+            :omit="createServerId ? ['type'] : []"
             :schema="editorSchema"
             :disabled="busy"
             :choices="{ tls_id: certificateChoices, ...outboundChoices }"

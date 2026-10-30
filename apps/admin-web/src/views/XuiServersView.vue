@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import XrayCoreDialog from '../components/XrayCoreDialog.vue';
+import { splitPanelAddress, fullPanelAddress } from '../panel-address';
 import { computed, onMounted, reactive, ref } from 'vue';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
@@ -11,19 +12,18 @@ import 'element-plus/es/components/dropdown-menu/style/css';
 import 'element-plus/es/components/form/style/css';
 import 'element-plus/es/components/form-item/style/css';
 import 'element-plus/es/components/input/style/css';
-import 'element-plus/es/components/input-number/style/css';
+
 import 'element-plus/es/components/option/style/css';
 import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/switch/style/css';
 import 'element-plus/es/components/tooltip/style/css';
-import { ElAlert, ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElForm, ElFormItem, ElInput, ElInputNumber, ElMessage, ElMessageBox, ElOption, ElSelect, ElSwitch, ElTooltip } from 'element-plus';
+import { ElAlert, ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownMenu, ElForm, ElFormItem, ElInput, ElMessage, ElMessageBox, ElOption, ElSelect, ElSwitch, ElTooltip } from 'element-plus';
 import {
   Activity,
   CheckCircle2,
   Clipboard,
   CloudCog,
   Edit3,
-  Eye,
   FileKey2,
   KeyRound,
   MoreHorizontal,
@@ -101,10 +101,7 @@ const clearPassword = ref(false);
 const clearToken = ref(false);
 const form = reactive({
   name: '',
-  protocol: 'https' as 'http' | 'https',
-  host: '',
-  port: 2053,
-  basePath: '/',
+  address: '',
   shareHost: '',
   username: '',
   password: '',
@@ -123,7 +120,10 @@ const form = reactive({
 const enabledServerCount = computed(() => servers.value.filter((server) => server.enabled).length);
 const passwordServerCount = computed(() => servers.value.filter((server) => server.hasPassword).length);
 const tokenServerCount = computed(() => servers.value.filter((server) => server.hasToken).length);
-const baseConnectionReady = computed(() => Boolean(form.name.trim() && form.host.trim() && form.port >= 1 && form.port <= 65535));
+const baseConnectionReady = computed(() => {
+  try { splitPanelAddress(form.address); return Boolean(form.name.trim() && (form.token.trim() || form.username.trim() && (form.password || editingId.value))); }
+  catch { return false; }
+});
 const hasActiveFilters = computed(() => Boolean(searchQuery.value.trim() || selectedStatus.value || selectedCredential.value));
 const filteredServers = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase();
@@ -365,16 +365,12 @@ function openDialog() {
 }
 
 async function editServer(server: XuiServer) {
-  const connection = splitServerBaseUrl(server.baseUrl);
   editingId.value = server.id;
   clearPassword.value = false;
   clearToken.value = false;
   Object.assign(form, {
     name: server.name,
-    protocol: connection.protocol,
-    host: connection.host,
-    port: connection.port,
-    basePath: normalizeBasePathForForm(server.basePath),
+    address: fullPanelAddress(server.baseUrl, server.basePath),
     shareHost: server.config?.shareHost || '',
     username: server.username || '',
     password: '',
@@ -495,10 +491,7 @@ function resetForm() {
   clearToken.value = false;
   Object.assign(form, {
     name: '',
-    protocol: 'https',
-    host: '',
-    port: 2053,
-    basePath: '/',
+    address: '',
     shareHost: '',
     username: '',
     password: '',
@@ -518,8 +511,7 @@ function resetForm() {
 function cleanFormBody() {
   const body = {
     name: form.name.trim(),
-    baseUrl: buildServerBaseUrl(),
-    basePath: normalizeBasePathForApi(form.basePath),
+    ...splitPanelAddress(form.address),
     username: form.username.trim() || undefined,
     password: clearPassword.value ? '' : form.password || undefined,
     token: clearToken.value ? '' : form.token || undefined,
@@ -535,35 +527,6 @@ function cleanFormBody() {
     remark: form.remark.trim() || undefined
   };
   return body;
-}
-
-function buildServerBaseUrl() {
-  const rawHost = form.host.trim();
-  const normalizedHost = rawHost.includes(':') && !rawHost.startsWith('[') && !rawHost.endsWith(']') ? '[' + rawHost + ']' : rawHost;
-  return form.protocol + '://' + normalizedHost + ':' + form.port;
-}
-
-function splitServerBaseUrl(baseUrl: string) {
-  try {
-    const parsed = new URL(baseUrl);
-    const protocol: 'http' | 'https' = parsed.protocol === 'http:' ? 'http' : 'https';
-    const defaultPort = protocol === 'https' ? 443 : 80;
-    return { protocol, host: parsed.hostname, port: Number(parsed.port || defaultPort) };
-  } catch {
-    return { protocol: 'https' as const, host: baseUrl.replace(/^https?:\/\//i, '').split('/')[0] || '', port: 2053 };
-  }
-}
-
-function normalizeBasePathForForm(basePath?: string | null) {
-  const value = String(basePath || '').trim();
-  if (!value || value === '/') return '/';
-  return '/' + value.replace(/^\/+|\/+$/g, '');
-}
-
-function normalizeBasePathForApi(basePath: string) {
-  const value = basePath.trim();
-  if (!value || value === '/') return undefined;
-  return value.replace(/^\/+|\/+$/g, '');
 }
 
 function connectionStatus(server: XuiServer) {
@@ -816,86 +779,31 @@ onMounted(loadServers);
   <el-dialog
     v-model="dialogVisible"
     :title="editingId ? '编辑面板连接' : '添加面板连接'"
-    width="min(940px, 94vw)"
+    width="min(680px, 94vw)"
     class="xui-dialog"
     destroy-on-close
   >
-    <div class="xui-dialog-intro">
-      <Server :size="18" />
-      <div>
-        <strong>{{ editingId ? '更新已保存的 3x-ui 连接配置' : '接入新的 3x-ui 面板' }}</strong>
-        <span>连接测试、证书读取、状态查询和同步操作都会直接使用这里保存的真实地址与凭据。</span>
+    <el-form :model="form" label-position="top" class="xui-dialog-form" :disabled="saving || testingForm">
+      <div class="xui-dialog-grid">
+        <el-form-item label="面板名称" required><el-input v-model="form.name" maxlength="100" placeholder="方便识别的名称" /></el-form-item>
+        <el-form-item label="完整面板地址" class="xui-dialog-full" required><el-input v-model="form.address" type="url" maxlength="2048" placeholder="https://panel.example.com:2053/面板路径/" /><small>直接粘贴浏览器中的面板地址，端口与路径自动识别。</small></el-form-item>
+        <el-form-item label="用户名" :required="!form.token.trim()"><el-input v-model="form.username" maxlength="100" placeholder="面板登录账号" /></el-form-item>
+        <el-form-item label="密码" :required="!form.token.trim()"><el-input v-model="form.password" type="text" maxlength="256" :disabled="clearPassword" placeholder="面板登录密码" /></el-form-item>
       </div>
-    </div>
-
-    <el-form :model="form" label-position="top" class="xui-dialog-form">
-      <section class="xui-dialog-section">
-        <header><strong>连接设置</strong><span>填写远程面板地址与访问令牌，保存后即可使用可视化管理</span></header>
-        <div class="xui-dialog-grid xui-connection-grid">
-          <el-form-item label="名称" class="xui-connection-name" required><el-input v-model="form.name" maxlength="100" placeholder="例如：de-frankfurt-1" /></el-form-item>
-          <el-form-item label="备注" class="xui-connection-remark"><el-input v-model="form.remark" maxlength="500" placeholder="可选" /></el-form-item>
-          <el-form-item label="协议" class="xui-connection-protocol">
-            <el-select v-model="form.protocol" style="width: 100%">
-              <el-option label="https" value="https" />
-              <el-option label="http" value="http" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="地址" class="xui-connection-host" required><el-input v-model="form.host" maxlength="255" placeholder="panel.example.com 或 1.2.3.4" /></el-form-item>
-          <el-form-item label="端口" class="xui-connection-port" required><el-input-number v-model="form.port" :min="1" :max="65535" :controls="false" style="width: 100%" /></el-form-item>
-          <el-form-item label="基础路径" class="xui-connection-path"><el-input v-model="form.basePath" maxlength="120" placeholder="/" /></el-form-item>
-          <el-form-item label="已启用" class="xui-switch-item xui-connection-enabled">
-            <div class="xui-enabled-control"><el-switch v-model="form.enabled" /><span>保存后启用</span></div>
-          </el-form-item>
-        </div>
-      </section>
-
-      <section class="xui-dialog-section">
-        <header><strong>访问凭据</strong><span>可保存用户名和密码，也可保存 访问令牌；编辑时留空会保留原值</span></header>
+      <details class="xui-dialog-section connection-advanced">
+        <summary>高级设置 <small>令牌、分享地址与证书 · 通常无需填写</small></summary>
         <div class="xui-dialog-grid">
-          <el-form-item label="用户名"><el-input v-model="form.username" maxlength="100" placeholder="3x-ui 登录账号" /></el-form-item>
-          <el-form-item label="密码">
-            <el-input v-model="form.password" type="text" maxlength="256" :disabled="clearPassword" placeholder="编辑时留空不修改" />
-            <el-checkbox v-if="editingId" v-model="clearPassword" class="xui-clear-secret">清除已保存密码</el-checkbox>
-          </el-form-item>
-          <el-form-item label="访问令牌" class="xui-dialog-full">
-            <el-input v-model="form.token" type="text" maxlength="2048" :disabled="clearToken" placeholder="编辑时留空不修改" />
-            <el-checkbox v-if="editingId" v-model="clearToken" class="xui-clear-secret">清除已保存 Token</el-checkbox>
-          </el-form-item>
-          <el-form-item v-if="editingId" label="已保存凭据" class="xui-dialog-full">
-            <el-button class="xui-secondary-button" :loading="revealingSecrets" @click="revealServerSecrets"><Eye :size="15" />读取已保存密码和 Token</el-button>
-          </el-form-item>
+          <el-form-item label="访问令牌" class="xui-dialog-full"><el-input v-model="form.token" type="text" maxlength="2048" :disabled="clearToken" placeholder="使用令牌接入时填写" /><el-checkbox v-if="editingId" v-model="clearToken">清除已保存令牌</el-checkbox></el-form-item>
+          <el-form-item v-if="editingId" label="凭据管理"><el-checkbox v-model="clearPassword">清除已保存密码</el-checkbox></el-form-item>
+          <el-form-item label="分享主机"><el-input v-model="form.shareHost" maxlength="255" placeholder="留空使用面板主机" /></el-form-item>
+          <el-form-item label="TLS 域名"><el-input v-model="form.tlsServerName" maxlength="255" /></el-form-item>
+          <el-form-item label="证书文件"><el-input v-model="form.tlsCertFile" maxlength="500" /></el-form-item>
+          <el-form-item label="私钥文件"><el-input v-model="form.tlsKeyFile" maxlength="500" /></el-form-item>
+          <el-form-item label="读取证书" class="xui-dialog-full"><el-button :loading="testingCertForm" :disabled="!baseConnectionReady" @click="testFormCerts"><FileKey2 :size="15" />从面板读取证书</el-button></el-form-item>
+          <el-form-item label="备注"><el-input v-model="form.remark" maxlength="500" /></el-form-item>
+          <el-form-item label="启用连接"><el-switch v-model="form.enabled" /></el-form-item>
         </div>
-      </section>
-
-      <section class="xui-dialog-section">
-        <header><strong>分享链接</strong><span>分享主机用于生成真实客户端链接；留空时使用面板地址中的主机名</span></header>
-        <div class="xui-dialog-grid">
-          <el-form-item label="分享主机"><el-input v-model="form.shareHost" maxlength="255" placeholder="代理入口域名或 IP" /></el-form-item>
-          <el-form-item label="TLS Server Name"><el-input v-model="form.tlsServerName" maxlength="255" placeholder="例如 node.example.com" /></el-form-item>
-        </div>
-      </section>
-
-      <section class="xui-dialog-section">
-        <header><strong>TLS 证书</strong><span>填写远端服务器上的真实证书文件与私钥文件路径</span></header>
-        <div class="xui-dialog-grid">
-          <el-form-item label="证书文件"><el-input v-model="form.tlsCertFile" maxlength="500" placeholder="例如 /root/cert/fullchain.pem" /></el-form-item>
-          <el-form-item label="私钥文件"><el-input v-model="form.tlsKeyFile" maxlength="500" placeholder="例如 /root/cert/privkey.pem" /></el-form-item>
-          <el-form-item label="从面板读取" class="xui-dialog-full">
-            <el-button class="xui-secondary-button" :loading="testingCertForm" :disabled="!baseConnectionReady" @click="testFormCerts"><FileKey2 :size="15" />读取 3x-ui 证书配置</el-button>
-          </el-form-item>
-        </div>
-      </section>
-
-      <section class="xui-dialog-section">
-        <header><strong>Reality 探测</strong><span>目标与 Server Name 可留空，创建 Reality 节点时会优先调用 3x-ui 自动扫描</span></header>
-        <div class="xui-dialog-grid">
-          <el-form-item label="目标候选"><el-input v-model="form.realityTarget" maxlength="255" placeholder="例如 example.com:443" /></el-form-item>
-          <el-form-item label="Server Name 候选"><el-input v-model="form.realityServerName" maxlength="255" placeholder="例如 example.com" /></el-form-item>
-          <el-form-item label="浏览器指纹"><el-input v-model="form.realityFingerprint" maxlength="40" placeholder="chrome" /></el-form-item>
-          <el-form-item label="SpiderX"><el-input v-model="form.realitySpiderX" maxlength="120" placeholder="/" /></el-form-item>
-        </div>
-      </section>
-
+      </details>
     </el-form>
 
     <template #footer>
@@ -906,3 +814,10 @@ onMounted(loadServers);
   </el-dialog>
   <XrayCoreDialog v-if="coreServer" :server="coreServer" @close="coreServer = null" />
 </template>
+
+<style scoped>
+.connection-advanced > summary { cursor: pointer; font-weight: 600; color: var(--text); padding: 16px 0; }
+.connection-advanced > summary small { font-weight: 400; font-size: 13px; margin-left: 8px; color: var(--muted); }
+.connection-advanced > .xui-dialog-grid { padding-top: 12px; }
+.xui-dialog-form small { color: var(--muted); line-height: 1.6; margin-top: 6px; }
+</style>
