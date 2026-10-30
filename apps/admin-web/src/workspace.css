@@ -44,7 +44,6 @@
 .mobile-nav-toggle, .mobile-nav-close { display: none; background: transparent; border: 0; color: var(--text); padding: 5px; }
 .skip-link { position: fixed; top: -100px; left: 16px; z-index: 100; padding: 12px; background: var(--primary); color: var(--on-primary); }
 .skip-link:focus { top: 12px; }
-.login-theme { position: absolute; top: 24px; right: 28px; }
 .settings-logo-preview .brand-emblem { width: 84px; height: 84px; border: 0; }
 .settings-logo-preview .brand-emblem svg { width: 54px; height: 54px; }
 .settings-brand-preview-card > .brand-emblem { width: 80px; height: 80px; margin: 20px auto; }
@@ -61,8 +60,8 @@
 .dashboard-workspace-link > div { display: grid; gap: 4px; flex: 1; }
 .dashboard-workspace-link small, .dashboard-workspace-link p { color: var(--muted); font-size: 14px; }
 .dashboard-workspace-link > span:first-child { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 12px; color: var(--primary-strong); font-size: 22px; }
-.hub-button.primary, .login-submit, .el-button--primary:not(.is-plain):not(.is-disabled) { color: var(--on-primary); background: var(--primary); border-color: var(--primary); }
-.hub-button.primary:hover, .login-submit:hover { background: var(--primary-hover); }
+.hub-button.primary, .el-button--primary:not(.is-plain):not(.is-disabled) { color: var(--on-primary); background: var(--primary); border-color: var(--primary); }
+.hub-button.primary:hover { background: var(--primary-hover); }
 .el-loading-mask { background-color: color-mix(in srgb, var(--surface) 86%, transparent); }
 @media (max-width: 1200px) { .workspace-header { gap: 18px; padding: 12px 20px; } .workspace-brand { width: 185px; } .workspace-sections a { padding: 10px; } .admin-identity { display: none; } .overview-shell .route-stage { padding: 12px 24px 40px; } }
 @media (max-width: 900px) { .workspace-header { flex-wrap: wrap; gap: 12px; } .workspace-brand { flex: 1; width: auto; } .workspace-tools { margin-left: 0; } .workspace-sections { order: 3; width: 100%; overflow-x: auto; } .overview-shell .sidebar { inset: 0 auto 0 0; transform: translateX(-100%); width: 264px; padding-top: 24px; z-index: 60; } .mobile-nav-open .sidebar { transform: translateX(0); } .mobile-nav-backdrop { position: fixed; inset: 0; z-index: 55; border: 0; background: var(--overlay); } .mobile-nav-toggle, .mobile-nav-close { display: inline-flex; } .nav-section { display: block; margin-bottom: 20px; } .nav-section-title { display: block; font-size: 13px; color: var(--muted); padding: 8px 12px; } .admin-workspace { margin-left: 0; } .overview-shell .topbar { padding: 0 20px; } .context-label { color: var(--text); } }

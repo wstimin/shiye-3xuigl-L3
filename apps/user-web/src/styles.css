@@ -23,8 +23,8 @@ button svg, a svg { flex-shrink: 0; }
 .eyebrow { color: var(--primary-strong); letter-spacing: .16em; }
 .surface { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-bg); overflow: hidden; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 40px; padding: 10px 16px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-bg); color: var(--text); font-size: 15px; font-weight: 600; white-space: nowrap; }
-.button.primary, .login-submit { border-color: var(--primary); background: var(--primary); }
-.button.primary:hover:not(:disabled), .login-submit:hover:not(:disabled) { background: var(--primary); border-color: var(--border-strong); }
+.button.primary { border-color: var(--primary); background: var(--primary); }
+.button.primary:hover:not(:disabled) { background: var(--primary); border-color: var(--border-strong); }
 .button.secondary:hover:not(:disabled) { border-color: var(--border-strong); background: var(--panel-soft); }
 .button.small { min-height: 32px; padding: 6px 10px; font-size: 15px; gap: 6px; }
 .button.wide { width: 100%; }
@@ -236,22 +236,6 @@ button svg, a svg { flex-shrink: 0; }
 .toast-card p { margin: 4px 0 0; font-size: 15px; color: var(--muted); overflow-wrap: anywhere; }
 .toast-card button { align-self: start; border: 0; padding: 0; background: transparent; color: var(--muted); font-size: 15px; }
 .boot-screen { min-height: 100svh; display: grid; place-items: center; align-content: center; gap: 18px; color: var(--muted); font-size: 15px; }
-.public-header { display: flex; align-items: center; gap: 12px; max-width: 1360px; margin: 0 auto; padding: 28px 40px; }
-.public-header strong { font-size: 15px; }
-.public-header-note { margin-left: auto; color: var(--muted); font-size: 15px; }
-.login-stage { display: grid; grid-template-columns: minmax(0, 1fr) 410px; align-items: center; gap: 100px; max-width: 1100px; min-height: calc(100svh - 190px); margin: 0 auto; padding: 40px; }
-.login-caption h1 { margin: 16px 0 24px; font-size: 42px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
-.login-caption p { max-width: 360px; color: var(--muted); font-size: 15px; line-height: 1.9; }
-.login-panel { display: grid; gap: 24px; padding: 36px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel-bg); }
-.login-heading h2 { margin: 12px 0 8px; font-size: 22px; font-weight: 600; }
-.login-heading p { margin: 0; color: var(--muted); font-size: 15px; }
-.login-form-group { display: grid; gap: 8px; font-size: 15px; font-weight: 500; }
-.login-field { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 7px; color: var(--muted); }
-.login-field:focus-within { border-color: var(--primary-strong); outline: 2px solid var(--primary-soft); }
-.login-field input { width: 100%; border: 0; outline: 0; padding: 10px 0; background: transparent; }
-.login-submit { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 10px 16px; border: 1px solid var(--primary); border-radius: 7px; color: var(--text); font-size: 15px; font-weight: 600; }
-.login-security-note { display: flex; align-items: flex-start; gap: 7px; color: var(--muted); font-size: 15px; line-height: 1.8; }
-.public-footer { display: flex; justify-content: space-between; gap: 16px; max-width: 1360px; margin: 0 auto; padding: 24px 40px; color: var(--muted); font-size: 15px; }
 .route-stage { position: relative; }
 .route-progress { position: absolute; top: 0; left: 0; width: 100%; height: 2px; opacity: 0; overflow: hidden; pointer-events: none; }
 .route-progress.active { opacity: 1; }
@@ -284,8 +268,6 @@ button svg, a svg { flex-shrink: 0; }
  .funding-content { padding: 26px; }
  .checkout-footer { margin: 28px -26px -26px; padding: 22px 26px; flex-wrap: wrap; }
  .checkout-footer > .button { flex: 1; }
- .login-stage { gap: 48px; grid-template-columns: minmax(0, 1fr) 380px; }
- .login-caption h1 { font-size: 34px; }
 }
 @media (max-width: 860px) {
  .overview-layout, .funding-layout { grid-template-columns: minmax(0, 1fr); }
@@ -376,14 +358,6 @@ button svg, a svg { flex-shrink: 0; }
  .payment-result-details > div { flex-direction: column; gap: 4px; }
  .qr-modal-head { padding: 16px 20px; }
  .qr-modal-body { padding: 20px; }
- .public-header { padding: 24px; }
- .public-header-note { display: none; }
- .login-stage { grid-template-columns: 1fr; gap: 28px; min-height: auto; padding: 24px; }
- .login-caption h1 { margin: 12px 0; font-size: 28px; }
- .login-caption h1 br { display: none; }
- .login-caption p { margin-bottom: 0; font-size: 15px; }
- .login-panel { gap: 22px; padding: 28px 24px; }
- .public-footer { padding: 24px; font-size: 15px; }
 }
 @media (prefers-reduced-motion: reduce) {
  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

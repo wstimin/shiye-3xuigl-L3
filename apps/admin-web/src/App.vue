@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ArrowRight, ChevronRight, CircleAlert, ClipboardList, CreditCard, GitBranch, HeartPulse, LayoutDashboard, LockKeyhole, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
+import { ArrowRight, ChevronRight, CircleAlert, ClipboardList, CreditCard, GitBranch, HeartPulse, LayoutDashboard, LogOut, Menu, Network, ReceiptText, Router, Settings, ShieldCheck, UserRound, Users, WalletCards, X } from 'lucide-vue-next';
+import LoginScreen from '../../web-shared/LoginScreen.vue';
 import BrandMark from '../../web-shared/BrandMark.vue';
 import ThemeToggle from '../../web-shared/ThemeToggle.vue';
 import { applyBranding } from '../../web-shared/branding';
@@ -145,80 +146,7 @@ onUnmounted(() => {
 <template>
   <div v-if="checking" class="boot-screen">正在检查登录状态</div>
 
-  <div v-else-if="!user" class="login-screen admin-login-screen">
-    <div class="login-theme"><ThemeToggle /></div>
-    <div class="login-layout">
-      <section class="login-intro" aria-labelledby="admin-login-title">
-        <div class="intro-brand-row">
-          <BrandMark :src="branding.logoDataUrl" :name="branding.brandName" />
-          <div class="intro-brand-copy">
-            <strong>{{ branding.brandName }}</strong>
-            <span><i></i>运维控制台运行中</span>
-          </div>
-        </div>
-
-        <div class="intro-content">
-          <p class="intro-kicker">ONE WORKSPACE. EVERY CONNECTION.</p>
-          <h1 id="admin-login-title">连接每个节点，<br />掌握每一程。</h1>
-          <p class="intro-description">集中维护面板连接、入站用户和节点配置，完成创建、删除、同步、流量状态检查与运行诊断。</p>
-          <div class="login-feature-list">
-            <div class="login-feature-item">
-              <span class="feature-icon"><Network :size="18" /></span>
-              <div><strong>双引擎，一个工作区</strong><span>集中接入 3x-ui 与 S-UI，管理 Xray 与 sing-box</span></div>
-            </div>
-            <div class="login-feature-item">
-              <span class="feature-icon"><Users :size="18" /></span>
-              <div><strong>用户与入站</strong><span>创建、删除用户并管理入站及服务配置</span></div>
-            </div>
-            <div class="login-feature-item">
-              <span class="feature-icon"><HeartPulse :size="18" /></span>
-              <div><strong>同步与诊断</strong><span>同步节点数据，查看流量状态和执行日志</span></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <main class="login-area">
-        <form class="login-panel refined-login" autocomplete="on" @submit.prevent="login">
-          <div class="login-card-brand">
-            <BrandMark :src="branding.logoDataUrl" :name="branding.brandName" />
-            <div><strong>{{ branding.brandName }}</strong><span>管理端</span></div>
-          </div>
-
-          <div class="login-heading">
-            <h2>登录管理端</h2>
-            <p>请输入管理员账号和密码继续</p>
-          </div>
-
-          <div v-if="loginError" class="login-error" role="alert">
-            <CircleAlert :size="17" />
-            <span>{{ loginError }}</span>
-          </div>
-
-          <label class="login-form-group">
-            <span>管理员账号</span>
-            <span class="login-field">
-              <UserRound :size="18" />
-              <input v-model="loginForm.username" name="shiye-admin-account" placeholder="请输入管理员账号" autocomplete="username" />
-            </span>
-          </label>
-          <label class="login-form-group">
-            <span>密码</span>
-            <span class="login-field">
-              <LockKeyhole :size="18" />
-              <input v-model="loginForm.password" name="shiye-admin-passcode" type="password" placeholder="请输入密码" autocomplete="current-password" />
-            </span>
-          </label>
-          <button class="login-submit" :disabled="loggingIn || !loginForm.username || !loginForm.password">
-            <span>{{ loggingIn ? '正在验证' : '登录控制台' }}</span>
-            <ArrowRight :size="18" />
-          </button>
-          <div class="login-security-note"><ShieldCheck :size="15" />管理员身份验证</div>
-        </form>
-      </main>
-    </div>
-  </div>
-
+  <LoginScreen v-else-if="!user" entry="admin" :brand="branding" v-model:username="loginForm.username" v-model:password="loginForm.password" :busy="loggingIn" :error="loginError" @submit="login" />
   <div v-else class="shell overview-shell" :class="{ 'mobile-nav-open': mobileNavOpen, 'overview-home': route.path === '/'  }">
     <a class="skip-link" href="#admin-content">跳到页面内容</a>
     <header class="workspace-header">
