@@ -63,7 +63,7 @@ watch(() => route.path, () => {
 
 watch(user, session => {
   if (session) window.setTimeout(() => {
-    if (user.value) for (const path of ['/customers', '/nodes', '/xui-servers']) preloadRoute(path);
+    if (user.value) for (const path of ['/customers', '/nodes', '/xui-servers', '/sui-servers', '/network-config']) preloadRoute(path);
   }, 800);
 });
 
