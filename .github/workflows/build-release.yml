@@ -88,19 +88,34 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         shell: bash
         run: |
+          retry() {
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              if [[ "$attempt" -lt 3 ]]; then
+                echo "GitHub request failed; retrying in $((attempt * 5)) seconds." >&2
+                sleep "$((attempt * 5))"
+              fi
+            done
+            return 1
+          }
           remote_sha="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" | awk '{print $1}')"
           if [[ -n "$remote_sha" && "$remote_sha" != "$GITHUB_SHA" ]]; then
             echo "Release tag $RELEASE_TAG already points to $remote_sha, not $GITHUB_SHA." >&2
             echo "Bump package.json before publishing another release." >&2
             exit 1
           fi
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" shiye-3xuigl.zip --clobber
-            gh release edit "$RELEASE_TAG" --latest
-          else
-            gh release create "$RELEASE_TAG" shiye-3xuigl.zip \
-              --target "$GITHUB_SHA" \
-              --title "$RELEASE_TAG" \
-              --generate-notes \
-              --latest
-          fi
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          awk -v tag="$RELEASE_TAG" '
+            /^## / { if (found) exit; if ($2 == tag) found = 1 }
+            found { print }
+          ' CHANGELOG.md > "$notes_file"
+          if [[ ! -s "$notes_file" ]]; then printf '%s\n' "$RELEASE_TAG" > "$notes_file"; fi
+          ensure_draft() {
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then return 0; fi
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" --notes-file "$notes_file" --draft
+          }
+          retry ensure_draft
+          retry gh release upload "$RELEASE_TAG" shiye-3xuigl.zip --clobber
+          retry gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" \
+            --notes-file "$notes_file" --draft=false --latest
