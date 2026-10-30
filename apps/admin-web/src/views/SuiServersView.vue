@@ -13,6 +13,8 @@ import {
 } from "../panel-fields";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from 'vue-router';
+const props = defineProps<{ createServerId?: string }>();
+const emit = defineEmits<{ saved: []; close: []; busy: [value: boolean] }>();
 const route = useRoute();
 import {
   Activity,
@@ -217,9 +219,11 @@ watch(
   () => connectionDialog.value || editor.value,
   async (open) => {
     await nextTick();
-    if (open) dialogElement.value?.showModal();
+    if (open && !props.createServerId) dialogElement.value?.showModal();
+    if (!open && props.createServerId) emit('close');
   },
 );
+watch(busy, value => emit('busy', value));
 const resources = [
   { id: "clients", label: "客户端", icon: Users },
   { id: "inbounds", label: "入站", icon: Network },
@@ -556,6 +560,7 @@ async function editResource(row?: Row) {
         })),
       ];
     } catch (cause) {
+      if (props.createServerId) error.value = message(cause);
       ElMessage.error(message(cause));
       return;
     }
@@ -635,15 +640,18 @@ async function saveResource() {
       method: "POST",
       body,
     });
-    editor.value = false;
     ElMessage.success("远端配置已保存");
-    await refresh();
+    if (!props.createServerId) {
+      editor.value = false;
+      await refresh();
+    }
   } catch (cause) {
     editorError.value = message(cause);
     confirmSave.value = false;
   } finally {
     busy.value = false;
   }
+  if (props.createServerId && !editorError.value) emit('saved');
 }
 async function deleteResource(row: Row) {
   try {
@@ -717,14 +725,17 @@ async function control(
 }
 onMounted(async () => {
   await loadServers();
-  const panel = servers.value.find(item => item.id === route.query.serverId);
-  if (!panel) return;
-  resource.value = resources.some(item => item.id === route.query.resource) ? String(route.query.resource) : 'clients';
+  const panel = servers.value.find(item => item.id === (props.createServerId || route.query.serverId));
+  if (!panel) {
+    if (props.createServerId && !error.value) error.value = '未找到所选面板，请关闭后重新选择。';
+    return;
+  }
+  resource.value = props.createServerId ? 'inbounds' : resources.some(item => item.id === route.query.resource) ? String(route.query.resource) : 'clients';
   await nextTick();
   selected.value = panel;
   await refresh();
   if (error.value) return;
-  if (route.query.create === '1' && writable.value) await editResource();
+  if ((props.createServerId || route.query.create === '1') && writable.value) await editResource();
   else if (route.query.inboundId && resource.value === 'inbounds') {
     const row = rows.value.find(item => Number(item.id) === Number(route.query.inboundId));
     if (row) await editResource(row);
@@ -733,7 +744,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="panel-hub">
+  <div class="panel-hub" :class="{ 'inbound-create-inline': createServerId }">
+    <template v-if="!createServerId">
     <header class="hub-heading">
       <div>
         <div class="eyebrow">INFRASTRUCTURE / SING-BOX</div>
@@ -1144,21 +1156,24 @@ onMounted(async () => {
       @close="linkClient = null"
       @linked="refresh"
     />
-    <dialog
+    </template>
+    <div v-if="createServerId && error" class="hub-alert error" role="alert">{{ error }}</div>
+    <div v-if="createServerId && !editor && !error" class="hub-empty" role="status">正在准备入站表单…</div>
+    <component
+      :is="createServerId ? 'div' : 'dialog'"
       v-if="connectionDialog || editor"
       ref="dialogElement"
-      class="hub-overlay"
-      @click.self="!busy && ((connectionDialog = false), (editor = false))"
+      :class="createServerId ? 'inbound-create-content' : 'hub-overlay'"
+      @click.self="!createServerId && !busy && ((connectionDialog = false), (editor = false))"
       @cancel.prevent="!busy && ((connectionDialog = false), (editor = false))"
     >
       <section
-        class="hub-dialog"
-        :class="{ wide: editor }"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="sui-dialog-title"
+        :class="[createServerId ? 'inbound-create-form' : 'hub-dialog', { wide: editor }]"
+        :role="createServerId ? undefined : 'dialog'"
+        :aria-modal="createServerId ? undefined : true"
+        :aria-labelledby="createServerId ? undefined : 'sui-dialog-title'"
       >
-        <header>
+        <header v-if="!createServerId">
           <div>
             <div class="eyebrow">S-UI WORKSPACE</div>
             <h2 id="sui-dialog-title">
@@ -1355,6 +1370,6 @@ onMounted(async () => {
           </footer>
         </form>
       </section>
-    </dialog>
+    </component>
   </div>
 </template>

@@ -37,15 +37,19 @@ import {
 } from "../xui-panel";
 
 type Panel = { id: string; name: string };
+const props = defineProps<{ createServerId?: string }>();
+const emit = defineEmits<{ saved: []; busy: [value: boolean] }>();
 const route = useRoute();
 const panels = ref<Panel[]>([]);
-const serverId = ref(String(route.query.serverId || ""));
+const serverId = ref(props.createServerId || String(route.query.serverId || ""));
 const catalog = ref<PanelOperation[]>([]);
 const section = ref("overview");
 const selected = ref("");
 const search = ref("");
 const loading = ref(false);
 const running = ref(false);
+const confirming = ref(false);
+watch([running, confirming], ([running, confirming]) => emit('busy', running || confirming));
 const error = ref("");
 const draft = ref<unknown>({});
 const original = ref<unknown>({});
@@ -291,10 +295,11 @@ async function loadCatalog() {
     if (version === revision) loading.value = false;
   }
   if (version === revision && catalog.value.length) {
-    const initial = tabs.value.some(tab => tab.id === route.query.section) ? String(route.query.section) : 'overview';
+    const initial = props.createServerId ? 'inbounds' : tabs.value.some(tab => tab.id === route.query.section) ? String(route.query.section) : 'overview';
     await openSection(initial);
-    const action = route.query.create === '1' && initial === 'inbounds' ? findOperation('POST /panel/api/inbounds/add') : undefined;
+    const action = (props.createServerId || route.query.create === '1') && initial === 'inbounds' ? findOperation('POST /panel/api/inbounds/add') : undefined;
     if (action && operationSection(action) === initial) await choose(action);
+    else if (props.createServerId) error.value = '该面板未提供新建入站功能，请检查面板版本后重试。';
     else if (initial === 'inbounds' && route.query.inboundId) {
       const row = rows.value.find(item => Number(item.id) === Number(route.query.inboundId));
       if (row) rowAction('update', row);
@@ -450,6 +455,7 @@ async function execute() {
       item.path,
     );
   if (item.mutates) {
+    confirming.value = true;
     try {
       await ElMessageBox.confirm(
         `将在「${panels.value.find((panel) => panel.id === serverId.value)?.name}」${operationLabel(item)}。${risky ? "可能中断连接、清除记录或重启服务，请核对后继续。" : "保存后立即生效。"}`,
@@ -462,6 +468,8 @@ async function execute() {
       );
     } catch {
       return;
+    } finally {
+      confirming.value = false;
     }
   }
   running.value = true;
@@ -484,6 +492,7 @@ async function execute() {
   } finally {
     running.value = false;
   }
+  if (props.createServerId && completed.value) emit('saved');
 }
 function rowAction(kind: "update" | "del", row: PanelRecord) {
   const item = actions.value.find(
@@ -549,7 +558,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="panel-hub">
+  <section class="panel-hub" :class="{ 'inbound-create-inline': createServerId }">
+    <template v-if="!createServerId">
     <header class="hub-heading">
       <div>
         <div class="eyebrow">3X-UI</div>
@@ -590,9 +600,11 @@ onMounted(async () => {
         {{ tab.label }}
       </button>
     </nav>
+    </template>
     <div v-if="error" class="hub-alert error" role="alert">{{ error }}</div>
+    <div v-if="createServerId && loading && !catalog.length" class="hub-empty" role="status">正在准备入站表单…</div>
     <section v-if="catalog.length" class="hub-card">
-      <div class="hub-toolbar">
+      <div v-if="!createServerId" class="hub-toolbar">
         <h2>{{ title }}</h2>
         <div class="hub-actions">
           <button
@@ -635,7 +647,7 @@ onMounted(async () => {
           class="panel-task-form hub-form"
           @submit.prevent="execute"
         >
-          <header class="panel-task-heading">
+          <header v-if="!createServerId" class="panel-task-heading">
             <Settings2 :size="18" />
             <h3>{{ operationLabel(operation) }}</h3>
           </header>
@@ -841,3 +853,9 @@ onMounted(async () => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.inbound-create-inline { gap: 0; }
+.inbound-create-inline > .hub-card { border: 0; box-shadow: none; }
+.inbound-create-inline .panel-task-form { padding: 0; border: 0; }
+</style>
