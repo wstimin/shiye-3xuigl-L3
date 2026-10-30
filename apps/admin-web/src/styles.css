@@ -540,4 +540,4 @@ input::placeholder, textarea::placeholder { color: var(--field-placeholder); opa
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 @media (max-width: 640px) {
- input, select, textarea, .el-input__inner, .el-textarea__inner { font-size: 16px; } }
+ :root input:not([readonly]), :root select, :root textarea, :root .el-input__inner, :root .el-textarea__inner { font-size: 16px; } }

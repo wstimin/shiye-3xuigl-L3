@@ -358,7 +358,7 @@ button svg, a svg { flex-shrink: 0; }
  .payment-result-details > div { flex-direction: column; gap: 4px; }
  .qr-modal-head { padding: 16px 20px; }
  .qr-modal-body { padding: 20px; }
- input, select, textarea, .el-input__inner, .el-textarea__inner { font-size: 16px; }
+ :root input:not([readonly]), :root select, :root textarea, :root .el-input__inner, :root .el-textarea__inner { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
