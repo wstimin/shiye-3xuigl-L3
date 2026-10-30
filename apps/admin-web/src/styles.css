@@ -303,10 +303,12 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .settings-console-navigation { padding: 16px; }
 .settings-navigation-head { padding: 4px 8px 16px; font-size: 15px; font-weight: 600; }
 .settings-navigation-head p, .settings-navigation-footer { font-size: 15px; color: var(--muted); }
-.settings-navigation-item { display: flex; gap: 10px; align-items: center; width: 100%; padding: 12px 10px; margin-bottom: 6px; border: 1px solid transparent; background: transparent; text-align: left; color: var(--muted); border-radius: 6px; }
+.settings-navigation-item { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px 10px; align-items: start; width: 100%; padding: 12px 10px; margin-bottom: 6px; border: 1px solid transparent; background: transparent; text-align: left; color: var(--muted); border-radius: 6px; }
 .settings-navigation-item.active, .settings-navigation-item.is-active { background: var(--primary-soft); color: var(--primary-strong); }
-.settings-navigation-copy { display: grid; gap: 3px; flex: 1; }
-.settings-navigation-copy strong { font-size: 15px; }
+.settings-navigation-copy { display: grid; gap: 3px; min-width: 0; }
+.settings-navigation-copy strong { font-size: 15px; white-space: nowrap; }
+.settings-navigation-state { grid-column: 2; justify-self: start; }
+.settings-navigation-arrow { display: none; }
 .settings-navigation-copy small { color: var(--muted); font-size: 15px; }
 .settings-navigation-footer { padding: 12px 8px 0; border-top: 1px solid var(--border); }
 .settings-workspace-head { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); padding: 22px 24px; }
@@ -504,7 +506,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
   .settings-console-navigation { display: flex; gap: 6px; overflow-x: auto; padding: 8px; }
   .settings-navigation-head, .settings-navigation-footer, .settings-navigation-copy small, .settings-navigation-arrow, .settings-navigation-state { display: none; }
   .settings-console-navigation nav { display: flex; gap: 6px; }
-  .settings-navigation-item { width: auto; min-width: 120px; margin: 0; white-space: nowrap; }
+  .settings-navigation-item { display: flex; width: auto; min-width: 120px; margin: 0; white-space: nowrap; }
   .settings-overview-grid { grid-template-columns: 1fr; }
   .login-layout { gap: 36px; grid-template-columns: 1fr 380px; }
   .intro-content h1 { font-size: 28px; }
