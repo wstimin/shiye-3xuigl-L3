@@ -715,7 +715,7 @@ function parseJson(value: string): Record<string, any> | null {
 
 function parseXml(value: string): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const match of value.matchAll(/<([A-Za-z0-9_:-]+)>\s*(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))\s*<\/\1>/g)) {
+  for (const match of value.matchAll(/<([A-Za-z0-9_:-]+)>\s*(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))\s*<\/\1>/g)) {
     const key = match[1];
     if (!key || key === 'xml') continue;
     result[key] = (match[2] ?? match[3] ?? '').trim();

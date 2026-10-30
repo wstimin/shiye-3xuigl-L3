@@ -107,3 +107,60 @@ test('payment callback with a mismatched amount does not credit balance', async 
   assert.equal(credited, 0);
   assert.equal(order.status, 'pending');
 });
+
+test('WeChat parses wrapped XML gateway responses and signed XML notifications', async (t) => {
+  const key = 'wechat-merchant-secret';
+  const channel = { id: 'wx-channel', provider: 'wechat', enabled: true, configEnc: {
+    url: 'https://payment-fixture.invalid', appId: 'wx-app', mchId: 'wx-merchant', apiKey: key,
+    notifyUrl: 'https://site-fixture.invalid/api/payments/wechat/notify'
+  } };
+  const customer = { id: 'wx-customer', status: 'active', balance: new Prisma.Decimal(0) };
+  let order: any;
+  let credits = 0;
+  const tx: any = {
+    $queryRaw: async () => [{ id: order.id }],
+    rechargeOrder: {
+      findUnique: async () => order,
+      updateMany: async ({ data }: any) => { Object.assign(order, data); return { count: 1 }; }
+    },
+    paymentCallback: { create: async () => ({ id: 'wx-callback' }) },
+    customer: {
+      findUnique: async () => customer,
+      update: async ({ data }: any) => {
+        credits++;
+        customer.balance = customer.balance.plus(data.balance.increment);
+        return { balance: customer.balance };
+      }
+    },
+    balanceLog: { create: async () => ({ id: 'wx-balance-log' }) }
+  };
+  const prisma: any = {
+    customer: tx.customer,
+    paymentChannel: { findFirst: async () => channel },
+    rechargeOrder: {
+      create: async ({ data }: any) => (order = { ...data, id: 'wx-order', channel }),
+      findUnique: async () => order
+    },
+    $transaction: async (operation: any) => operation(tx)
+  };
+  const xml = (data: Record<string, string>, cdata: boolean) => '<xml>' + Object.entries(data).map(([name, value]) =>
+    `<${name}>${cdata ? `<![CDATA[${value}]]>` : value}</${name}>`).join('') + '</xml>';
+  const service = new PaymentsService(prisma, { decrypt: (value: string) => value } as any);
+  for (const cdata of [false, true]) {
+    const fetchMock = t.mock.method(globalThis, 'fetch', async () => new Response(xml({
+      return_code: 'SUCCESS', result_code: 'SUCCESS', code_url: 'weixin://fixture-payment'
+    }, cdata), { headers: { 'content-type': 'text/xml' } }));
+    try {
+      const result = await service.createOrder(customer.id, { provider: 'wechat', channelId: channel.id, amount: '4.56' });
+      assert.equal(result.qrCode, 'weixin://fixture-payment');
+      const params = { return_code: 'SUCCESS', result_code: 'SUCCESS', out_trade_no: order.tradeNo, transaction_id: `wx-${cdata}`, total_fee: '456' };
+      const sign = createHash('md5').update(Object.keys(params).sort().map(name => `${name}=${params[name as keyof typeof params]}`).join('&') + '&key=' + key).digest('hex').toUpperCase();
+      const notify = { provider: 'wechat', query: {}, body: xml({ ...params, sign }, cdata) };
+      assert.match(await service.notify(notify), /<!\[CDATA\[SUCCESS\]\]>/);
+      assert.match(await service.notify(notify), /<!\[CDATA\[SUCCESS\]\]>/);
+      assert.equal(order.status, 'paid');
+    } finally { fetchMock.mock.restore(); }
+  }
+  assert.equal(credits, 2);
+  assert.equal(customer.balance.toFixed(2), '9.12');
+});
