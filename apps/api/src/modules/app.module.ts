@@ -18,6 +18,7 @@ import { SetupModule } from './setup/setup.module.js';
 import { XuiModule } from './xui/xui.module.js';
 import { SuiModule } from './sui/sui.module.js';
 import { DatabaseLockModule } from '../shared/database-lock.module.js';
+import { MaintenanceModule } from './maintenance/maintenance.module.js';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { DatabaseLockModule } from '../shared/database-lock.module.js';
     SetupModule,
     AuthModule,
     SettingsModule,
+    MaintenanceModule,
     CustomersModule,
     DiagnosticsModule,
     NodesModule,

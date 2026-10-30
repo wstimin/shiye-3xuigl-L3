@@ -1,6 +1,6 @@
 {
   "name": "shiye-management-system",
-  "version": "1.1.9",
+  "version": "1.2.0",
   "private": true,
   "description": "Shiye management system for 3x-ui and S-UI panels, user services, billing and network routing.",
   "type": "module",
@@ -40,12 +40,12 @@
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "mysql2": "^3.11.5",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "prisma": "^5.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "npm-run-all": "^4.1.5",
-    "prisma": "^5.22.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },

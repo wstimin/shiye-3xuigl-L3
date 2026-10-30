@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { readBuildInfo } from '../../shared/build-info.js';
+import { maintenanceOperations } from '../../shared/maintenance-state.js';
 
 const buildInfo = readBuildInfo();
 
@@ -7,6 +8,6 @@ const buildInfo = readBuildInfo();
 export class HealthController {
   @Get()
   health() {
-    return { status: 'ok', service: 'shiye-api', ...buildInfo, time: new Date().toISOString() };
+    return { status: 'ok', service: 'shiye-api', ...buildInfo, maintenanceOperations: maintenanceOperations(), time: new Date().toISOString() };
   }
 }

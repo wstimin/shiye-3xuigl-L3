@@ -10,12 +10,19 @@ import { AppModule } from './modules/app.module.js';
 import { HttpExceptionFilter } from './shared/http-exception.filter.js';
 import { ResponseInterceptor } from './shared/response.interceptor.js';
 import { setHtmlNoStore, setStaticAssetHeaders } from './web-cache.js';
+import { maintenanceActive, beginMaintenanceOperation } from './shared/maintenance-state.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true, bodyParser: false });
 
   app.setGlobalPrefix('api');
   app.use(cookieParser());
+  app.use('/api', (request: express.Request, response: express.Response, next: express.NextFunction) => {
+    if (/^\/(health|admin\/maintenance|auth\/me|login|logout|public\/branding)(?:[/?]|$)/.test(request.url)) return next();
+    if (maintenanceActive()) return response.status(503).json({ ok: false, message: '网站正在维护，请稍后重试' });
+    const finish = beginMaintenanceOperation();
+    response.once('finish', finish); response.once('close', finish); next();
+  });
   app.use('/api/admin/xui-servers/:id/native/execute', express.json({ limit: '24mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use(express.text({ type: ['text/xml', 'application/xml', '*/xml'], limit: '1mb' }));

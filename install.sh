@@ -29,6 +29,12 @@ ATOMIC_BACKUP=""
 log() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+maintenance_progress() {
+  if [ -n "${MAINTENANCE_STATUS_FILE:-}" ] && [ -f "${MAINTENANCE_PROGRESS_SCRIPT:-}" ]; then
+    node "${MAINTENANCE_PROGRESS_SCRIPT}" "${MAINTENANCE_STATUS_FILE}" "$1" "$2" "$3"
+  fi
+}
+
 to_lower() { printf "%s" "$1" | tr '[:upper:]' '[:lower:]'; }
 is_yes() { case "$(to_lower "$1")" in y|yes|1|true|on|enable|enabled) return 0 ;; *) return 1 ;; esac; }
 is_no() { case "$(to_lower "$1")" in n|no|0|false|off|disable|disabled|skip) return 0 ;; *) return 1 ;; esac; }
@@ -431,6 +437,7 @@ write_env_file_in() {
     set_env_value PORT "${PORT}"
     set_env_value PUBLIC_WEB_URL "${public_url}"
     set_env_value ADMIN_PATH "${admin_path}"
+    set_env_value SHIYE_MAINTENANCE_DIR "/var/lib/shiye-maintenance/${APP_NAME}"
     return
   fi
 
@@ -439,6 +446,7 @@ NODE_ENV=production
 PORT=${PORT}
 PUBLIC_WEB_URL=${public_url}
 ADMIN_PATH=${admin_path}
+SHIYE_MAINTENANCE_DIR=/var/lib/shiye-maintenance/${APP_NAME}
 
 DATABASE_URL=${DATABASE_URL}
 
@@ -543,26 +551,31 @@ prepare_atomic_update() {
   release_id="$(date +%Y%m%d%H%M%S)-$$"
   ATOMIC_STAGE="${parent_dir}/.${base_name}.next.${release_id}"
   ATOMIC_BACKUP="${parent_dir}/.${base_name}.previous.${release_id}"
+  if [ -n "${MAINTENANCE_RUNTIME_BACKUP:-}" ]; then ATOMIC_BACKUP="${MAINTENANCE_RUNTIME_BACKUP}"; fi
   mkdir -p "${ATOMIC_STAGE}"
   log "Preparing new release while the current service stays online: ${ATOMIC_STAGE}"
   install_app_files_to "${ATOMIC_STAGE}"
   cp -a "${APP_DIR}/.env" "${ATOMIC_STAGE}/.env"
   write_env_file_in "${ATOMIC_STAGE}"
+  maintenance_progress dependencies 48 "正在安装新版本运行依赖"
   install_dependencies_and_build_in "${ATOMIC_STAGE}"
   assert_migrations_are_rollback_compatible "${ATOMIC_STAGE}"
   verify_runtime_files_in "${ATOMIC_STAGE}"
   cd "${ATOMIC_STAGE}"
   log "Applying rollback-compatible database migrations before the short switch"
+  maintenance_progress database 65 "正在适配数据库结构"
   npm run prisma:migrate
   npm run admin:sync -- --create-only
   npm prune --omit=dev
   cleanup_runtime_files_in "${ATOMIC_STAGE}"
   verify_runtime_files_in "${ATOMIC_STAGE}"
+  stage_maintenance_helpers "${ATOMIC_STAGE}"
   chown -R shiye:shiye "${ATOMIC_STAGE}" 2>/dev/null || true
 }
 
 rollback_atomic_update() {
   log "New release failed health checks; restoring the previous version"
+  maintenance_progress recovery:running 0 "正在独立恢复原版本"
   systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
   failed_dir="${ATOMIC_BACKUP}.failed"
   if [ -d "${APP_DIR}" ]; then mv "${APP_DIR}" "${failed_dir}"; fi
@@ -570,14 +583,17 @@ rollback_atomic_update() {
   systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
   if wait_for_api_health_soft 30 && verify_web_routes_soft; then
     rm -rf "${failed_dir}"
+    maintenance_progress recovery:succeeded 0 "已恢复原版本，网站运行正常"
     die "Update failed and the previous version was restored successfully."
   fi
   echo "Automatic rollback failed. Inspect ${APP_DIR}, ${failed_dir} and system logs immediately." >&2
+  maintenance_progress recovery:failed 0 "自动恢复未通过检查，原版本和更新前备份已保留"
   return 1
 }
 
 activate_atomic_update() {
   log "New release is ready. Starting the short service switch"
+  maintenance_progress switch 80 "正在切换版本，网站将短暂重启"
   systemctl stop "${APP_NAME}"
   if ! mv "${APP_DIR}" "${ATOMIC_BACKUP}"; then
     systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
@@ -589,6 +605,7 @@ activate_atomic_update() {
     die "Unable to activate the prepared release; the previous version is still installed."
   fi
   systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
+  maintenance_progress health 90 "正在检查新版本与网站页面"
   if ! wait_for_api_health_soft 30 || ! verify_web_routes_soft; then
     rollback_atomic_update
     return 1
@@ -609,6 +626,13 @@ activate_atomic_update() {
 run_atomic_update() {
   prepare_atomic_update
   activate_atomic_update
+}
+stage_maintenance_helpers() {
+  helper_source="$1"
+  MAINTENANCE_HELPER_STAGE="$(mktemp -d)"
+  for file in maintenance-core.mjs maintenance-worker.mjs maintenance-progress.mjs; do
+    install -m 0600 "${helper_source}/scripts/${file}" "${MAINTENANCE_HELPER_STAGE}/${file}"
+  done
 }
 write_service() {
   node_bin="$(command -v node)"
@@ -637,6 +661,54 @@ Group=shiye
 [Install]
 WantedBy=multi-user.target
 SERVICE
+}
+
+write_maintenance_service() {
+  helper_dir=/usr/local/lib/shiye-maintenance
+  data_dir="/var/lib/shiye-maintenance/${APP_NAME}"
+  maintenance_unit="shiye-maintenance-${APP_NAME}"
+  config_file="/etc/${maintenance_unit}.json"
+  node_bin="$(command -v node)"
+  mysql_bin="$(command -v mariadb || command -v mysql)"
+  dump_bin="$(command -v mariadb-dump || command -v mysqldump)"
+  [ -n "${mysql_bin}" ] && [ -n "${dump_bin}" ] || die "MySQL client and dump utilities are required for website migration"
+  install -d -m 0755 "${helper_dir}"
+  for file in maintenance-core.mjs maintenance-worker.mjs maintenance-progress.mjs; do
+    install -m 0644 "${MAINTENANCE_HELPER_STAGE}/${file}" "${helper_dir}/${file}"
+  done
+  rm -rf "${MAINTENANCE_HELPER_STAGE}"
+  install -d -m 2750 -o root -g shiye "${data_dir}" "${data_dir}/jobs"
+  install -d -m 2770 -o root -g shiye "${data_dir}/requests" "${data_dir}/uploads"
+  node --input-type=module - "${config_file}" "${APP_DIR}" "${APP_NAME}" "${data_dir}" "${helper_dir}" "$(id -u shiye)" "$(id -g shiye)" "${mysql_bin}" "${dump_bin}" <<'NODE'
+import {writeFileSync} from 'node:fs';
+const [path,appDir,service,dataDir,helperDir,uid,gid,mysql,dump]=process.argv.slice(2);
+writeFileSync(path,JSON.stringify({appDir,service,dataDir,helperDir,uid:Number(uid),gid:Number(gid),mysql,dump}),{mode:0o600});
+writeFileSync(dataDir+'/ready.json',JSON.stringify({protocol:1}),{mode:0o640});
+NODE
+  chown root:shiye "${data_dir}/ready.json"
+  cd "${APP_DIR}"
+  set_env_value SHIYE_MAINTENANCE_DIR "${data_dir}"
+  cat > "/etc/systemd/system/${maintenance_unit}.service" <<SERVICE
+[Unit]
+Description=Shiye update and migration worker (${APP_NAME})
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=${node_bin} ${helper_dir}/maintenance-worker.mjs ${config_file}
+TimeoutStartSec=1800
+UMask=0027
+SERVICE
+  cat > "/etc/systemd/system/${maintenance_unit}.path" <<SERVICE
+[Unit]
+Description=Shiye maintenance queue (${APP_NAME})
+[Path]
+DirectoryNotEmpty=${data_dir}/requests
+Unit=${maintenance_unit}.service
+[Install]
+WantedBy=multi-user.target
+SERVICE
+  systemctl daemon-reload
+  systemctl enable --now "${maintenance_unit}.path"
 }
 
 installed_release_identity() {
@@ -787,7 +859,11 @@ server {
   listen 80;
   server_name ${DOMAIN};
 
+  client_max_body_size 2g;
+  client_body_timeout 900s;
   location / {
+    proxy_read_timeout 900s;
+    proxy_request_buffering off;
     proxy_pass http://127.0.0.1:${PORT};
     proxy_http_version 1.1;
     proxy_set_header Host \$host;
@@ -965,7 +1041,11 @@ server {
   listen 80;
   server_name \${domain};
 
+  client_max_body_size 2g;
+  client_body_timeout 900s;
   location / {
+    proxy_read_timeout 900s;
+    proxy_request_buffering off;
     proxy_pass http://127.0.0.1:\${port};
     proxy_http_version 1.1;
     proxy_set_header Host \\\$host;
@@ -1326,6 +1406,7 @@ main() {
     cleanup_runtime_files
     verify_runtime_files
 
+    stage_maintenance_helpers "${APP_DIR}"
     log "Writing systemd service"
     write_service
     systemctl daemon-reload
@@ -1336,6 +1417,8 @@ main() {
   fi
 
   configure_optional_nginx
+
+  write_maintenance_service
 
   write_management_command
 

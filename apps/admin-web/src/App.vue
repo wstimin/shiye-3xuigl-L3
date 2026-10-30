@@ -38,7 +38,7 @@ const navSections = [
       { to: '/payments', label: '支付设置', icon: ReceiptText }
     ]
   },
-  { label: '系统配置', items: [{ to: '/settings', label: '系统设置', icon: Settings }] }
+  { label: '系统配置', items: [{ to: '/settings', label: '系统设置', icon: Settings }, { to: '/maintenance', label: '更新与迁移', icon: ShieldCheck }] }
 ];
 
 const checking = ref(true);

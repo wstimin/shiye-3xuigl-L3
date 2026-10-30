@@ -1,3 +1,4 @@
+import { maintenanceBackground } from '../../shared/maintenance-state.js';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
@@ -94,11 +95,13 @@ export class ExternalCardsService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async recoverCredits() {
+    return maintenanceBackground(async () => {
     const pending = await this.prisma.externalCardRedemption.findMany({ where: { status: 'activated' }, orderBy: { updatedAt: 'asc' }, take: 20 });
     for (const receipt of pending) {
       try { await this.locks.withLock(`card:${receipt.codeHash.slice(0, 40)}`, () => this.credit(receipt.id)); }
       catch { this.logger.warn(`卡密入账等待重试：${receipt.id}`); }
     }
+    });
   }
 }
 

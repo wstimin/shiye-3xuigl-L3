@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { XuiService } from '../xui/xui.service.js';
 import { DatabaseLockService } from '../../shared/database-lock.service.js';
+import { maintenanceBackground } from '../../shared/maintenance-state.js';
 
 type DisableExpiredResult = {
   customerNodeId: string;
@@ -62,6 +63,7 @@ export class JobsService {
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async disableExpiredOnSchedule() {
+    return maintenanceBackground(async () => {
     if (this.disableExpiredRunning) return;
     const settings = await this.jobSettings();
     if (!settings.disableExpiredEnabled) return;
@@ -73,10 +75,12 @@ export class JobsService {
     } catch (error) {
       this.logger.error(`到期节点停用任务失败：${this.errorMessage(error)}`);
     }
+    });
   }
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async disableTrafficExceededOnSchedule() {
+    return maintenanceBackground(async () => {
     if (this.disableTrafficExceededRunning) return;
     const settings = await this.jobSettings();
     if (!settings.trafficSyncEnabled) return;
@@ -88,6 +92,7 @@ export class JobsService {
     } catch (error) {
       this.logger.error(`流量超限停用任务失败：${this.errorMessage(error)}`);
     }
+    });
   }
 
   async jobSettings(): Promise<JobSettings> {

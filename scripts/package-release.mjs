@@ -34,6 +34,9 @@ const runtimeScripts = [
   'deploy-check.mjs',
   'install-check.mjs',
   'install.mjs',
+  'maintenance-core.mjs',
+  'maintenance-worker.mjs',
+  'maintenance-progress.mjs',
   'panel-start.mjs',
   'sync-admin.mjs'
 ];

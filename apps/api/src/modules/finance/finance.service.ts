@@ -1,3 +1,4 @@
+import { maintenanceBackground } from '../../shared/maintenance-state.js';
 import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
@@ -211,6 +212,7 @@ export class FinanceService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async recoverPendingRenewals() {
+    return maintenanceBackground(async () => {
     if (this.renewalRecoveryRunning) return;
     this.renewalRecoveryRunning = true;
     try {
@@ -230,6 +232,7 @@ export class FinanceService {
     } finally {
       this.renewalRecoveryRunning = false;
     }
+    });
   }
 
   private async resumeExistingRenewal(id: string, customerId: string, customerNodeId: string, months: number, operator: string) {

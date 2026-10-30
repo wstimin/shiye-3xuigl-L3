@@ -486,6 +486,44 @@ input:focus, select:focus, textarea:focus { outline-color: #b77900; }
 .management-dialog-toolbar, .log-detail-meta, .diagnostics-detail-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 
 /* Diagnostics */
+.maintenance-version, .maintenance-section-title { display: flex; align-items: center; gap: 10px; }
+.maintenance-version { background: var(--primary-soft); border: 1px solid #f3dfa1; border-radius: 6px; padding: 8px 12px; color: #785400; white-space: nowrap; }
+.maintenance-section-title > svg { color: #a87500; }
+.maintenance-section-title p { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.maintenance-version-grid, .maintenance-migration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.maintenance-version-grid { padding: 20px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.maintenance-version-grid > div { display: grid; gap: 6px; }
+.maintenance-version-grid span, .maintenance-note, .maintenance-version-grid small { color: var(--muted); font-size: 12px; }
+.maintenance-version-grid strong { font-size: 25px; font-weight: 650; }
+.maintenance-note { line-height: 1.8; margin-top: 16px; }
+.maintenance-release { display: grid; gap: 16px; padding-top: 16px; }
+.maintenance-release > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; }
+.maintenance-release a { color: #8c5c00; }
+.maintenance-release details { border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+.maintenance-release summary { cursor: pointer; font-weight: 600; }
+.maintenance-release details p { padding-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; max-height: 260px; overflow-y: auto; }
+.maintenance-release > .el-button { justify-self: start; }
+.maintenance-progress-copy { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.maintenance-progress-copy > span { color: #8c5c00; font-variant-numeric: tabular-nums; }
+.maintenance-progress { height: 8px; border-radius: 4px; overflow: hidden; background: #f0f1f3; }
+.maintenance-progress > span { display: block; height: 100%; border-radius: inherit; background: #dba500; transition: width .2s ease; }
+.maintenance-failure, .maintenance-recovery { display: flex; align-items: flex-start; gap: 12px; border-radius: 6px; padding: 14px; border: 1px solid #f1d2ce; background: #fff7f6; color: #a52b20; }
+.maintenance-failure p, .maintenance-recovery p { margin-top: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.maintenance-recovery { margin-top: 12px; border-color: #eee1b7; background: #fffaf0; color: #8a6500; }
+.maintenance-recovery.recovery-succeeded { border-color: #cde7d4; background: #f4fbf6; color: #15803d; }
+.maintenance-includes, .maintenance-steps { margin: 20px 0; padding-left: 20px; color: #4b5563; line-height: 2.1; font-size: 12px; }
+.maintenance-file { display: flex; align-items: center; gap: 10px; padding: 20px 14px; border: 1px dashed #ced3da; border-radius: 6px; background: var(--surface-soft); position: relative; margin-bottom: 14px; cursor: pointer; overflow-wrap: anywhere; }
+.maintenance-file input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.maintenance-file:focus-within { outline: 2px solid #b77900; outline-offset: 2px; }
+.maintenance-file:has(input:disabled) { opacity: .6; cursor: not-allowed; }
+.maintenance-upload { display: grid; gap: 8px; margin-top: 16px; }
+.maintenance-inspection { margin-top: 18px; padding: 16px; border: 1px solid #cde7d4; background: #f8fcf9; border-radius: 6px; }
+.maintenance-inspection > strong { display: flex; gap: 8px; align-items: center; color: #15803d; }
+.maintenance-inspection dl { display: grid; gap: 8px; font-size: 12px; }
+.maintenance-inspection dl > div { display: flex; gap: 12px; }
+.maintenance-inspection dt { color: var(--muted); flex: 0 0 60px; }
+.maintenance-inspection dd { margin: 0; overflow-wrap: anywhere; }
+.maintenance-download { display: inline-flex; margin-top: 16px; gap: 8px; align-items: center; }
 .diagnostics-health-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .diagnostics-health-page > *, .diagnostics-score-copy { min-width: 0; }
 .diagnostics-score-title { flex-wrap: wrap; }
@@ -585,6 +623,9 @@ input:focus, select:focus, textarea:focus { outline-color: #b77900; }
   .intro-content h1 { font-size: 28px; }
 }
 @media (max-width: 700px) {
+  .maintenance-migration-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .maintenance-version-grid { gap: 12px; }
+  .maintenance-version-grid strong { font-size: 21px; }
   .panel-fields { grid-template-columns: minmax(0, 1fr); }
   .panel-task-form, .panel-result { padding: 16px; }
   .panel-field-nested { padding: 12px; }

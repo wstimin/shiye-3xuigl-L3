@@ -15,7 +15,8 @@ const viewLoaders: Record<string, () => Promise<{ default: Component }>> = {
   '/finance': () => import('./views/FinanceView.vue'),
   '/cards': () => import('./views/CardsView.vue'),
   '/payments': () => import('./views/PaymentsView.vue'),
-  '/settings': () => import('./views/SettingsView.vue')
+  '/settings': () => import('./views/SettingsView.vue'),
+  '/maintenance': () => import('./views/MaintenanceView.vue')
 };
 
 export const routeLoading = ref(false);
