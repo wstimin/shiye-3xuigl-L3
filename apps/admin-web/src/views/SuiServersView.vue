@@ -129,6 +129,7 @@ const editorSchema = computed((): FieldSchema => {
             "mixed",
             "hysteria2",
             "tuic",
+            "anytls",
           ],
         },
         tag: { type: "string" },
@@ -155,6 +156,7 @@ const editorSchema = computed((): FieldSchema => {
             "trojan",
             "hysteria2",
             "tuic",
+            "anytls",
           ],
         },
         tag: { type: "string" },
@@ -1263,7 +1265,7 @@ onMounted(async () => {
             </button>
           </footer>
         </form>
-        <label v-if="createServerId && editor" class="hub-form" style="margin-bottom: 20px">入站协议<select v-model="createProtocol" aria-label="新建入站协议" :disabled="busy"><option value="" disabled>请选择协议</option><option v-for="protocol in editorSchema.properties?.type?.enum" :key="String(protocol)" :value="String(protocol)">{{ String(protocol).toUpperCase() }}</option></select></label>
+        <label v-if="createServerId && editor" class="hub-form" style="margin-bottom: 20px">入站协议<select v-model="createProtocol" aria-label="新建入站协议" :disabled="busy"><option value="" disabled>请选择协议</option><option v-for="protocol in editorSchema.properties?.type?.enum" :key="String(protocol)" :value="String(protocol)">{{ String(protocol).toLowerCase() }}</option></select></label>
         <form v-if="!connectionDialog && (!createServerId || createProtocol)" class="hub-form" @submit.prevent="saveResource">
           <template v-if="resource === 'clients'">
             <div class="hub-form-grid">
@@ -1354,6 +1356,7 @@ onMounted(async () => {
           <p v-if="editorError" class="form-error" role="alert">
             {{ editorError }}
           </p>
+          <p v-if="resource === 'inbounds' && (editorRecord as Row).type === 'anytls'" class="muted-text">anytls 需要 TLS，请选择已配置的证书；客户端使用密码认证。</p>
           <div v-if="confirmSave" class="hub-alert" role="alert">
             <CircleAlert :size="18" /><span
               >即将修改远端配置，可能触发核心重启并中断连接。确认后再次点击保存。</span

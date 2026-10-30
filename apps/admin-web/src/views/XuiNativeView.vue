@@ -654,7 +654,7 @@ onMounted(async () => {
           class="panel-task-form hub-form"
           @submit.prevent="execute"
         >
-          <label v-if="createServerId">入站协议<select :value="createProtocol" aria-label="新建入站协议" :disabled="running || !prepared" @change="selectCreateProtocol"><option value="" disabled>请选择协议</option><option v-for="protocol in bodySchema.properties?.protocol?.enum || xrayInboundProtocols" :key="String(protocol)" :value="String(protocol)">{{ String(protocol).toUpperCase() }}</option></select></label>
+          <label v-if="createServerId">入站协议<select :value="createProtocol" aria-label="新建入站协议" :disabled="running || !prepared" @change="selectCreateProtocol"><option value="" disabled>请选择协议</option><option v-for="protocol in bodySchema.properties?.protocol?.enum || xrayInboundProtocols" :key="String(protocol)" :value="String(protocol)">{{ String(protocol).toLowerCase() }}</option></select></label>
           <template v-if="!createServerId || createProtocol">
           <header v-if="!createServerId" class="panel-task-heading">
             <Settings2 :size="18" />

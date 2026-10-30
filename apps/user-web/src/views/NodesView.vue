@@ -241,7 +241,7 @@ onMounted(loadNodes);
       <div class="node-list">
         <details v-for="node in filteredNodes" :id="'service-' + node.id" :key="node.id" class="node-entry" :open="String(route.query.node || '') === node.id">
           <summary class="node-summary">
-            <div class="service-identity"><span class="protocol-symbol">{{ node.serviceNode.protocol.slice(0, 1).toUpperCase() }}</span><div><strong>{{ node.serviceNode.name }}</strong><small>{{ node.serviceNode.server.name }} · {{ node.serviceNode.protocol.toUpperCase() }}</small></div></div>
+            <div class="service-identity"><span class="protocol-symbol">{{ node.serviceNode.protocol.slice(0, 1).toLowerCase() }}</span><div><strong>{{ node.serviceNode.name }}</strong><small>{{ node.serviceNode.server.name }} · {{ node.serviceNode.protocol.toLowerCase() }}</small></div></div>
             <div class="summary-usage"><strong>{{ node.trafficStatus === 'live' ? node.officialTrafficUnlimited ? '无限流量' : hasFiniteTrafficQuota(node) ? formatTraffic(Number(node.officialTrafficRemainingBytes)) + ' 剩余' : '额度未返回' : '用量暂不可用' }}</strong><small>{{ Number(node.serviceNode.priceMonthly).toFixed(2) }} 元 / 月</small></div>
             <div class="summary-expiry"><strong>{{ node.expireAt ? new Date(node.expireAt).toLocaleDateString('zh-CN') : '长期有效' }}</strong><small>{{ node.links?.length || 0 }} 个连接入口</small></div>
             <span class="status-pill" :class="nodeStatusHint(node).type"><i></i>{{ nodeStatusHint(node).label }}</span>

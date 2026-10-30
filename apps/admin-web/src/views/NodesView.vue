@@ -101,11 +101,11 @@ type TrafficSyncResult = {
 type RegionDefinition = { value: string; label: string; keywords: string[]; codes?: string[] };
 
 const protocolOptions = [
-  { label: 'VLESS', value: 'vless' },
-  { label: 'VMess', value: 'vmess' },
-  { label: 'Trojan', value: 'trojan' },
-  { label: 'Shadowsocks', value: 'shadowsocks' },
-  { label: 'Hysteria', value: 'hysteria' }
+  { label: 'vless', value: 'vless' },
+  { label: 'vmess', value: 'vmess' },
+  { label: 'trojan', value: 'trojan' },
+  { label: 'shadowsocks', value: 'shadowsocks' },
+  { label: 'hysteria', value: 'hysteria' }
 ];
 const encryptionOptions = [
   { label: '无加密', value: 'none' },
@@ -575,7 +575,7 @@ function ownershipLabel(ownership: ServiceNode['ownership']) {
 }
 
 function protocolLabel(protocol: string) {
-  return protocolOptions.find((item) => item.value === protocol)?.label || protocol.toUpperCase();
+  return protocol.toLowerCase();
 }
 
 function transportLabel(transport?: string) {
