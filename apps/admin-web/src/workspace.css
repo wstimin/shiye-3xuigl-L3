@@ -52,8 +52,6 @@
 .dashboard-workspace-link > div { display: grid; gap: 4px; flex: 1; }
 .dashboard-workspace-link small, .dashboard-workspace-link p { color: var(--muted); font-size: 14px; }
 .dashboard-workspace-link > span:first-child { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 12px; color: var(--primary-strong); font-size: 22px; }
-.hub-button.primary, .el-button--primary:not(.is-plain):not(.is-disabled) { color: var(--on-primary); background: var(--primary); border-color: var(--primary); }
-.hub-button.primary:hover { background: var(--primary-hover); }
 .el-loading-mask { background-color: color-mix(in srgb, var(--surface) 86%, transparent); }
 
 @media (max-width: 1200px) { .overview-shell .route-stage { padding: 24px; } .overview-shell .topbar { padding: 0 24px; } }

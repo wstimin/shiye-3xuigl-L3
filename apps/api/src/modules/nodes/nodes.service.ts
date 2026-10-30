@@ -825,14 +825,15 @@ export class NodesService {
     const serviceNodes = await this.prisma.serviceNode.findMany({ select: { id: true, name: true, config: true } });
     const used = serviceNodes.find((node) => jsonObject(node.config).socksNodeId === id);
     if (used) throw new BadRequestException(`Socks 节点正在被服务节点“${used.name}”使用，请先关闭或更换该服务节点的 Socks 中转`);
-    const importedReference = Boolean(node.sourceServerId && node.remoteOutboundTag);
+    const source = node.sourceServerId ? await this.prisma.xuiServer.findUnique({ where: { id: node.sourceServerId }, select: { provider: true } }) : null;
+    const importedReference = Boolean(node.sourceServerId && node.remoteOutboundTag && source?.provider !== 'sui');
     if (importedReference && !takeover) {
       throw new BadRequestException('该 Socks 节点来自官方面板。删除远端出站及其路由前必须明确确认接管删除');
     }
     let remoteDeleted = false;
     try {
       let remoteDelete: unknown = null;
-      if (node.sourceServerId && node.remoteOutboundTag) {
+      if (importedReference && node.sourceServerId && node.remoteOutboundTag) {
         const outbound = await this.prisma.networkOutbound.findUnique({
           where: { serverId_tag: { serverId: node.sourceServerId, tag: node.remoteOutboundTag } },
           select: { id: true }

@@ -39,6 +39,9 @@ export class SuiController {
   @Post(':id/sync') sync(@Param('id') id: string) {
     return this.business.sync(id);
   }
+  @Post(':id/sync-socks') copySocksTemplates(@Param('id') id: string) {
+    return this.sui.copySocksTemplates(id);
+  }
   @Get(':id/business-nodes') businessNodes(@Param('id') id: string) {
     return this.business.list(id);
   }

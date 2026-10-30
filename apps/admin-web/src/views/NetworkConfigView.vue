@@ -17,7 +17,6 @@ import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/switch/style/css';
 import 'element-plus/es/components/tab-pane/style/css';
 import 'element-plus/es/components/tabs/style/css';
-import 'element-plus/es/components/tooltip/style/css';
 import {
   ElAlert,
   ElButton,
@@ -31,24 +30,18 @@ import {
   ElSelect,
   ElSwitch,
   ElTabPane,
-  ElTabs,
-  ElTooltip
+  ElTabs
 } from 'element-plus';
 import {
   ArrowDownToLine,
-  CloudOff,
   CloudUpload,
-  Code2,
-  Edit3,
   GitBranch,
   Network,
   Plus,
   RefreshCw,
   Route,
   Search,
-  Server,
-  ShieldCheck,
-  Trash2
+  ShieldCheck
 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
@@ -521,7 +514,7 @@ onMounted(loadResources);
       <el-tab-pane label="路由规则" name="routes" />
       <el-tab-pane label="SOCKS 中转模板" name="library" />
     </el-tabs>
-    <SocksNodesView v-if="activeTab === 'library'" embedded />
+    <SocksNodesView v-if="activeTab === 'library'" embedded :provider="provider" />
     <SuiServersView v-else-if="provider === 'sui'" network-only :network-resource="activeTab === 'routes' ? 'config' : 'outbounds'" />
     <template v-else>
     <div class="metric-grid operations-stat-grid">
@@ -547,63 +540,33 @@ onMounted(loadResources);
         <el-button text @click="resetFilters">重置</el-button>
       </div>
 
-      <div v-loading="loading" class="entity-card-grid network-resource-grid">
-        <template v-if="activeTab === 'outbounds'">
-          <article v-for="outbound in filteredOutbounds" :key="outbound.id" class="network-resource-card entity-runtime-card" :class="outbound.lastSyncedAt ? 'runtime-state-online' : 'runtime-state-unknown'">
-            <header class="network-resource-card-header">
-              <div class="network-resource-identity">
-                <span class="network-resource-icon entity-name-avatar">{{ entityInitial(outbound.name, '出') }}</span>
-                <div><strong :title="outbound.name">{{ outbound.name }}</strong><span :title="outbound.tag">{{ outbound.tag }}</span></div>
-              </div>
-              <span class="network-resource-status" :class="outbound.lastSyncedAt ? 'is-synced' : 'is-local'"><i></i>{{ outbound.lastSyncedAt ? '已同步' : '仅本地' }}</span>
-            </header>
-            <div class="network-resource-metrics runtime-metric-grid">
-              <div class="runtime-metric tone-cyan"><span>协议</span><strong>{{ outbound.protocol.toUpperCase() }}</strong></div>
-              <div class="runtime-metric tone-indigo"><span>来源格式</span><strong>{{ sourceFormatLabel(outbound.sourceFormat) }}</strong></div>
-              <div class="runtime-metric tone-emerald"><span>关联路由</span><strong>{{ outbound._count.routes }}</strong></div>
-            </div>
-            <div class="network-resource-runtime-info runtime-endpoint-line"><span class="runtime-endpoint-value"><Server :size="13" /><strong :title="outbound.server.name">{{ outbound.server.name }}</strong></span></div>
-            <div class="network-resource-summary runtime-summary-line"><span class="network-resource-tag">{{ ownershipLabel(outbound.ownership) }}</span><span class="runtime-summary-note">同步：{{ formatDate(outbound.lastSyncedAt) }}</span></div>
-            <footer class="network-resource-actions runtime-card-footer">
-              <span class="runtime-footer-label"><Network :size="13" />{{ outbound.protocol.toUpperCase() }} · {{ outbound.tag }}</span>
-              <div class="runtime-action-group">
-                <el-tooltip content="修改出站名称" placement="top"><el-button class="runtime-icon-button" aria-label="修改出站名称" @click="renameOutbound(outbound)"><Edit3 :size="15" /></el-button></el-tooltip>
-                <el-tooltip content="查看出站详情" placement="top"><el-button class="runtime-icon-button" aria-label="查看出站详情" @click="showOutboundConfig(outbound)"><Code2 :size="15" /></el-button></el-tooltip>
-                <el-tooltip content="仅删除本地记录" placement="top"><el-button class="runtime-icon-button" :loading="deletingIds.has(outbound.id)" aria-label="仅删除本地记录" @click="deleteOutbound(outbound, false)"><Trash2 :size="15" /></el-button></el-tooltip>
-                <el-tooltip :content="outbound.remoteFingerprint ? (outbound.ownership === 'managed' ? '删除远端出站与本地记录' : '接管并删除远端出站与本地记录') : '缺少已确认的远端状态，不能删除远端'" placement="top"><el-button class="runtime-icon-button danger" :disabled="!outbound.remoteFingerprint" :loading="deletingIds.has(outbound.id)" aria-label="删除远端出站" @click="deleteOutbound(outbound, true)"><CloudOff :size="15" /></el-button></el-tooltip>
-              </div>
-            </footer>
-          </article>
-          <div v-if="!loading && !filteredOutbounds.length" class="empty-panel network-empty"><Network :size="26" /><strong>暂无符合条件的出站</strong><span>从右上角导入分享链接、订阅或面板导出的配置文件。</span></div>
-        </template>
-
-        <template v-else>
-          <article v-for="route in filteredRoutes" :key="route.id" class="network-resource-card entity-runtime-card" :class="route.lastSyncedAt ? 'runtime-state-online' : 'runtime-state-unknown'">
-            <header class="network-resource-card-header">
-              <div class="network-resource-identity">
-                <span class="network-resource-icon entity-name-avatar">{{ entityInitial(route.name, '路') }}</span>
-                <div><strong :title="route.name">{{ route.name }}</strong><span :title="ruleSummary(route.normalizedConfig)">{{ ruleSummary(route.normalizedConfig) }}</span></div>
-              </div>
-              <span class="network-resource-status" :class="route.lastSyncedAt ? 'is-synced' : 'is-local'"><i></i>{{ route.lastSyncedAt ? '已同步' : '仅本地' }}</span>
-            </header>
-            <div class="network-resource-metrics runtime-metric-grid">
-              <div class="runtime-metric tone-cyan"><span>出站</span><strong>{{ route.outbound?.tag || String(route.normalizedConfig.outboundTag || '-') }}</strong></div>
-              <div class="runtime-metric tone-indigo"><span>服务节点</span><strong>{{ route.serviceNode?.name || '未关联' }}</strong></div>
-              <div class="runtime-metric tone-amber"><span>远端顺序</span><strong>{{ route.remoteOrder ?? '本地' }}</strong></div>
-            </div>
-            <div class="network-resource-runtime-info runtime-endpoint-line"><span class="runtime-endpoint-value"><Server :size="13" /><strong :title="route.server.name">{{ route.server.name }}</strong></span></div>
-            <div class="network-resource-summary runtime-summary-line"><span class="network-resource-tag">{{ ownershipLabel(route.ownership) }}</span><span class="runtime-summary-note">同步：{{ formatDate(route.lastSyncedAt) }}</span></div>
-            <footer class="network-resource-actions runtime-card-footer">
-              <span class="runtime-footer-label"><Route :size="13" />{{ route.serviceNode?.name || '全部入站' }}</span>
-              <div class="runtime-action-group">
-                <el-tooltip content="编辑路由" placement="top"><el-button class="runtime-icon-button" aria-label="编辑路由" @click="editRoute(route)"><Edit3 :size="15" /></el-button></el-tooltip>
-                <el-tooltip content="仅删除本地记录" placement="top"><el-button class="runtime-icon-button" :loading="deletingIds.has(route.id)" aria-label="仅删除本地记录" @click="deleteRoute(route, false)"><Trash2 :size="15" /></el-button></el-tooltip>
-                <el-tooltip :content="route.remoteFingerprint ? (route.ownership === 'managed' ? '删除远端路由与本地记录' : '接管并删除远端路由与本地记录') : '缺少已确认的远端状态，不能删除远端'" placement="top"><el-button class="runtime-icon-button danger" :disabled="!route.remoteFingerprint" :loading="deletingIds.has(route.id)" aria-label="删除远端路由" @click="deleteRoute(route, true)"><CloudOff :size="15" /></el-button></el-tooltip>
-              </div>
-            </footer>
-          </article>
-          <div v-if="!loading && !filteredRoutes.length" class="empty-panel network-empty"><GitBranch :size="26" /><strong>暂无符合条件的路由</strong><span>创建本地规则或直接写入目标官方面板。</span></div>
-        </template>
+      <div v-loading="loading" class="hub-table-wrap">
+        <table v-if="activeTab === 'outbounds'" class="hub-table resource-table" aria-label="3x-ui 出站列表">
+          <thead><tr><th>名称 / 标识</th><th>类型 / 来源</th><th>关联路由</th><th>所属面板</th><th>同步状态</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="outbound in filteredOutbounds" :key="outbound.id">
+              <td><div class="hub-entity"><span class="hub-avatar">{{ entityInitial(outbound.name, '出') }}</span><div><strong>{{ outbound.name }}</strong><small>{{ outbound.tag }}</small></div></div></td>
+              <td>{{ outbound.protocol }}<small class="resource-note">{{ sourceFormatLabel(outbound.sourceFormat) }}</small></td>
+              <td>{{ outbound._count.routes }} 条</td><td>{{ outbound.server.name }}<small class="resource-note">{{ ownershipLabel(outbound.ownership) }}</small></td>
+              <td><span class="status-pill" :class="{ off: !outbound.lastSyncedAt }">{{ outbound.lastSyncedAt ? '已同步' : '仅本地' }}</span><small class="resource-note">{{ formatDate(outbound.lastSyncedAt) }}</small></td>
+              <td><div class="hub-actions"><button class="hub-link" @click="renameOutbound(outbound)">改名</button><button class="hub-link" @click="showOutboundConfig(outbound)">详情</button><button class="hub-link danger" :disabled="deletingIds.has(outbound.id)" @click="deleteOutbound(outbound, false)">删除本地</button><button class="hub-link danger" :disabled="!outbound.remoteFingerprint || deletingIds.has(outbound.id)" :title="outbound.ownership === 'managed' ? '删除远端出站与本地记录' : '接管并删除远端出站与本地记录'" @click="deleteOutbound(outbound, true)">删除远端</button></div></td>
+            </tr>
+            <tr v-if="!loading && !filteredOutbounds.length"><td colspan="6" class="table-empty">暂无符合条件的出站，可导入分享链接或配置文件。</td></tr>
+          </tbody>
+        </table>
+        <table v-else class="hub-table resource-table" aria-label="3x-ui 路由列表">
+          <thead><tr><th>规则名称</th><th>关联入站 / 出站</th><th>顺序</th><th>所属面板</th><th>同步状态</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="route in filteredRoutes" :key="route.id">
+              <td><strong>{{ route.name }}</strong><small class="resource-note">{{ ruleSummary(route.normalizedConfig) }}</small></td>
+              <td>{{ route.serviceNode?.name || '全部入站' }}<small class="resource-note">出站：{{ route.outbound?.name || String(route.normalizedConfig.outboundTag || '未指定') }}</small></td>
+              <td>{{ route.remoteOrder ?? '本地' }}</td><td>{{ route.server.name }}<small class="resource-note">{{ ownershipLabel(route.ownership) }}</small></td>
+              <td><span class="status-pill" :class="{ off: !route.lastSyncedAt }">{{ route.lastSyncedAt ? '已同步' : '仅本地' }}</span><small class="resource-note">{{ formatDate(route.lastSyncedAt) }}</small></td>
+              <td><div class="hub-actions"><button class="hub-link" @click="editRoute(route)">编辑</button><button class="hub-link danger" :disabled="deletingIds.has(route.id)" @click="deleteRoute(route, false)">删除本地</button><button class="hub-link danger" :disabled="!route.remoteFingerprint || deletingIds.has(route.id)" :title="route.ownership === 'managed' ? '删除远端路由与本地记录' : '接管并删除远端路由与本地记录'" @click="deleteRoute(route, true)">删除远端</button></div></td>
+            </tr>
+            <tr v-if="!loading && !filteredRoutes.length"><td colspan="6" class="table-empty">暂无符合条件的路由，可创建规则并选择关联出站。</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
     </template>

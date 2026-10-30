@@ -6,6 +6,7 @@ import {
   NotFoundException
 } from '@nestjs/common';
 import { suiObjects, SuiClient } from '@shiye/xui-client';
+import { socksNodeUpsertSchema } from '@shiye/shared';
 import type {
   suiControlSchema,
   suiSaveSchema,
@@ -44,6 +45,37 @@ export class SuiService {
       where: { provider: 'sui' },
       select: publicFields,
       orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  copySocksTemplates(id: string) {
+    return this.locks.withLock(this.locks.panelOperationKey(id), async () => {
+      const server = await this.stored(id);
+      const client = await this.client(id);
+      const response = await this.remote(() => client.read('outbounds'));
+      if (!Array.isArray(response.outbounds)) throw new BadGatewayException('S-UI 出站响应无效');
+      const socks = (response.outbounds as Record<string, unknown>[]).filter(row => row && typeof row === 'object' && row.type === 'socks');
+      let skipped = 0;
+      const imported = await this.prisma.$transaction(async tx => {
+        const ids: string[] = [];
+        const used = new Set((await tx.serviceNode.findMany({ select: { config: true } })).map(node => (node.config as Prisma.JsonObject | null)?.socksNodeId));
+        for (const row of socks) {
+          const tag = typeof row.tag === 'string' ? row.tag.trim() : '';
+          const parsed = socksNodeUpsertSchema.safeParse({ name: `${server.name} ${tag}`.slice(0, 120), host: row.server, port: row.server_port, username: row.username, password: row.password });
+          if (!tag || tag.length > 120 || String(row.version || '5') !== '5' || (row.tls as Record<string, unknown>)?.enabled === true || !parsed.success) { skipped++; continue; }
+          const input = parsed.data;
+          const existing = await tx.socksNode.findFirst({ where: { sourceServerId: id, remoteOutboundTag: tag } });
+          if (existing && used.has(existing.id)) { skipped++; continue; }
+          const data = { host: input.host, port: input.port, username: input.username || null, passwordEnc: this.encryption.encryptNullable(input.password) };
+          const saved = existing
+            ? await tx.socksNode.update({ where: { id: existing.id }, data })
+            : await tx.socksNode.create({ data: { ...data, name: input.name, enabled: true, sourceServerId: id, remoteOutboundTag: tag, remark: '从 S-UI 复制的独立 SOCKS 模板' } });
+          ids.push(saved.id);
+        }
+        return ids;
+      });
+      await this.log(id, 'SOCKS模板', '复制');
+      return { imported: imported.length, skipped };
     });
   }
 

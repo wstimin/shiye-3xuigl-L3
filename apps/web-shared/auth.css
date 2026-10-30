@@ -49,7 +49,7 @@
 .auth-submit { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 52px; padding: 14px 18px; border: 1px solid var(--primary); border-radius: 10px; background: var(--primary); color: var(--on-primary); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; transition: background-color 140ms ease, transform 140ms ease-out; }
 .auth-submit:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
 .auth-submit:active:not(:disabled) { transform: scale(.985); }
-.auth-submit:disabled { opacity: .5; cursor: not-allowed; }
+.auth-submit:disabled { opacity: 1; cursor: not-allowed; color: var(--muted); background: var(--surface-soft); border-color: var(--border-strong); }
 .auth-assistance { display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--muted); font-size: 13px; line-height: 1.7; margin: 0; text-align: center; }
 .auth-assistance svg { flex-shrink: 0; }
 .auth-error { display: flex; align-items: flex-start; gap: 9px; padding: 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 8px; background: var(--danger-soft); color: var(--danger); font-size: 14px; }

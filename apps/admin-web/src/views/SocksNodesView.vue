@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-defineProps<{ embedded?: boolean }>();
+const props = defineProps<{ embedded?: boolean; provider?: 'xui' | 'sui' }>();
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/button/style/css';
 import 'element-plus/es/components/checkbox/style/css';
@@ -12,24 +12,18 @@ import 'element-plus/es/components/input-number/style/css';
 import 'element-plus/es/components/option/style/css';
 import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/switch/style/css';
-import 'element-plus/es/components/tooltip/style/css';
-import { ElAlert, ElButton, ElCheckbox, ElDialog, ElForm, ElFormItem, ElInput, ElInputNumber, ElMessage, ElMessageBox, ElOption, ElSelect, ElSwitch, ElTooltip } from 'element-plus';
+import { ElAlert, ElButton, ElCheckbox, ElDialog, ElForm, ElFormItem, ElInput, ElInputNumber, ElMessage, ElMessageBox, ElOption, ElSelect, ElSwitch } from 'element-plus';
 import {
   CheckCircle2,
   Clipboard,
-  CloudCog,
   Download,
-  Edit3,
   Eye,
   KeyRound,
   Link2,
-  Network,
   Plus,
   RefreshCw,
   Search,
-  Server,
-  ShieldCheck,
-  Trash2
+  ShieldCheck
 } from 'lucide-vue-next';
 import { readableError } from '@shiye/shared';
 import { api } from '../api';
@@ -53,11 +47,15 @@ type SocksNode = {
   syncTasks?: SyncTask[];
 };
 type ServiceNode = { id: string; config?: { socksRelayEnabled?: boolean; socksNodeId?: string | null } | null };
-type XuiServer = { id: string; name: string; baseUrl: string; enabled: boolean };
+type PanelServer = { id: string; provider: string; name: string; baseUrl: string; enabled: boolean };
 
 const nodes = ref<SocksNode[]>([]);
 const serviceNodes = ref<ServiceNode[]>([]);
-const servers = ref<XuiServer[]>([]);
+const servers = ref<PanelServer[]>([]);
+const applying = ref<SocksNode | null>(null);
+const applyServerId = ref('');
+const applyName = ref('');
+const applyingBusy = ref(false);
 const loading = ref(false);
 const saving = ref(false);
 const syncingRemote = ref(false);
@@ -106,13 +104,13 @@ async function loadNodes() {
     const [socksResult, serviceResult, serverResult] = await Promise.all([
       api<SocksNode[]>('/api/admin/socks-nodes'),
       api<ServiceNode[]>('/api/admin/service-nodes'),
-      api<XuiServer[]>('/api/admin/xui-servers')
+      api<PanelServer[]>('/api/admin/panel-servers')
     ]);
     nodes.value = socksResult;
     serviceNodes.value = serviceResult;
     servers.value = serverResult;
     if (syncServerId.value && !enabledServers.value.some((server) => server.id === syncServerId.value)) syncServerId.value = '';
-    const firstEnabledServer = enabledServers.value[0];
+    const firstEnabledServer = enabledServers.value.find(server => server.provider === props.provider) || enabledServers.value[0];
     if (!syncServerId.value && firstEnabledServer) syncServerId.value = firstEnabledServer.id;
   } catch (err) {
     error.value = readableError(err, '加载SOCKS 中转模板失败');
@@ -143,13 +141,13 @@ async function saveNode() {
 async function syncRemoteSocks() {
   if (syncingRemote.value) return;
   if (!syncServerId.value) {
-    ElMessage.warning('请先选择要导入的 3x-ui 面板');
+    ElMessage.warning('请先选择来源面板');
     return;
   }
   const server = servers.value.find((item) => item.id === syncServerId.value);
   try {
     await ElMessageBox.confirm(
-      `确认从“${server?.name || '选中的面板'}”读取并从面板复制模板 出站？此操作只同步真实 SOCKS 出站到本地列表，不会创建远端规则。`,
+      `从“${server?.name || '选中的面板'}”复制 SOCKS 模板到本地？此操作不会创建远端规则。`,
       '从面板复制模板',
       { type: 'warning', customClass: 'socks-message-box' }
     );
@@ -159,14 +157,43 @@ async function syncRemoteSocks() {
   syncingRemote.value = true;
   error.value = '';
   try {
-    await api(`/api/admin/xui-servers/${syncServerId.value}/sync-socks`, { method: 'POST' });
-    ElMessage.success('导入成功');
+    const result = await api<{ imported?: number; skipped?: number; remoteSocksImported?: number }>(`/api/admin/${server?.provider === 'sui' ? 'sui' : 'xui'}-servers/${syncServerId.value}/sync-socks`, { method: 'POST' });
+    const note = `已复制 ${result.imported ?? result.remoteSocksImported ?? 0} 个 SOCKS 模板`;
+    if (result.skipped) ElMessage.warning(`${note}；${result.skipped} 个不支持、无效或正在使用的模板已跳过`);
+    else ElMessage.success(note);
     await loadNodes();
   } catch (err) {
     showError(err, '从面板复制模板 失败');
   } finally {
     syncingRemote.value = false;
   }
+}
+
+function openApply(node: SocksNode) {
+  applying.value = node;
+  applyServerId.value = enabledServers.value.find(server => server.provider === props.provider)?.id || syncServerId.value || enabledServers.value[0]?.id || '';
+  applyName.value = node.name;
+}
+async function applyTemplate() {
+  const node = applying.value, server = servers.value.find(item => item.id === applyServerId.value);
+  if (!node || !server || !node.enabled || !server.enabled || !applyName.value.trim() || applyingBusy.value) return;
+  applyingBusy.value = true;
+  try {
+    const { password } = await api<{ password: string }>(`/api/admin/socks-nodes/${node.id}/secrets`);
+    if (password && !node.username) throw new Error('此模板有密码但未填写账号，请先编辑模板补齐账号');
+    if (server.provider === 'sui') {
+      await api(`/api/admin/sui-servers/${server.id}/save`, { method: 'POST', body: { object: 'outbounds', action: 'new', data: { type: 'socks', tag: applyName.value.trim(), server: node.host, server_port: node.port, version: '5', ...(node.username ? { username: node.username, password } : {}) } } });
+    } else {
+      const url = new URL('socks://127.0.0.1');
+      url.hostname = node.host.includes(':') ? `[${node.host.replace(/^\[|\]$/g, '')}]` : node.host;
+      url.port = String(node.port); url.username = node.username || ''; url.password = password || '';
+      const result = await api<OperationResult>('/api/admin/network-outbounds/import', { method: 'POST', body: { serverId: server.id, name: applyName.value.trim(), input: url.toString(), format: 'socks', strategy: 'target_panel', ownership: 'managed', conflict: 'reject', createRoute: false, inboundTags: [] } });
+      if (result.state && result.state !== 'success') throw new Error(result.message || '出站创建尚未完成，请先核对面板状态');
+    }
+    ElMessage.success('出站已创建，可在路由规则中选择并关联入站');
+    applying.value = null;
+  } catch (cause) { notifyError(cause, '使用 SOCKS 模板失败'); }
+  finally { applyingBusy.value = false; }
 }
 
 function openDialog() {
@@ -210,9 +237,9 @@ async function revealNodeSecret() {
 
 async function removeNode(node: SocksNode) {
   if (deletingIds.value.has(node.id)) return;
-  const remoteHint = isImportedNode(node)
+  const remoteHint = isRemoteManaged(node)
     ? '该节点来自官方面板。本次操作表示确认接管删除，并会同步删除远端对应 SOCKS 出站和全部引用规则。'
-    : '该节点由本地创建，只会删除本地记录。';
+    : '只删除本地模板，已有远端出站不受影响。';
   try {
     await ElMessageBox.confirm(
       `确认删除SOCKS 中转模板“${node.name}”？${remoteHint} 正在被服务入站使用时，后端会拒绝删除。`,
@@ -225,7 +252,7 @@ async function removeNode(node: SocksNode) {
   deletingIds.value = addPendingId(deletingIds.value, node.id);
   error.value = '';
   try {
-    const takeover = isImportedNode(node) ? '?takeover=true' : '';
+    const takeover = isRemoteManaged(node) ? '?takeover=true' : '';
     await api(`/api/admin/socks-nodes/${node.id}${takeover}`, { method: 'DELETE' });
     ElMessage.success('SOCKS 中转模板已删除');
     await loadNodes();
@@ -328,6 +355,9 @@ function serverName(id?: string | null) {
 function isImportedNode(node: SocksNode) {
   return Boolean(node.sourceServerId || node.remoteOutboundTag);
 }
+function isRemoteManaged(node: SocksNode) {
+  return Boolean(node.sourceServerId && node.remoteOutboundTag && servers.value.find(server => server.id === node.sourceServerId)?.provider !== 'sui');
+}
 
 function hasAuthentication(node: SocksNode) {
   return Boolean(node.username || node.hasPassword);
@@ -374,8 +404,8 @@ onMounted(loadNodes);
         <p>维护真实 SOCKS 出站连接；服务入站启用出站中转后会引用这里的地址与认证信息。</p>
       </div>
       <div class="socks-page-actions">
-        <el-select v-model="syncServerId" placeholder="选择来源面板" class="socks-server-select">
-          <el-option v-for="server in enabledServers" :key="server.id" :label="server.name" :value="server.id" />
+        <el-select v-model="syncServerId" aria-label="模板来源面板" placeholder="选择来源面板" class="socks-server-select">
+          <el-option v-for="server in enabledServers" :key="server.id" :label="`${server.provider === 'sui' ? 'S-UI' : '3x-ui'} · ${server.name}`" :value="server.id" />
         </el-select>
         <el-button class="socks-secondary-button" :loading="syncingRemote" :disabled="!syncServerId" @click="syncRemoteSocks"><Download :size="15" />从面板复制模板</el-button>
         <el-button class="socks-secondary-button" :loading="loading" @click="loadNodes"><RefreshCw :size="15" />刷新</el-button>
@@ -426,78 +456,39 @@ onMounted(loadNodes);
       <el-button v-if="hasActiveFilters" class="socks-reset-filter" text @click="resetFilters">重置</el-button>
     </div>
 
-    <div v-loading="loading" class="socks-card-grid">
-      <article v-for="node in filteredNodes" :key="node.id" class="socks-outbound-card entity-runtime-card" :class="node.syncTasks?.length ? 'runtime-state-error' : node.enabled ? 'runtime-state-online' : 'runtime-state-disabled'">
-        <header class="socks-card-header">
-          <div class="socks-card-identity">
-            <span class="socks-card-icon entity-name-avatar">{{ entityInitial(node.name, '出') }}</span>
-            <div>
-              <strong :title="node.name">{{ node.name }}</strong>
-              <span>SOCKS 出站 · {{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
-            </div>
-          </div>
-          <span class="socks-status-chip" :class="node.syncTasks?.length ? 'is-pending' : node.enabled ? 'is-enabled' : 'is-disabled'"><i></i>{{ node.syncTasks?.length ? '待同步' : node.enabled ? '已启用' : '已停用' }}</span>
-        </header>
-
-        <div class="socks-card-meta runtime-metric-grid">
-          <div class="runtime-metric tone-indigo"><span>认证方式</span><strong>{{ hasAuthentication(node) ? '已配置' : '无认证' }}</strong></div>
-          <div class="runtime-metric tone-cyan"><span>路由引用</span><strong>{{ usageCount(node.id) }} 个</strong></div>
-          <div class="runtime-metric" :class="isImportedNode(node) ? 'tone-amber' : 'tone-emerald'"><span>节点来源</span><strong>{{ isImportedNode(node) ? '远端导入' : '本地创建' }}</strong></div>
-        </div>
-
-        <div class="runtime-info-line runtime-endpoint-line socks-runtime-info">
-          <span class="runtime-endpoint-value"><Server :size="13" /><strong :title="node.host + ':' + node.port">{{ node.host }}:{{ node.port }}</strong></span>
-          <el-tooltip content="复制 SOCKS 地址" placement="top">
-            <button type="button" class="runtime-inline-copy socks-copy-button" aria-label="复制 SOCKS 地址" @click="copyEndpoint(node)"><Clipboard :size="12" /></button>
-          </el-tooltip>
-        </div>
-
-        <div class="runtime-summary-line socks-card-summary">
-          <div class="socks-card-tags">
-            <span class="socks-card-tag protocol">SOCKS</span>
-            <span class="socks-card-tag" :class="isImportedNode(node) ? 'imported' : 'manual'">{{ isImportedNode(node) ? '远端导入' : '本地创建' }}</span>
-            <span v-if="node.hasPassword" class="socks-card-tag password">已保存密码</span>
-            <span v-if="node.remoteOutboundTag" class="socks-card-tag outbound" :title="node.remoteOutboundTag">{{ node.remoteOutboundTag }}</span>
-            <span v-if="node.syncTasks?.length" class="socks-card-tag sync-pending" :title="node.syncTasks.map((task) => task.message || task.action).join('；')">待同步 {{ node.syncTasks.length }}</span>
-          </div>
-          <span class="runtime-summary-note" :title="[node.username || '未设置登录账号', usageCount(node.id) ? '正在被路由引用' : '暂未被引用', node.remark].filter(Boolean).join(' · ')"><KeyRound :size="12" />{{ node.username || '未设置登录账号' }} · {{ usageCount(node.id) ? '正在被路由引用' : '暂未被引用' }}<template v-if="node.remark"> · {{ node.remark }}</template></span>
-        </div>
-
-        <footer class="socks-card-actions runtime-card-footer">
-          <span class="runtime-footer-label"><Network :size="13" />{{ isImportedNode(node) ? (serverName(node.sourceServerId) || '远端面板') : '本地配置' }}</span>
-          <div class="runtime-action-group">
-          <el-tooltip v-if="node.syncTasks?.length" content="重试待同步任务" placement="top">
-            <el-button class="runtime-icon-button runtime-retry-button" :loading="retryingIds.has(node.id)" aria-label="重试待同步任务" @click="retryNodeTasks(node)"><RefreshCw :size="15" /></el-button>
-          </el-tooltip>
-          <el-tooltip content="编辑出站" placement="top">
-            <el-button class="runtime-icon-button" aria-label="编辑出站" @click="editNode(node)"><Edit3 :size="15" /></el-button>
-          </el-tooltip>
-          <el-tooltip :content="node.enabled ? '停用出站' : '启用出站'" placement="top">
-            <el-switch
-              class="runtime-toggle-switch"
-              :model-value="node.enabled"
-              :loading="togglingIds.has(node.id)"
-              :disabled="togglingIds.has(node.id)"
-              @change="(enabled: boolean | string | number) => toggleNodeEnabled(node, Boolean(enabled))"
-            />
-          </el-tooltip>
-          <el-tooltip content="删除SOCKS 中转模板" placement="top">
-            <el-button class="socks-delete-button runtime-icon-button" :loading="deletingIds.has(node.id)" aria-label="删除SOCKS 中转模板" @click="removeNode(node)"><Trash2 :size="15" /></el-button>
-          </el-tooltip>
-          </div>
-        </footer>
-      </article>
-
-      <div v-if="!filteredNodes.length && !loading" class="socks-empty-state">
-        <CloudCog :size="28" />
-        <strong>{{ nodes.length ? '没有符合筛选条件的SOCKS 中转模板' : '暂无SOCKS 中转模板' }}</strong>
-        <span>{{ nodes.length ? '调整筛选条件后再查看' : '使用右上角按钮添加真实 SOCKS 出站，或从已启用面板导入' }}</span>
-      </div>
+    <div v-loading="loading" class="hub-card hub-table-wrap">
+      <table class="hub-table resource-table" aria-label="SOCKS 模板列表">
+        <thead><tr><th>模板名称</th><th>连接地址</th><th>来源</th><th>认证 / 引用</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="node in filteredNodes" :key="node.id">
+            <td><div class="hub-entity"><span class="hub-avatar">{{ entityInitial(node.name, '出') }}</span><div><strong>{{ node.name }}</strong><small>{{ node.remark || 'socks5' }}</small></div></div></td>
+            <td>{{ node.host }}:{{ node.port }} <button class="hub-link" aria-label="复制 SOCKS 地址" @click="copyEndpoint(node)"><Clipboard :size="14" /></button></td>
+            <td>{{ serverName(node.sourceServerId) || '本地创建' }}<small class="resource-note">{{ isRemoteManaged(node) ? '关联远端出站' : '独立模板' }}<template v-if="node.remoteOutboundTag"> · {{ node.remoteOutboundTag }}</template></small></td>
+            <td>{{ hasAuthentication(node) ? '已配置认证' : '无认证' }}<small class="resource-note">{{ usageCount(node.id) }} 个服务入站引用</small></td>
+            <td><span class="status-pill" :class="{ off: !node.enabled }">{{ node.syncTasks?.length ? '待同步' : node.enabled ? '已启用' : '已停用' }}</span></td>
+            <td><div class="hub-actions">
+              <button class="hub-link" :disabled="!node.enabled" @click="openApply(node)">使用模板</button><button class="hub-link" @click="editNode(node)">编辑</button>
+              <button v-if="node.syncTasks?.length" class="hub-link" :disabled="retryingIds.has(node.id)" @click="retryNodeTasks(node)">重试同步</button>
+              <el-switch :model-value="node.enabled" :aria-label="node.enabled ? '停用模板' : '启用模板'" :loading="togglingIds.has(node.id)" :disabled="togglingIds.has(node.id)" @change="(enabled: boolean | string | number) => toggleNodeEnabled(node, Boolean(enabled))" />
+              <button class="hub-link danger" :disabled="deletingIds.has(node.id)" @click="removeNode(node)">删除</button>
+            </div></td>
+          </tr>
+          <tr v-if="!filteredNodes.length && !loading"><td colspan="6" class="table-empty">暂无符合条件的 SOCKS 模板，可添加模板或从 3x-ui、S-UI 面板复制。</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <footer class="socks-list-footer">显示 {{ filteredNodes.length }} / {{ nodes.length }} 个真实 SOCKS 出站</footer>
   </section>
 
+  <el-dialog :model-value="Boolean(applying)" title="使用 SOCKS 模板" width="min(560px, 94vw)" :close-on-click-modal="!applyingBusy" :close-on-press-escape="!applyingBusy" :show-close="!applyingBusy" @update:model-value="!applyingBusy && (applying = null)">
+    <el-form label-position="top">
+      <el-form-item label="目标面板"><el-select v-model="applyServerId" aria-label="模板目标面板" :disabled="applyingBusy" style="width: 100%"><el-option v-for="server in enabledServers" :key="server.id" :label="`${server.provider === 'sui' ? 'S-UI' : '3x-ui'} · ${server.name}`" :value="server.id" /></el-select></el-form-item>
+      <el-form-item label="出站名称"><el-input v-model="applyName" maxlength="120" :disabled="applyingBusy" placeholder="输入便于识别的名称" /></el-form-item>
+      <p class="muted-text">创建独立出站后，可在路由规则中选择它。后续修改模板不会改动此次创建的出站。</p>
+    </el-form>
+    <template #footer><el-button :disabled="applyingBusy" @click="applying = null">取消</el-button><el-button type="primary" :loading="applyingBusy" :disabled="!applyServerId || !applyName.trim()" @click="applyTemplate">创建出站</el-button></template>
+  </el-dialog>
   <el-dialog
     v-model="dialogVisible"
     :title="editingId ? '编辑 SOCKS 出站' : '添加 SOCKS 出站'"
@@ -509,7 +500,7 @@ onMounted(loadNodes);
       <ShieldCheck :size="18" />
       <div>
         <strong>{{ editingId ? '更新已保存的 SOCKS 出站配置' : '添加真实 SOCKS 出站连接' }}</strong>
-        <span>这里只保存当前系统实际支持的 SOCKS 地址与认证信息，服务入站引用后会同步写入对应远端 Xray。</span>
+        <span>保存地址与认证信息后，可用模板在 3x-ui 或 S-UI 创建出站，再选择路由关联入站。</span>
       </div>
     </div>
 

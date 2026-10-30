@@ -9,6 +9,7 @@ import {
   clonePanelValue,
   decodePanelValue,
   encodePanelValue,
+  fieldLabel,
   type FieldSchema,
 } from "../panel-fields";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
@@ -273,6 +274,13 @@ const rows = computed<Row[]>(() => {
     ? (value.filter((item) => item && typeof item === "object") as Row[])
     : [];
 });
+const networkRoute = computed(() => ((data.value as Row)?.config as Row)?.route as Row | undefined);
+const networkRules = computed(() => Array.isArray(networkRoute.value?.rules) ? networkRoute.value.rules as Row[] : []);
+function routeConditions(rule: Row) {
+  return Object.entries(rule).filter(([key]) => !['action', 'outbound', 'inbound'].includes(key)).map(([key, value]) =>
+    `${fieldLabel(key)}：${Array.isArray(value) ? value.every(item => typeof item !== 'object') ? value.join('、') : '组合条件' : typeof value === 'object' ? '组合条件' : String(value)}`
+  ).join('；') || '全部流量';
+}
 const filtered = computed(() =>
   rows.value.filter((row) =>
     JSON.stringify(row).toLowerCase().includes(search.value.toLowerCase()),
@@ -1001,6 +1009,7 @@ onMounted(async () => {
             }}</span>
           </h2>
           <div class="hub-actions">
+            <router-link v-if="resource === 'outbounds'" class="hub-button" to="/network-config?provider=sui&tab=library">SOCKS 模板</router-link>
             <label v-if="rows.length" class="hub-search"
               ><Search :size="16" /><input
                 v-model="search"
@@ -1028,7 +1037,7 @@ onMounted(async () => {
           "
           class="hub-table-wrap"
         >
-          <table class="hub-table">
+          <table class="hub-table" :class="{ 'resource-table': networkOnly }">
             <thead>
               <tr>
                 <th>名称 / 标识</th>
@@ -1133,6 +1142,13 @@ onMounted(async () => {
                 <td colspan="5" class="table-empty">没有匹配的资源</td>
               </tr>
             </tbody>
+          </table>
+        </div>
+        <div v-else-if="networkOnly && resource === 'config'" class="hub-table-wrap">
+          <table class="hub-table resource-table" aria-label="S-UI 路由列表">
+            <thead><tr><th>规则 / 顺序</th><th>关联入站</th><th>匹配条件</th><th>目标出站</th><th>操作</th></tr></thead>
+            <tbody><tr v-for="(rule, index) in networkRules" :key="index"><td>规则 {{ index + 1 }}<small class="resource-note">{{ ({ route: '转发', reject: '拒绝', sniff: '流量识别', resolve: '解析地址', 'hijack-dns': 'DNS 处理' } as Record<string, string>)[String(rule.action)] || '转发' }}</small></td><td>{{ Array.isArray(rule.inbound) && rule.inbound.length ? rule.inbound.join('、') : '全部入站' }}</td><td>{{ routeConditions(rule) }}</td><td>{{ rule.outbound || '按规则处理' }}</td><td><button class="hub-link" @click="editResource()">编辑</button></td></tr><tr v-if="!networkRules.length"><td colspan="5" class="table-empty">暂无路由规则，可在编辑配置中添加。</td></tr></tbody>
+            <tfoot><tr><td colspan="5">默认出站：{{ networkRoute?.final || '自动选择' }}</td></tr></tfoot>
           </table>
         </div>
         <div
