@@ -58,7 +58,7 @@ export function outboundMatches(actual: unknown, expected: unknown): boolean {
       actual &&
         typeof actual === "object" &&
         Object.entries(expected).every(
-          ([k, v]) => k === "id" || outboundMatches((actual as Row)[k], v),
+          ([k, v]) => outboundMatches((actual as Row)[k], v),
         ),
     );
   return isDeepStrictEqual(actual, expected);

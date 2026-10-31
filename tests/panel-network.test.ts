@@ -389,6 +389,7 @@ test("S-UI failed route association restores the old route and removes only the 
   );
 });
 test("missing outbounds and existing inbound IDs cannot write remote resources", async () => {
+  assert.equal(outboundMatches({settings:{users:[{id:'wrong-credential'}]}},{settings:{users:[{id:'expected-credential'}]}}),false);
   const f = fixture();
   await assert.rejects(
     () =>
