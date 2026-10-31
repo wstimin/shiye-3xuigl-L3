@@ -186,6 +186,7 @@ export class SuiBusinessService {
       inboundId: node.inboundId!,
       xuiEmail: String(client.name),
       expiryTime: Math.max(0, Number(client.expiry) || 0) * 1000,
+      totalGB: Math.max(0, Number(client.volume) || 0),
       enable: client.enable === true
     };
   }

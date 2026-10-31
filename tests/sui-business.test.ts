@@ -112,6 +112,7 @@ function fixture() {
 test('S-UI billing writes use complete detail, preserve native options and convert expiry seconds and quota bytes', async () => {
   const f = fixture(),
     expiryTime = Date.parse('2027-02-03T04:05:06.789Z');
+  assert.equal((await f.service.state(f.node, { email: 'alice' })).totalGB, 100 * 1024 ** 3);
   const result = await f.service.patch(
     f.node,
     { email: 'alice' },
@@ -119,6 +120,9 @@ test('S-UI billing writes use complete detail, preserve native options and conve
     'expiry'
   );
   assert(f.calls[0]!.endsWith('clients?id=7'));
+  const verified = await f.service.state(f.node, { email: 'alice' });
+  assert.equal(verified.totalGB, 2 * 1024 ** 3);
+  assert.equal(verified.enable, false);
   assert.deepEqual(f.writes[0].config, {
     tuic: { uuid: 'keep', password: 'keep-secret' }
   });

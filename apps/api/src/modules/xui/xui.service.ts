@@ -2890,6 +2890,7 @@ export class XuiService {
         inboundId: existing.inboundId || inboundId,
         xuiEmail: existing.email || identity.email,
         expiryTime: Number.isFinite(expiryTime) && expiryTime > 0 ? expiryTime : 0,
+        totalGB: this.gbToBytes(this.remoteClientTrafficLimitGb(raw)),
         enable: this.booleanValue(raw.enable, false)
       };
     });
@@ -2899,13 +2900,15 @@ export class XuiService {
     serviceNodeId: string,
     identity: ServiceNodeRemoteClientIdentity,
     expireAt: Date | null,
-    enable: boolean
+    enable: boolean,
+    trafficLimitGb?: Prisma.Decimal | number | string | null
   ) {
     return this.locks.withLock(this.locks.serviceNodeKey(serviceNodeId), async () => {
       const serviceNode = await this.serviceNodeForRemoteAuthorization(serviceNodeId);
       return this.patchServiceNodeRemoteAuthorization(serviceNode, identity, {
         expiryTime: expireAt ? expireAt.getTime() : 0,
-        enable
+        enable,
+        ...(trafficLimitGb === undefined ? {} : { totalGB: this.gbToBytes(trafficLimitGb) })
       }, 'expiry');
     });
   }

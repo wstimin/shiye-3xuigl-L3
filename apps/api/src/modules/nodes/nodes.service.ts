@@ -988,14 +988,15 @@ export class NodesService {
     try {
       await this.xui.refreshCustomerNodeBinding(customerId, node.id);
       remoteBefore = await this.xui.serviceNodeRemoteClientState(serviceNode.id, remoteIdentity);
-      syncResult = await this.xui.updateServiceNodeRemoteAuthorization(serviceNode.id, remoteIdentity, expireAt, enabled);
+      syncResult = await this.xui.updateServiceNodeRemoteAuthorization(serviceNode.id, remoteIdentity, expireAt, enabled, node.trafficLimitGb);
     } catch (error) {
       if (remoteBefore) {
         await this.xui.updateServiceNodeRemoteAuthorization(
           serviceNode.id,
           remoteIdentity,
           remoteBefore.expiryTime > 0 ? new Date(remoteBefore.expiryTime) : null,
-          remoteBefore.enable
+          remoteBefore.enable,
+          remoteBefore.totalGB / 1024 ** 3
         ).catch(() => undefined);
       }
       await this.prisma.customerNode.delete({ where: { id: node.id } }).catch(() => undefined);
@@ -1121,14 +1122,15 @@ export class NodesService {
       targetRemoteBefore = nodeChanged
         ? await this.xui.serviceNodeRemoteClientState(serviceNodeId, targetRemoteIdentity)
         : oldRemoteBefore;
-      syncResult = await this.xui.updateServiceNodeRemoteAuthorization(serviceNodeId, targetRemoteIdentity, nextExpireAt, nextEnabled);
+      syncResult = await this.xui.updateServiceNodeRemoteAuthorization(serviceNodeId, targetRemoteIdentity, nextExpireAt, nextEnabled, node.trafficLimitGb);
     } catch (error) {
       if (targetRemoteBefore) {
         await this.xui.updateServiceNodeRemoteAuthorization(
           serviceNodeId,
           targetRemoteIdentity,
           targetRemoteBefore.expiryTime > 0 ? new Date(targetRemoteBefore.expiryTime) : null,
-          targetRemoteBefore.enable
+          targetRemoteBefore.enable,
+          targetRemoteBefore.totalGB / 1024 ** 3
         ).catch(() => undefined);
       }
       await this.prisma.customerNode.update({

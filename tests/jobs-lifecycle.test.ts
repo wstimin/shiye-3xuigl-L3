@@ -96,7 +96,7 @@ test('traffic job reads official usage and keeps a below-limit node active', asy
     syncLog: { create: async () => ({}) }
   } as any;
   const xui = {
-    syncCustomerNodeTraffic: async () => ({ usedBytes: 5 * 1024 ** 3, usedTrafficGb: 5 }),
+    syncCustomerNodeTraffic: async () => ({ usedBytes: 5 * 1024 ** 3, usedTrafficGb: 5, totalBytes: 10 * 1024 ** 3 }),
     setCustomerNodeRemoteEnabled: async () => { remoteDisableCalls += 1; }
   } as any;
   const service = new JobsService(prisma, xui, testLocks());
@@ -165,4 +165,78 @@ test('traffic job leaves local state active when official traffic cannot be read
   assert.equal(result.disabled, 0);
   assert.equal(result.failed, 1);
   assert.match(result.results[0].message || '', /panel unavailable/);
+});
+
+test('failed expiry enforcement stays eligible and succeeds on the next run', async () => {
+  const node = expiredFixture();
+  let attempts = 0;
+  const service = new JobsService({
+    customerNode: {
+      findMany: async () => node.status === 'active' ? [node] : [],
+      findUnique: async () => node,
+      update: async ({ data }: any) => Object.assign(node, data)
+    },
+    renewalLog: { findFirst: async () => null },
+    syncLog: { create: async () => ({}) }
+  } as any, {
+    setCustomerNodeRemoteEnabled: async () => {
+      if (++attempts === 1) throw new Error('remote read-back failed');
+    }
+  } as any, testLocks());
+  assert.equal((await service.disableExpiredNodes()).failed, 1);
+  assert.equal(node.status, 'active');
+  assert.equal((await service.disableExpiredNodes()).success, 1);
+  assert.equal(node.status, 'disabled');
+  assert.equal(attempts, 2);
+});
+
+test('quota enforcement repairs legacy remote limits and retries failed writes without false success', async () => {
+  const node = trafficFixture();
+  let quota = 0, attempts = 0, disables = 0;
+  const service = new JobsService({
+    customerNode: { findMany: async () => [node], findUnique: async () => node, update: async () => assert.fail('below limit') },
+    renewalLog: { findFirst: async () => null }, syncLog: { create: async () => ({}) }
+  } as any, {
+    syncCustomerNodeTraffic: async () => ({ usedBytes: 1024, usedTrafficGb: 1024 / 1024 ** 3, totalBytes: quota }),
+    updateCustomerNodeRemoteQuota: async (customerId: string, nodeId: string, gb: number) => {
+      assert.equal(customerId, node.customerId); assert.equal(nodeId, node.id); assert.equal(gb, 10);
+      if (++attempts === 1) throw new Error('quota read-back failed');
+      quota = gb * 1024 ** 3;
+    },
+    setCustomerNodeRemoteEnabled: async () => { disables++; }
+  } as any, testLocks());
+  assert.equal((await service.disableTrafficExceededNodes()).failed, 1);
+  assert.equal(node.status, 'active');
+  assert.equal((await service.disableTrafficExceededNodes()).failed, 0);
+  assert.equal(quota, 10 * 1024 ** 3);
+  await service.disableTrafficExceededNodes();
+  assert.equal(attempts, 2, 'matching limits do not write every ten minutes');
+  assert.equal(disables, 0);
+});
+
+test('exhausted quota disables immediately without waiting for quota repair; remote failures retry', async () => {
+  const node = trafficFixture();
+  let attempts = 0;
+  const service = new JobsService({
+    customerNode: {
+      findMany: async () => node.status === 'active' ? [node] : [], findUnique: async () => node,
+      update: async ({ data }: any) => Object.assign(node, data)
+    },
+    renewalLog: { findFirst: async () => null }, syncLog: { create: async () => ({}) }
+  } as any, {
+    syncCustomerNodeTraffic: async () => ({ usedBytes: 10 * 1024 ** 3, usedTrafficGb: 10, totalBytes: 0 }),
+    updateCustomerNodeRemoteQuota: async () => assert.fail('disable must take priority'),
+    setCustomerNodeRemoteEnabled: async () => { if (++attempts === 1) throw new Error('panel unavailable'); }
+  } as any, testLocks());
+  assert.equal((await service.disableTrafficExceededNodes()).failed, 1);
+  assert.equal(node.status, 'active');
+  assert.equal((await service.disableTrafficExceededNodes()).disabled, 1);
+  assert.equal(node.status, 'disabled');
+  assert.equal((node as any).disabledReason, 'traffic_exceeded');
+});
+
+test('expiry and traffic enforcement keep the authorized ten-minute schedule', () => {
+  for (const method of [JobsService.prototype.disableExpiredOnSchedule, JobsService.prototype.disableTrafficExceededOnSchedule]) {
+    assert.equal(Reflect.getMetadata('SCHEDULE_CRON_OPTIONS', method).cronTime, '0 */10 * * * *');
+  }
 });

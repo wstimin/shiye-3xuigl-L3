@@ -668,6 +668,15 @@ test('node authorization uses the official full-row update endpoint without addi
   assert.equal(requests.some((request) => request.path.includes('/panel/api/clients/del/')), false);
   assert.equal(storedConfig.remoteClientExpireAt, expireAt.toISOString());
   assert.equal(storedConfig.remoteClientEnabled, true);
+  const identity = { email: 'shared@example.com', uuid: 'shared-uuid' };
+  assert.equal((await service.serviceNodeRemoteClientState('service-node-1', identity)).totalGB, 100 * 1024 ** 3);
+  await service.updateServiceNodeRemoteAuthorization('service-node-1', identity, expireAt, false, 12.5);
+  const verified = await service.serviceNodeRemoteClientState('service-node-1', identity);
+  assert.equal(verified.totalGB, 12.5 * 1024 ** 3);
+  assert.equal(verified.enable, false);
+  assert.equal(remoteClient.password, 'keep-password');
+  assert.equal(remoteClient.flow, 'xtls-rprx-vision');
+  assert.equal(storedConfig.remoteClientTrafficLimitGb, 12.5);
 });
 
 test('customer links reject every inactive authorization layer before contacting the panel', async () => {

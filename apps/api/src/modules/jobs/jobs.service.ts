@@ -266,6 +266,9 @@ export class JobsService {
             if (await this.hasPendingRenewal(node.id)) return { skipped: true, reason: '节点续费正在处理，已等待续费完成后再检查', usedBytes: 0, usedTrafficGb: 0, limitBytes: currentLimitBytes } as const;
             const traffic = await this.xui.syncCustomerNodeTraffic(current.customerId, node.id);
             if (traffic.usedBytes < currentLimitBytes) {
+              if (traffic.totalBytes !== currentLimitBytes) {
+                await this.xui.updateCustomerNodeRemoteQuota(current.customerId, node.id, current.trafficLimitGb);
+              }
               return {
                 skipped: true,
                 belowLimit: true,

@@ -197,6 +197,7 @@ test('binding refreshes identity and synchronizes the shared client expiry witho
 test('binding always uses the service node shared client and ignores legacy create fields', async () => {
   let storedNode: any;
   let remoteWriteCalls = 0;
+  const authorizations: unknown[][] = [];
   const serviceNode = {
     id: 'service-node-1',
     serverId: 'server-1',
@@ -224,7 +225,7 @@ test('binding always uses the service node shared client and ignores legacy crea
   const xui = {
     refreshCustomerNodeBinding: async () => ({ synced: true, remoteWrite: false, node: storedNode }),
     serviceNodeRemoteClientState: async () => ({ expiryTime: 0, enable: false }),
-    updateServiceNodeRemoteAuthorization: async () => ({ synced: true, remoteWrite: true }),
+    updateServiceNodeRemoteAuthorization: async (...args: unknown[]) => { authorizations.push(args); return { synced: true, remoteWrite: true }; },
     createCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; },
     patchCustomerNodeRemoteClient: async () => { remoteWriteCalls += 1; }
   } as any;
@@ -246,6 +247,7 @@ test('binding always uses the service node shared client and ignores legacy crea
   assert.equal(storedNode.remoteControl, 'reference');
   assert.equal(storedNode.config.subId, 'shared-sub');
   assert.equal(remoteWriteCalls, 0);
+  assert.equal(Number(authorizations[0]![4]), 50, 'binding quota is written to the remote client');
 });
 
 test('a service node can only be bound to one user at a time', async () => {
@@ -286,6 +288,30 @@ test('a service node can only be bound to one user at a time', async () => {
 
   assert.equal(storedNodes.length, 1);
   assert.equal(storedNodes[0].xuiEmail, 'us-premium');
+});
+
+test('failed binding restores the original remote quota, expiry and enable state', async () => {
+  const serviceNode = { id: 'n1', serverId: 's1', inboundId: 1, trafficLimitGb: 100, config: { remoteClientEmail: 'test-client' } };
+  const before = { expiryTime: Date.parse('2030-01-01T00:00:00Z'), totalGB: 75 * 1024 ** 3, enable: false };
+  let remote = { ...before }, binding: any, calls = 0;
+  const service = new NodesService({
+    customer: { findUnique: async () => ({ id: 'c1' }) }, serviceNode: { findUnique: async () => serviceNode },
+    customerNode: {
+      findFirst: async () => null, create: async ({ data }: any) => (binding = { id: 'b1', ...data }),
+      delete: async () => { binding = undefined; }
+    }
+  } as any, encryption(), {
+    refreshCustomerNodeBinding: async () => ({}),
+    serviceNodeRemoteClientState: async () => ({ ...remote }),
+    updateServiceNodeRemoteAuthorization: async (_id: string, _identity: unknown, expiry: Date | null, enable: boolean, quota: number) => {
+      remote = { expiryTime: expiry?.getTime() || 0, enable, totalGB: Number(quota) * 1024 ** 3 };
+      if (++calls === 1) throw new Error('response lost after remote write');
+    }
+  } as any, testLocks());
+  await assert.rejects(() => service.bindCustomerNode('c1', { serviceNodeId: 'n1', trafficLimitGb: 5 }), /response lost/);
+  assert.equal(binding, undefined);
+  assert.deepEqual(remote, before);
+  assert.equal(calls, 2);
 });
 
 test('failed node switching restores each remote client by explicit service-node identity', async () => {

@@ -391,7 +391,7 @@ onMounted(loadDashboard);
     <section class="dashboard-job-grid">
       <article class="dashboard-job-card">
         <header>
-          <div class="dashboard-job-title"><i><ShieldOff :size="18" /></i><div><h2>自动停用过期节点</h2><p>每 10 分钟自动检测，启用后立即检测一次</p></div></div>
+          <div class="dashboard-job-title"><i><ShieldOff :size="18" /></i><div><h2>到期停用远端客户端</h2><p>每 10 分钟检测；远端回读成功才确认停用，失败下轮重试</p></div></div>
           <div class="dashboard-job-switch"><span>{{ jobSettings.disableExpiredEnabled ? '启用' : '停用' }}</span><el-switch :model-value="jobSettings.disableExpiredEnabled" :loading="jobSettingsSaving" @change="toggleDisableExpired" /></div>
         </header>
         <div class="dashboard-job-stats">
@@ -404,13 +404,14 @@ onMounted(loadDashboard);
 
       <article class="dashboard-job-card">
         <header>
-          <div class="dashboard-job-title"><i><Activity :size="18" /></i><div><h2>远端流量同步任务</h2><p>每 10 分钟读取远端用量，超限后同步停用节点</p></div></div>
+          <div class="dashboard-job-title"><i><Activity :size="18" /></i><div><h2>流量耗尽停用远端客户端</h2><p>每 10 分钟读取远端用量；耗尽后停用，失败下轮重试</p></div></div>
           <div class="dashboard-job-switch"><span>{{ jobSettings.trafficSyncEnabled ? '启用' : '停用' }}</span><el-switch :model-value="jobSettings.trafficSyncEnabled" :loading="jobSettingsSaving" @change="toggleTrafficSync" /></div>
         </header>
         <div class="dashboard-job-stats">
           <div><span>上次检测</span><strong>{{ formatDate(lastTrafficSync?.checkedAt) }}</strong></div>
           <div><span>检查</span><strong>{{ lastTrafficSync?.checked ?? '-' }}</strong></div>
           <div><span>停用</span><strong>{{ lastTrafficSync?.disabled ?? '-' }}</strong></div>
+          <div><span>失败待重试</span><strong>{{ lastTrafficSync?.failed ?? '-' }}</strong></div>
         </div>
         <button type="button" :disabled="trafficJobRunning" @click="syncTraffic"><Activity :size="15" />{{ trafficJobRunning ? '同步中' : '立即同步' }}</button>
       </article>
