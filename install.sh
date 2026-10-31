@@ -678,10 +678,11 @@ write_maintenance_service() {
   install -d -m 2750 -o root -g shiye "${data_dir}" "${data_dir}/jobs"
   install -d -m 2770 -o root -g shiye "${data_dir}/requests" "${data_dir}/uploads"
   node --input-type=module - "${config_file}" "${APP_DIR}" "${APP_NAME}" "${data_dir}" "${helper_dir}" "$(id -u shiye)" "$(id -g shiye)" "${mysql_bin}" "${dump_bin}" <<'NODE'
-import {writeFileSync} from 'node:fs';
+import {writeFileSync,chmodSync} from 'node:fs';
 const [path,appDir,service,dataDir,helperDir,uid,gid,mysql,dump]=process.argv.slice(2);
 writeFileSync(path,JSON.stringify({appDir,service,dataDir,helperDir,uid:Number(uid),gid:Number(gid),mysql,dump}),{mode:0o600});
 writeFileSync(dataDir+'/ready.json',JSON.stringify({protocol:1}),{mode:0o640});
+chmodSync(dataDir+'/ready.json',0o640);
 NODE
   chown root:shiye "${data_dir}/ready.json"
   cd "${APP_DIR}"

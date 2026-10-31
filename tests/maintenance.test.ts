@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { parse as dotenv } from 'dotenv';
 import { compareVersions, validateRelease, snapshotUpload, packBackup, unpackBackup, migrationEnv, parseEnv, serializeEnv, updateProgress, writeJson } from '../scripts/maintenance-core.mjs';
@@ -44,6 +45,18 @@ test('panel maintenance becomes unavailable when its supervisor heartbeat expire
     await writeFile(join(root, 'ready.json'), JSON.stringify({ provider: 'panel', updatedAt: new Date(Date.now() - 30000).toISOString() }));
     assert.equal(new MaintenanceService().status().available, false);
   } finally { if (before === undefined) delete process.env.SHIYE_MAINTENANCE_DIR; else process.env.SHIYE_MAINTENANCE_DIR = before; }
+}));
+
+test('systemd installer makes its ready marker readable with restrictive umask and after legacy upgrades', { skip: process.platform !== 'linux' }, async () => fixture(async root => {
+  const installer = await readFile(resolve('install.sh'), 'utf8');
+  const script = installer.match(/node --input-type=module - "\$\{config_file\}"[^\n]*<<'NODE'\r?\n([\s\S]*?)\r?\nNODE/)?.[1];
+  assert(script);
+  for (const legacy of [false, true]) {
+    const marker = join(root, 'ready.json'); await rm(marker, { force: true });
+    if (legacy) await writeFile(marker, '{}', { mode: 0o600 });
+    execFileSync(process.execPath, ['--input-type=module', '-', join(root, 'config.json'), '/fixture', 'shiye-api', root, '/helpers', '1000', '1000', 'mysql', 'dump'], { input: 'process.umask(0o077);\n' + script });
+    assert.equal((await stat(marker)).mode & 0o777, 0o640);
+  }
 }));
 
 test('release comparison uses numeric versions and rejects malformed versions', () => {
