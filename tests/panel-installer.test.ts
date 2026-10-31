@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, access, copyFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -25,6 +25,9 @@ async function until<T>(read: () => Promise<T>, accepts: (value: T) => boolean):
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'shiye-wizard-'));
+  await mkdir(join(root, 'scripts'));
+  for (const script of ['panel-maintenance.mjs', 'maintenance-core.mjs']) await copyFile(resolve('scripts', script), join(root, 'scripts', script));
+  await writeFile(join(root, 'build-info.json'), JSON.stringify({ version: '1.0.0', commit: 'a'.repeat(40) }));
   const bin = join(root, 'bin'); await mkdir(bin);
   const runner = join(bin, 'npm-fixture.cjs');
   const apiFixture = "require('node:fs').writeFileSync('.api-started','yes')";

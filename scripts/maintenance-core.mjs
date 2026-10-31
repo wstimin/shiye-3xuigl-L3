@@ -25,8 +25,8 @@ export function parseEnv(text) {
     const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
     if (!match) continue;
     let value = match[2].trim();
-    if (value.startsWith('"') && value.endsWith('"')) { try { value = JSON.parse(value); } catch { value = value.slice(1, -1); } }
-    else if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1).replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+    else if (["'", '`'].some(quote => value.startsWith(quote) && value.endsWith(quote))) value = value.slice(1, -1);
     values[match[1]] = value;
   }
   return values;
@@ -41,7 +41,14 @@ export function migrationEnv(source, target) {
   return result;
 }
 export function serializeEnv(values) {
-  return Object.entries(values).map(([key, value]) => `${key}=${/^[^\s"'#\\]*$/.test(value) ? value : JSON.stringify(value)}`).join('\n') + '\n';
+  return Object.entries(values).map(([key, raw]) => {
+    const value = String(raw);
+    if (!/^[A-Z][A-Z0-9_]*$/.test(key) || /[\r\n\0]/.test(value)) throw Error('配置值无效');
+    if (/^[A-Za-z0-9_./:@%+\-=]*$/.test(value)) return key + '=' + value;
+    const quote = ["'", '`', '"'].find(quote => !value.includes(quote) && (quote !== '"' || !/\\[nr]/.test(value)));
+    if (!quote) throw Error('配置值包含无法保存的引号组合');
+    return key + '=' + quote + value + quote;
+  }).join('\n') + '\n';
 }
 export function validateRelease(release, currentVersion) {
   if (release.draft || release.prerelease || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) throw new Error('没有可用的稳定版本');

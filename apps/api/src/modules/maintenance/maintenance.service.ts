@@ -15,7 +15,10 @@ export class MaintenanceService {
   private checked?: { id: string; version: string; sha256: string; expires: number; hasUpdate: boolean };
   private uploading = false;
   private root() { return maintenanceDirectory(); }
-  private available() { return process.platform === 'linux' && existsSync(join(this.root(), 'ready.json')); }
+  private available() {
+    if (process.platform !== 'linux') return false;
+    try { const ready = this.read(join(this.root(), 'ready.json')); return ready.provider !== 'panel' || Date.now() - Date.parse(ready.updatedAt) < 15_000; } catch { return false; }
+  }
   private requireAvailable() { if (!this.available()) throw new ServiceUnavailableException('此部署尚未启用维护服务，请使用新版安装程序升级一次'); }
   private read(path: string) { return JSON.parse(readFileSync(path, 'utf8')); }
   private busy() { const job = this.latest(); return this.uploading || this.queued().length > 0 || job?.state === 'running' || job?.recovery?.state === 'running'; }

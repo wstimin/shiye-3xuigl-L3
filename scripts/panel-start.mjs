@@ -3,12 +3,13 @@ import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const root = process.cwd();
 const envPath = resolve(root, '.env');
 const installedMarkerPath = resolve(root, '.panel-installed');
 const criticalSecrets = ['SESSION_SECRET', 'JWT_SECRET', 'ENCRYPTION_KEY', 'CARD_HASH_SECRET'];
-const installerVersion = '1.12.7';
+const installerVersion = '1.12.8';
 const requiredFiles = [
   'apps/api/dist/main.js',
   'dist/user-web/index.html',
@@ -302,6 +303,13 @@ function commandEnv() {
 }
 
 async function runApi() {
+  if (process.platform === 'linux' && !commandEnv().SHIYE_MAINTENANCE_DIR) {
+    const pointer = resolve(root, '.shiye-maintenance/active.json');
+    const active = existsSync(pointer) ? JSON.parse(readFileSync(pointer, 'utf8')).appDir : root;
+    const runtime = await import(pathToFileURL(resolve(active, 'scripts/panel-maintenance.mjs')).href);
+    await runtime.servePanel(root, process.env);
+    return;
+  }
   await new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(process.execPath, [resolve(root, 'apps/api/dist/main.js')], { cwd: root, stdio: 'inherit', env: commandEnv() });
     child.on('error', rejectPromise);
@@ -840,7 +848,7 @@ ${refreshMeta}  <title>十夜 · 安装向导</title>
             <li>再次启动时，npm start 会自动进入正式网站，访问首页及你设置的管理路径。</li>
             <li>使用域名时，把整站反向代理到当前 Node.js 运行环境端口即可，例如 http://127.0.0.1:3388。</li>
           </ul>
-          <p class="hint">网页更新与迁移需要独立维护服务。普通宝塔项目或 1Panel 容器不会自动安装该服务；这类部署可在面板中更新程序，迁移时同时备份数据库和 .env。</p>
+          <p class="hint">通过 npm start 启动后，自动启用网页更新与备份迁移，无需配置宿主机服务。1Panel 请把整个项目目录持久化挂载，并保留 .shiye-maintenance 目录；后续仍使用此目录启动项目。</p>
         </div>
       </aside>
     </section>

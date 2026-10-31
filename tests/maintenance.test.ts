@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
+import { parse as dotenv } from 'dotenv';
 import { compareVersions, validateRelease, snapshotUpload, packBackup, unpackBackup, migrationEnv, parseEnv, serializeEnv, updateProgress, writeJson } from '../scripts/maintenance-core.mjs';
 import { MaintenanceService } from '../apps/api/src/modules/maintenance/maintenance.service.js';
 import { maintenanceActive, maintenanceBackground, maintenanceDirectory, maintenanceOperations } from '../apps/api/src/shared/maintenance-state.js';
@@ -35,6 +36,16 @@ test('uploaded files are privately snapshotted without overwriting existing file
   await assert.rejects(snapshotUpload(root, join(root, 'directory')), /上传文件无效|EISDIR/);
 }));
 
+test('panel maintenance becomes unavailable when its supervisor heartbeat expires', { skip: process.platform !== 'linux' }, async () => fixture(async root => {
+  const before = process.env.SHIYE_MAINTENANCE_DIR; process.env.SHIYE_MAINTENANCE_DIR = root;
+  try {
+    await writeFile(join(root, 'ready.json'), JSON.stringify({ provider: 'panel', updatedAt: new Date().toISOString() }));
+    assert.equal(new MaintenanceService().status().available, true);
+    await writeFile(join(root, 'ready.json'), JSON.stringify({ provider: 'panel', updatedAt: new Date(Date.now() - 30000).toISOString() }));
+    assert.equal(new MaintenanceService().status().available, false);
+  } finally { if (before === undefined) delete process.env.SHIYE_MAINTENANCE_DIR; else process.env.SHIYE_MAINTENANCE_DIR = before; }
+}));
+
 test('release comparison uses numeric versions and rejects malformed versions', () => {
   assert.equal(compareVersions('1.10.0', '1.9.9'), 1); assert.equal(compareVersions('v1.2.0', '1.2.0'), 0); assert.equal(compareVersions('1.1.9', '1.2.0'), -1);
   assert.throws(() => compareVersions('latest', '1.2.0')); assert.throws(() => compareVersions('1.2.0;reboot', '1.2.0'));
@@ -52,8 +63,8 @@ test('migration carries decryption and login secrets while preserving target add
   assert.throws(() => migrationEnv({ ...secrets, SESSION_SECRET: 'bad\nNODE_OPTIONS=evil' }, target));
 });
 test('environment serialization preserves special characters and ignores executable lines', () => {
-  const env = { SIMPLE: 'plain', PASSWORD: 'space # hash " quote', URL: 'mysql://u:p@127.0.0.1/db' };
-  assert.deepEqual(parseEnv(serializeEnv(env)), env); assert.deepEqual(parseEnv('export PATH=evil\n# ignored\nA=ok'), { A: 'ok' });
+  const env = { SIMPLE: 'plain', PASSWORD: 'space # hash " quote', URL: 'mysql://u:p@127.0.0.1/db', PUNCTUATION: "single'quote\\new", BACKTICK: 'tick`quote\\path' };
+  assert.deepEqual(parseEnv(serializeEnv(env)), env); assert.deepEqual(dotenv(serializeEnv(env)), env); assert.deepEqual(parseEnv('export PATH=evil\n# ignored\nA=ok'), { A: 'ok' });
 });
 test('backup round trip retains exact SQL bytes and site metadata', async () => fixture(async root => {
   const sql = Buffer.from("SET NAMES utf8mb4;\nSELECT '测试数据';\n" + 'x'.repeat(256000)); await writeFile(join(root, 'source.sql'), sql);

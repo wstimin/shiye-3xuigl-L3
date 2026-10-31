@@ -15,6 +15,6 @@ export function serveStaticAssets(directory: string): RequestHandler {
     response.type(extname(path));
     response.setHeader('Content-Encoding', String(encoding));
     setStaticAssetHeaders(response, path);
-    response.sendFile(compressed, error => { if (error) next(error); });
+    response.sendFile(request.path.slice(1) + (encoding === 'br' ? '.br' : '.gz'), { root: directory }, error => { if (error) next(error); });
   };
 }

@@ -15,7 +15,7 @@ const prismaSchema = readRequiredFile('prisma/schema.prisma');
 const syncTaskMigration = readRequiredFile('prisma/migrations/20260801010000_sync_tasks/migration.sql');
 const installerScript = readRequiredFile('install.sh');
 const migrationCheckScript = readRequiredFile('scripts/check-update-migrations.mjs');
-for (const name of ['maintenance-core.mjs', 'maintenance-worker.mjs', 'maintenance-progress.mjs']) readRequiredFile('scripts/' + name);
+for (const name of ['maintenance-core.mjs', 'maintenance-worker.mjs', 'maintenance-progress.mjs', 'maintenance-database.mjs', 'maintenance-archive.mjs', 'panel-maintenance.mjs']) readRequiredFile('scripts/' + name);
 const packageMetadata = JSON.parse(readRequiredFile('package.json') || '{}');
 const buildInfo = JSON.parse(readRequiredFile('build-info.json') || '{}');
 

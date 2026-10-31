@@ -425,10 +425,10 @@ input::placeholder, textarea::placeholder { color: var(--field-placeholder); opa
 .maintenance-progress-copy > span { color: var(--primary-strong); font-variant-numeric: tabular-nums; }
 .maintenance-progress { height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-soft); }
 .maintenance-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .2s ease; }
-.maintenance-failure, .maintenance-recovery { display: flex; align-items: flex-start; gap: 12px; border-radius: 6px; padding: 14px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--danger); }
-.maintenance-failure p, .maintenance-recovery p { margin-top: 4px; font-size: 14px; overflow-wrap: anywhere; }
-.maintenance-recovery { margin-top: 12px; border-color: var(--border-strong); background: var(--surface-soft); color: var(--primary-strong); }
-.maintenance-recovery.recovery-succeeded { border-color: var(--border); background: var(--surface-soft); color: var(--success); }
+.maintenance-failure { display: flex; align-items: flex-start; gap: 12px; border-radius: 6px; padding: 14px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--danger); }
+.maintenance-failure > svg { flex-shrink: 0; }
+.maintenance-failure > div { flex: 1; min-width: 0; }
+.maintenance-failure p { margin-top: 4px; font-size: 14px; overflow-wrap: anywhere; }
 .maintenance-includes, .maintenance-steps { margin: 20px 0; padding-left: 20px; color: var(--text); line-height: 2.1; font-size: 14px; }
 .maintenance-file { display: flex; align-items: center; gap: 10px; padding: 20px 14px; border: 1px dashed var(--border); border-radius: 6px; background: var(--surface-soft); position: relative; margin-bottom: 14px; cursor: pointer; overflow-wrap: anywhere; }
 .maintenance-file input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }

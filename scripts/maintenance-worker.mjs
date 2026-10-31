@@ -3,18 +3,34 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
+import { randomUUID } from 'node:crypto';
 import { JOB_ID, compareVersions, readJson, writeJson, updateProgress, latestRelease, fileHash, snapshotUpload, packBackup, unpackBackup, parseEnv, migrationEnv, serializeEnv } from './maintenance-core.mjs';
 
 const config = readJson(process.argv[2] || '/etc/shiye-maintenance.json');
 const root = config.dataDir;
-const app = config.appDir;
+let app = config.appDir;
+const portable = config.provider === 'panel';
+const databaseTools = portable ? await import('./maintenance-database.mjs') : null;
+async function lifecycle(action, appDir) {
+  if (!portable) return run('systemctl', [action, config.service]);
+  const requestId = randomUUID();
+  await new Promise((ok, bad) => {
+    const timer = setTimeout(() => { process.off('message', receive); bad(Error('网站维护主进程没有响应')); }, 30_000);
+    const receive = value => { if (value.requestId !== requestId) return; clearTimeout(timer); process.off('message', receive); value.ok ? ok() : bad(Error(value.message)); };
+    process.on('message', receive); process.send({ action, appDir, requestId });
+  });
+  if (action === 'switch') app = appDir;
+}
 let statePath, log;
+const commands = new Set();
+if (portable) process.once('SIGTERM', () => { for (const child of commands) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} } process.exit(1); });
 function progress(stage, value, message) { return updateProgress(statePath, { stage, progress: value, message }); }
-function env() { return parseEnv(readFileSync(join(app, '.env'), 'utf8')); }
+function env() { return { ...parseEnv(readFileSync(join(app, '.env'), 'utf8')), ...(config.port ? { PORT: config.port } : {}) }; }
 function build() { return readJson(join(app, 'build-info.json')); }
 function run(command, args, options = {}) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, { cwd: app, env: { ...process.env, ...(options.appUser ? { HOME: app } : {}), ...options.env }, detached: true, uid: options.appUser ? config.uid : undefined, gid: options.appUser ? config.gid : undefined, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd: options.cwd || app, env: { ...process.env, ...(options.appUser ? { HOME: app } : {}), ...options.env }, detached: true, uid: options.appUser ? config.uid : undefined, gid: options.appUser ? config.gid : undefined, stdio: ['pipe', 'pipe', 'pipe'] });
+    commands.add(child); child.once('close', () => commands.delete(child));
     let interrupted = false;
     const interrupt = () => { interrupted = true; try { process.kill(-child.pid, 'SIGTERM'); } catch {} };
     const chunks = []; let size = 0;
@@ -36,10 +52,12 @@ async function mysqlArgs(values) {
   return { args: ['--protocol=TCP', '--host=' + url.hostname, '--port=' + (url.port || '3306'), '--user=' + decodeURIComponent(url.username), '--default-character-set=utf8mb4', url.pathname.slice(1)], env: { MYSQL_PWD: decodeURIComponent(url.password) } };
 }
 async function database(sql, values = env()) {
+  if (portable) return databaseTools.queryDatabase(sql, values);
   const options = await mysqlArgs(values);
   return run(config.mysql, [...options.args, '--batch', '--skip-column-names', '--binary-mode=1', '--local-infile=0', '--execute', sql], { env: options.env, appUser: true, error: '无法检查数据库状态' });
 }
 async function dump(path, values = env()) {
+  if (portable) return databaseTools.dumpDatabase(path, values);
   const options = await mysqlArgs(values);
   const output = createWriteStream(path, { flags: 'wx', mode: 0o600 });
   const finished = new Promise((ok, bad) => { output.on('finish', ok); output.on('error', bad); });
@@ -47,6 +65,7 @@ async function dump(path, values = env()) {
   catch (error) { output.destroy(); throw error; }
 }
 async function importSql(path, values) {
+  if (portable) return databaseTools.importDatabase(path, values);
   const options = await mysqlArgs(values);
   const tables = JSON.parse(await database("SELECT COALESCE(JSON_ARRAYAGG(TABLE_NAME),JSON_ARRAY()) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'", values));
   if (!Array.isArray(tables) || !tables.every(name => typeof name === 'string')) throw new Error('无法检查目标数据库表');
@@ -122,7 +141,7 @@ async function restore(dir, request) {
   let changed = false;
   try {
     progress('restore', 40, '正在恢复数据库和站点密钥');
-    await run('systemctl', ['stop', config.service]); changed = true;
+    await lifecycle('stop'); changed = true;
     await importSql(join(source, 'source.sql'), oldEnv);
     writeFileSync(join(app, '.env'), serializeEnv(next), { mode: 0o600 }); chownSync(join(app, '.env'), config.uid, config.gid);
     progress('migrate', 65, '正在适配当前版本和新服务器地址');
@@ -130,15 +149,15 @@ async function restore(dir, request) {
     const adminPath = String(oldEnv.ADMIN_PATH || '/admin').replaceAll("'", "''");
     await database(`UPDATE system_settings SET value=JSON_OBJECT('adminPath','${adminPath}') WHERE \`key\`='runtime'`, next);
     progress('restart', 85, '正在启动迁移后的网站');
-    await run('systemctl', ['start', config.service]); await health(expected);
+    await lifecycle('start'); await health(expected);
     return { loginRequired: true, adminPath: oldEnv.ADMIN_PATH || '/admin', version: expected.version };
   } catch (error) {
     if (changed) {
       updateProgress(statePath, { state: 'failed', message: '迁移失败', recovery: { state: 'running', message: '正在独立恢复迁移前的数据' } });
       try {
-        await run('systemctl', ['stop', config.service]); await importSql(join(dir, 'before.sql'), oldEnv);
+        await lifecycle('stop'); await importSql(join(dir, 'before.sql'), oldEnv);
         writeFileSync(join(app, '.env'), oldEnvText, { mode: 0o600 }); chownSync(join(app, '.env'), config.uid, config.gid);
-        await run('systemctl', ['start', config.service]); await health(expected);
+        await lifecycle('start'); await health(expected);
         updateProgress(statePath, { recovery: { state: 'succeeded', message: '已恢复迁移前的网站和数据' } });
       } catch { updateProgress(statePath, { recovery: { state: 'failed', message: '自动恢复未通过检查，恢复前备份已保留，请联系管理员' } }); }
     }
@@ -159,11 +178,16 @@ async function update(dir, request) {
   const zip = join(dir, 'release.zip'); await pipeline(Readable.from(download()), createWriteStream(zip, { flags: 'wx', mode: 0o600 }));
   if (bytes !== release.size || await fileHash(zip) !== release.sha256) throw new Error('发布包完整性校验失败，未修改网站');
   progress('verify', 36, '校验完成，正在准备更新文件');
-  const entries = await run('unzip', ['-Z1', zip]);
-  if (entries.split('\n').some(name => name.startsWith('/') || name.includes('\\') || name.split('/').includes('..'))) throw new Error('发布包目录无效');
-  const target = join(dir, 'release'); mkdirSync(target); await run('unzip', ['-q', zip, '-d', target]);
+  const target = portable ? join(root, 'releases', readJson(statePath).id) : join(dir, 'release'); mkdirSync(target);
+  if (portable) { const { extractRelease } = await import('./maintenance-archive.mjs'); await extractRelease(zip, target); }
+  else {
+    const entries = await run('unzip', ['-Z1', zip]);
+    if (entries.split('\n').some(name => name.startsWith('/') || name.includes('\\') || name.split('/').includes('..'))) throw new Error('发布包目录无效');
+    await run('unzip', ['-q', zip, '-d', target]);
+  }
   const identity = readJson(join(target, 'build-info.json'));
   if (identity.version !== release.version || !/^[a-f0-9]{40}$/.test(identity.commit)) throw new Error('发布包版本身份不符');
+  if (portable) return updatePanel(dir, target, identity);
   try {
     const values = env();
     await run('bash', [join(target, 'install.sh')], { env: { APP_DIR: app, APP_NAME: config.service, INSTALL_SOURCE: 'prebuilt', KEEP_PREVIOUS_RELEASE: 'yes', ENABLE_NGINX: 'no', ENABLE_HTTPS: 'no', PORT: values.PORT || '3388', MAINTENANCE_STATUS_FILE: statePath, MAINTENANCE_PROGRESS_SCRIPT: join(config.helperDir, 'maintenance-progress.mjs'), MAINTENANCE_RUNTIME_BACKUP: `${app}.maintenance-${readJson(statePath).id}` }, error: '更新未完成，请查看恢复状态' });
@@ -191,18 +215,61 @@ async function update(dir, request) {
     throw error;
   }
 }
+async function updatePanel(dir, target, identity) {
+  const previousApp = app, previous = build(), values = env();
+  writeJson(join(dir, 'rollback.json'), { appDir: app, identity: previous });
+  let changed = false;
+  try {
+    copyFileSync(join(app, '.env'), join(target, '.env'));
+    progress('dependencies', 40, '正在准备新版本运行环境');
+    await run('npm', ['ci', '--omit=dev'], { cwd: target, env: values, error: '新版本依赖安装失败，原站未切换' });
+    await run(process.execPath, [join(target, 'node_modules/prisma/build/index.js'), 'generate', '--schema', join(target, 'prisma/schema.prisma')], { cwd: target, env: values, error: '数据库客户端生成失败，原站未切换' });
+    await run(process.execPath, [join(target, 'scripts/check-update-migrations.mjs')], { cwd: target, env: values, error: '新版本数据库变更无法安全回滚，已停止更新' });
+    await run(process.execPath, [join(target, 'scripts/deploy-check.mjs')], { cwd: target, env: values, error: '新版本运行文件不完整，原站未切换' });
+    progress('migrate', 65, '正在适配数据库'); await lifecycle('stop'); changed = true;
+    await run(process.execPath, [join(target, 'node_modules/prisma/build/index.js'), 'migrate', 'deploy', '--schema', join(target, 'prisma/schema.prisma')], { cwd: target, env: values, error: '数据库版本适配失败' });
+    writeFileSync(join(target, '.panel-installed'), new Date().toISOString(), { mode: 0o600 });
+    progress('restart', 85, '正在切换并启动新版本'); await lifecycle('switch', target); await lifecycle('start'); await health(identity);
+    for (const id of readdirSync(join(root, 'releases')).filter(name => JOB_ID.test(name))) {
+      const old = join(root, 'releases', id);
+      if (old !== app && old !== previousApp) { try { rmSync(old, { recursive: true }); } catch {} }
+    }
+    return { version: identity.version, commit: identity.commit };
+  } catch (error) {
+    if (changed) await recoverPanel(dir, { appDir: previousApp, identity: previous });
+    else rmSync(target, { recursive: true, force: true });
+    throw error;
+  }
+}
+async function recoverPanel(dir, saved) {
+  updateProgress(statePath, { state: 'failed', message: '操作未完成', recovery: { state: 'running', message: '正在独立恢复原版本与数据库' } });
+  try {
+    await lifecycle('stop');
+    const oldText = readFileSync(join(dir, 'before.env'), 'utf8');
+    await importSql(join(dir, 'before.sql'), parseEnv(oldText));
+    writeFileSync(join(saved.appDir, '.env'), oldText, { mode: 0o600 });
+    await lifecycle('switch', saved.appDir); await lifecycle('start'); await health(saved.identity);
+    updateProgress(statePath, { recovery: { state: 'succeeded', message: '原网站和数据库已恢复' } });
+  } catch { updateProgress(statePath, { recovery: { state: 'failed', message: '恢复未通过检查，更新前备份已保留，请联系管理员' } }); }
+}
 async function processRequest(file) {
   const id = file.slice(0, -5);
   if (!JOB_ID.test(id)) { unlinkSync(join(root, 'requests', file)); return; }
   const dir = join(root, 'jobs', id);
   if (existsSync(dir)) {
     const path = join(dir, 'status.json');
-    if (existsSync(path)) updateProgress(path, { state: 'failed', message: '维护进程意外中断，请检查原站状态', recovery: { state: 'failed', message: '原备份已保留，不会自动重复导入或扣款' } });
+    const completed = existsSync(path) && ['succeeded', 'failed'].includes(readJson(path).state) && readJson(path).recovery?.state !== 'running';
+    if (portable && existsSync(path) && !completed) {
+      statePath = path;
+      if (existsSync(join(dir, 'rollback.json'))) await recoverPanel(dir, readJson(join(dir, 'rollback.json')));
+      else if (readJson(path).kind === 'restore' && existsSync(join(dir, 'before.env')) && existsSync(join(dir, 'before.sql'))) await recoverPanel(dir, { appDir: app, identity: build() });
+    }
+    if (existsSync(path) && !completed) updateProgress(path, { state: 'failed', message: '维护进程意外中断，未重复执行任务', ...(!portable ? { recovery: { state: 'failed', message: '原备份已保留，不会自动重复导入或扣款' } } : {}) });
     unlinkSync(join(root, 'requests', file));
     if (existsSync(join(root, 'gate.json'))) unlinkSync(join(root, 'gate.json'));
     return;
   }
-  mkdirSync(dir, { mode: 0o2750 }); chownSync(dir, 0, config.gid); chmodSync(dir, 0o2750);
+  mkdirSync(dir, { mode: 0o2750 }); chownSync(dir, portable ? config.uid : 0, config.gid); chmodSync(dir, 0o2750);
   statePath = join(dir, 'status.json'); log = createWriteStream(join(dir, 'private.log'), { mode: 0o600 });
   try {
     const path = join(root, 'requests', file), info = lstatSync(path);
@@ -223,10 +290,11 @@ async function processRequest(file) {
     log.end();
   }
 }
-if (process.getuid?.() !== 0) throw new Error('维护服务必须由 systemd 运行');
-if (!resolve(app).startsWith('/') || resolve(app) === '/' || !/^[a-zA-Z0-9_-]+$/.test(config.service)) throw new Error('维护安装配置无效');
+if (!portable && process.getuid?.() !== 0) throw new Error('维护服务必须由 systemd 运行');
+if (!resolve(app).startsWith('/') || resolve(app) === '/' || (portable ? !process.send || root !== join(config.baseDir, '.shiye-maintenance') : !/^[a-zA-Z0-9_-]+$/.test(config.service))) throw new Error('维护安装配置无效');
 for (const id of readdirSync(join(root, 'jobs')).filter(name => JOB_ID.test(name))) {
   const dir = join(root, 'jobs', id);
   try { const job = readJson(join(dir, 'status.json')); if (['succeeded', 'failed'].includes(job.state) && job.recovery?.state !== 'running' && Date.now() - Date.parse(job.createdAt) > 7 * 86400000) rmSync(dir, { recursive: true }); } catch {}
 }
 for (const file of readdirSync(join(root, 'requests')).filter(name => name.endsWith('.json')).sort()) await processRequest(file);
+if (portable) process.disconnect();

@@ -85,7 +85,7 @@ function serveWebApps(server: express.Express) {
     const indexFile = join(userWebDir, 'index.html');
     if (!existsSync(indexFile)) return next();
     setHtmlNoStore(response);
-    return response.sendFile(indexFile);
+    return response.sendFile('index.html', { root: userWebDir });
   });
 }
 

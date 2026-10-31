@@ -37,6 +37,9 @@ const runtimeScripts = [
   'maintenance-core.mjs',
   'maintenance-worker.mjs',
   'maintenance-progress.mjs',
+  'maintenance-database.mjs',
+  'maintenance-archive.mjs',
+  'panel-maintenance.mjs',
   'panel-start.mjs',
   'sync-admin.mjs'
 ];

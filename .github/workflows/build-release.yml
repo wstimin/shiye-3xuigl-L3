@@ -38,6 +38,12 @@ jobs:
       - name: Run critical logic tests
         run: npm test
 
+      - name: Test panel maintenance in an unprivileged Node container
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)"
+          -v "$PWD:/workspace" -w /workspace node:20-bookworm-slim
+          node --import tsx --test tests/panel-maintenance.test.ts tests/web-assets.test.ts
+
       - name: Type-check source
         run: npm run typecheck
 

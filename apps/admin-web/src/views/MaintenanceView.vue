@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Archive, ArrowUpCircle, CheckCircle2, Download, FileCheck2, RefreshCw, ShieldCheck, Upload, AlertCircle } from 'lucide-vue-next';
-import { ElMessageBox } from 'element-plus';
+import { ElAlert, ElDialog, ElMessageBox } from 'element-plus';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/dialog/style/css';
 import { api } from '../api';
 
 type Job = { id: string; kind: 'update' | 'backup' | 'inspect' | 'restore'; state: string; progress: number; stage?: string; message: string; createdAt: string; recovery?: { state: string; message: string }; result?: { version?: string; createdAt?: string; bytes?: number; siteUrl?: string; inspectionId?: string; downloadReady?: boolean } };
@@ -10,10 +12,11 @@ type Release = { checkId: string; version: string; hasUpdate: boolean; checkedAt
 const status = ref<Status>(), job = ref<Job | null>(null), release = ref<Release>(), error = ref('');
 const checking = ref(false), starting = ref(false), uploading = ref(false), uploadPercent = ref(0), file = ref<File>(), inspection = ref<Job>();
 const offlineSince = ref(0), reconnecting = ref(false), refreshing = ref(false);
+const taskDialog = ref(false), dismissedTask = ref(''), dismissedFailure = ref(''), polledAt = ref(Date.now());
 let timer: ReturnType<typeof setTimeout> | undefined, stopped = false, request: XMLHttpRequest | undefined;
 const busy = computed(() => starting.value || uploading.value || job.value?.state === 'queued' || job.value?.state === 'running' || job.value?.recovery?.state === 'running');
 const unavailable = computed(() => !status.value?.available);
-const connectionUnknown = computed(() => offlineSince.value > 0 && Date.now() - offlineSince.value > 120_000);
+const connectionUnknown = computed(() => offlineSince.value > 0 && polledAt.value - offlineSince.value > 120_000);
 const taskTitle = computed(() => ({ update: '网站更新', backup: '生成迁移备份', inspect: '校验迁移备份', restore: '恢复网站' })[job.value?.kind || 'update']);
 const percent = computed(() => Math.min(100, Math.max(0, job.value?.progress || 0)));
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—';
@@ -21,13 +24,14 @@ const sizeLabel = (bytes?: number) => bytes ? bytes < 1024 ** 2 ? `${Math.max(1,
 const message = (value: unknown) => value instanceof Error ? value.message : '操作失败，请稍后重试';
 
 function arm(next: Job) {
-  job.value = next;
+  job.value = next; taskDialog.value = true;
   if (next.kind === 'update' || next.kind === 'restore') sessionStorage.setItem('shiye:maintenance-refresh', next.id);
   schedule(500);
 }
 function schedule(delay = 2000) { if (timer) clearTimeout(timer); if (!stopped) timer = setTimeout(poll, delay); }
 async function poll() {
   if (stopped) return;
+  polledAt.value = Date.now();
   try {
     // A restore changes signing keys. Handle that login transition without losing this view early.
     const response = await fetch('/api/admin/maintenance', { credentials: 'include', cache: 'no-store' });
@@ -42,11 +46,13 @@ async function poll() {
     const current = status.value!.job;
     if (current) {
       job.value = current;
+      if (['queued', 'running'].includes(current.state)) taskDialog.value = dismissedTask.value !== current.id;
+      else taskDialog.value = false;
       if (current.kind === 'inspect' && current.state === 'succeeded') inspection.value = current;
       if (current.state === 'running' && ['update', 'restore'].includes(current.kind)) sessionStorage.setItem('shiye:maintenance-refresh', current.id);
       if (current.state === 'succeeded' && ['update', 'restore'].includes(current.kind) && sessionStorage.getItem('shiye:maintenance-refresh') === current.id) {
         refreshing.value = true; sessionStorage.removeItem('shiye:maintenance-refresh');
-        timer = setTimeout(() => window.location.reload(), 1500); return;
+        timer = setTimeout(() => window.location.reload(), 300); return;
       }
       if (current.state === 'failed') sessionStorage.removeItem('shiye:maintenance-refresh');
     }
@@ -115,17 +121,19 @@ onUnmounted(() => { stopped = true; if (timer) clearTimeout(timer); request?.abo
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <el-alert v-if="status && unavailable" title="此部署尚未启用维护服务，需要使用新版安装程序升级一次。" type="warning" :closable="false" show-icon />
 
-    <section v-if="job" class="panel maintenance-task" aria-live="polite">
-      <header class="panel-toolbar"><div class="maintenance-section-title"><component :is="job.state === 'failed' ? AlertCircle : job.state === 'succeeded' ? CheckCircle2 : RefreshCw" :size="20" /><h2>{{ taskTitle }}</h2></div><span class="status-pill">{{ connectionUnknown ? '状态待确认' : job.state === 'failed' ? '未完成' : job.state === 'succeeded' ? '已完成' : '进行中' }}</span></header>
-      <template v-if="job.state !== 'failed' && !connectionUnknown">
+    <el-button v-if="busy && job && !taskDialog" @click="dismissedTask = ''; taskDialog = true">查看{{ taskTitle }}进度</el-button>
+    <el-dialog v-model="taskDialog" :title="taskTitle" width="min(520px, calc(100vw - 32px))" align-center append-to-body :close-on-click-modal="false" @close="dismissedTask = job?.id || ''" class="maintenance-dialog">
+      <div v-if="job" aria-live="polite">
+      <template v-if="!connectionUnknown">
         <div class="maintenance-progress-copy"><strong>{{ refreshing ? '操作完成，正在自动刷新页面…' : job.message }}</strong><span>{{ percent }}%</span></div>
         <div class="maintenance-progress" role="progressbar" :aria-label="taskTitle" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: percent + '%' }"></span></div>
         <p v-if="reconnecting" class="maintenance-note">服务正在重启，连接恢复后会自动继续显示结果。</p>
       </template>
-      <div v-else class="maintenance-failure" role="alert"><AlertCircle :size="19" /><div><strong>{{ connectionUnknown ? '连接尚未恢复，已停止显示更新进度' : job.message }}</strong><p>{{ connectionUnknown ? '暂时无法确认服务器状态。页面会继续尝试连接，也可稍后刷新查看。' : '失败状态独立展示，不会继续推进进度条。' }}</p></div></div>
-      <div v-if="job.recovery" class="maintenance-recovery" :class="'recovery-' + job.recovery.state"><ShieldCheck :size="18" /><div><strong>{{ job.recovery.state === 'running' ? '正在恢复原站' : job.recovery.state === 'succeeded' ? '原站已恢复' : '需要检查恢复状态' }}</strong><p>{{ job.recovery.message }}</p></div></div>
-      <a v-if="job.kind === 'backup' && job.state === 'succeeded'" class="hub-button primary maintenance-download" :href="`/api/admin/maintenance/backups/${job.id}/download`"><Download :size="16" />下载迁移备份 · {{ sizeLabel(job.result?.bytes) }}</a>
-    </section>
+      <div v-else class="maintenance-failure" role="alert"><AlertCircle :size="19" /><div><strong>连接尚未恢复，已停止显示进度</strong><p>页面会继续尝试连接，也可稍后刷新查看。</p></div></div>
+      <p class="maintenance-note">任务在服务器继续执行，切换页面不会中断。完成后弹窗自动关闭；更新或恢复成功后自动刷新网页。</p>
+      </div>
+    </el-dialog>
+    <div v-if="job?.state === 'failed' && (dismissedFailure !== job.id || job.recovery?.state === 'running')" class="maintenance-failure" role="alert"><AlertCircle :size="19" /><div><strong>{{ taskTitle }}未完成：{{ job.message }}</strong><p v-if="job.recovery">{{ job.recovery.message }}</p></div><el-button v-if="job.recovery?.state !== 'running'" text @click="dismissedFailure = job.id">关闭</el-button></div>
 
     <section class="panel maintenance-update">
       <header class="panel-toolbar"><div class="maintenance-section-title"><ArrowUpCircle :size="22" /><div><h2>网站版本更新</h2><p>先检测，再由你决定是否更新。</p></div></div><el-button :loading="checking" :disabled="busy || unavailable" @click="check"><RefreshCw :size="15" />检测最新版</el-button></header>
@@ -135,7 +143,7 @@ onUnmounted(() => { stopped = true; if (timer) clearTimeout(timer); request?.abo
     </section>
 
     <div class="maintenance-migration-grid">
-      <section class="panel"><header class="maintenance-section-title"><Archive :size="22" /><div><h2>下载网站备份</h2><p>一个备份包，保留完整业务数据。</p></div></header><ul class="maintenance-includes"><li>用户、余额、账单和卡密记录</li><li>3x-ui、S-UI 连接及路由关联</li><li>站点设置、管理员账号和解密密钥</li></ul><el-button type="primary" :disabled="busy || unavailable" @click="backup"><Download :size="16" />生成迁移备份</el-button><p class="maintenance-note">备份包含账号和密钥，请妥善保存。服务器保留 7 天，请及时下载。生成时短暂暂停业务写入，完成后自动恢复。</p></section>
+      <section class="panel"><header class="maintenance-section-title"><Archive :size="22" /><div><h2>下载网站备份</h2><p>一个备份包，保留完整业务数据。</p></div></header><ul class="maintenance-includes"><li>用户、余额、账单和卡密记录</li><li>3x-ui、S-UI 连接及路由关联</li><li>站点设置、管理员账号和解密密钥</li></ul><el-button type="primary" :disabled="busy || unavailable" @click="backup"><Download :size="16" />生成迁移备份</el-button><a v-if="job?.kind === 'backup' && job.state === 'succeeded'" class="hub-button primary maintenance-download" :href="`/api/admin/maintenance/backups/${job.id}/download`"><Download :size="16" />下载备份 · {{ sizeLabel(job.result?.bytes) }}</a><p class="maintenance-note">备份包含账号和密钥，请妥善保存。服务器保留 7 天，请及时下载。生成时短暂暂停业务写入，完成后自动恢复。</p></section>
       <section class="panel"><header class="maintenance-section-title"><Upload :size="22" /><div><h2>上传备份并恢复</h2><p>在新服务器安装本系统后，上传备份即可恢复。</p></div></header><ol class="maintenance-steps"><li>选择旧站下载的 .shiye 文件。</li><li>上传并校验版本与完整性。</li><li>停用旧站，再确认恢复；完成后重新登录。</li></ol><label class="maintenance-file"><Upload :size="18" /><span>{{ file ? file.name + ' · ' + sizeLabel(file.size) : '选择迁移备份（最大 2 GB）' }}</span><input type="file" accept=".shiye" :disabled="busy || unavailable" aria-label="选择迁移备份" @change="selectFile" /></label><el-button :disabled="!file || busy || unavailable" :loading="uploading" @click="upload"><FileCheck2 :size="16" />上传并校验</el-button>
         <div v-if="uploading" class="maintenance-upload"><span>上传 {{ uploadPercent }}%</span><div class="maintenance-progress" role="progressbar" aria-label="上传备份" :aria-valuenow="uploadPercent" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: uploadPercent + '%' }"></span></div></div>
         <div v-if="inspection" class="maintenance-inspection"><strong><CheckCircle2 :size="16" />备份校验通过</strong><dl><div><dt>备份版本</dt><dd>v{{ inspection.result?.version }}</dd></div><div><dt>生成时间</dt><dd>{{ formatTime(inspection.result?.createdAt) }}</dd></div><div><dt>原站地址</dt><dd>{{ inspection.result?.siteUrl || '未记录' }}</dd></div></dl><el-button type="danger" plain :disabled="busy" @click="restore">确认恢复网站</el-button></div>

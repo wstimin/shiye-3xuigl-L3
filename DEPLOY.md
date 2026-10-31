@@ -117,7 +117,11 @@ DATABASE_URL='mysql://shiye:strong-password@127.0.0.1:3306/shiye_management' bas
 
 面板部署更新时，先备份数据库与 `.env`，暂停项目，上传新版发布包并保留 `.env`，在项目目录依次执行 `npm ci --include=dev`、`npm run install:prod`、`npm prune --omit=dev`，再从面板重启项目。安装命令会执行迁移并保留已有管理员密码，不能仅覆盖前端文件或直接使用 `git pull` 更新精简发布包。
 
-**维护能力的部署区别：** 一键 Linux/systemd 部署会配置独立维护服务，支持后台网页更新与网站迁移。普通宝塔 Node.js 项目或 1Panel 容器不会自动获得该服务，后台会显示尚未配置；请使用面板管理程序更新，并同时备份数据库和 `.env` 迁移，不要在容器内执行会接管宿主机服务的一键脚本。
+**网页更新与迁移：** Linux 上的宝塔 Node.js 项目和 1Panel 容器通过 `npm start` 启动时，会自动启用项目内维护进程，支持检测最新版后手动更新、下载 `.shiye` 备份、上传校验与恢复。无需 root、systemd、Docker 套接字、mysql 客户端或 unzip。更新先备份、校验、准备依赖，再重启网站子进程；失败独立回滚，成功自动刷新页面。
+
+**持久化与启动：** 必须让项目运行账号可写整个项目目录；1Panel 把整个项目目录持久化挂载（含 `.env` 和 `.shiye-maintenance`），工作目录保持原目录，启动命令保持 `npm start`。不要改用 `start:api` 或直接执行 API 文件，否则不会启动维护进程。新版本保存在 `.shiye-maintenance/releases`，重启项目或容器仍会加载已选版本；不要单独删除这个目录。检测与下载需要项目能访问 GitHub 和 npm。
+
+**旧版升级一次：** 1.12.7 及更早的宝塔 / 1Panel 部署先在面板停项目，用新版发布包替换程序文件，保留原 `.env`、数据库和 `.panel-installed`，安装依赖后以 `npm start` 重启。之后可在网站内完成更新与迁移。一键 Linux/systemd 安装仍使用独立维护服务，原有方式不受影响。
 
 ### 手动部署
 

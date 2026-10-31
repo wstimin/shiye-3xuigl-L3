@@ -8,13 +8,16 @@ import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { compressAssets } from '../scripts/compress-assets.mjs';
 import { serveStaticAssets } from '../apps/api/src/web-assets.js';
 
-test('compressed static assets preserve content, MIME, cache, negotiation and HEAD behavior', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'shiye-web-'));
+test('compressed static assets work inside hidden release directories, preserve negotiation and never expose dotfiles', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'shiye-web-'));
+  const root = join(workspace, '.shiye-maintenance', 'releases', 'runtime', 'dist', 'user-web');
   const assets = join(root, 'assets');
-  mkdirSync(assets);
+  mkdirSync(assets, { recursive: true });
   const content = 'console.log("verified");\n'.repeat(1000), file = join(assets, 'app-ABC.js');
   writeFileSync(file, content);
   assert.equal(compressAssets(assets), 1);
+  writeFileSync(join(assets, '.private.js'), 'private');
+  writeFileSync(join(root, '.env'), 'private');
   assert.equal(gunzipSync(readFileSync(file + '.gz')).toString(), content);
   assert.equal(brotliDecompressSync(readFileSync(file + '.br')).toString(), content);
   const app = express(); app.use(serveStaticAssets(root));
@@ -37,8 +40,10 @@ test('compressed static assets preserve content, MIME, cache, negotiation and HE
     const identity = await fetch(base + '/assets/app-ABC.js', { headers: { 'accept-encoding': 'gzip;q=0,br;q=0,identity;q=1' } });
     assert.equal(identity.headers.get('content-encoding'), null);
     assert.equal((await fetch(base + '/assets/%2e%2e%2foutside.js')).status, 404);
+    assert.equal((await fetch(base + '/assets/.private.js')).status, 404);
+    assert.equal((await fetch(base + '/.env')).status, 404);
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
-    rmSync(root, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
   }
 });
