@@ -4,6 +4,8 @@ import {
   PanelNetworkService,
   suiOutboundImportSchema,
   outboundMatches,
+  panelInboundCreateSchema,
+  suiClientCredentials,
 } from "../apps/api/src/modules/nodes/panel-network.service.js";
 import {
   toSuiOutbound,
@@ -67,6 +69,9 @@ function fixture() {
   const panel = { id: "s1", provider: "sui", enabled: true },
     writes: any[] = [],
     saved: any[] = [];
+  const clients: any[] = [{ id: 1, name: "existing", inbounds: [1] }];
+  let failClient = false,
+    corruptCredential = false;
   let remote: any[] = [{ id: 1, type: "direct", tag: "direct" }],
     inbounds: any[] = [
       { id: 1, type: "vless", tag: "original", listen_port: 50001 },
@@ -94,10 +99,17 @@ function fixture() {
           ? { outbounds: remote }
           : resource === "inbounds"
             ? { inbounds }
-            : resource === "config"
-              ? { config }
-              : { endpoints: [] },
+            : resource === "clients"
+              ? { clients }
+              : resource === "config"
+                ? { config }
+                : { endpoints: [] },
       ),
+    request: async (path: string) => ({
+      clients: structuredClone(
+        clients.filter((row) => row.id === Number(path.split("=")[1])),
+      ).map((row) => (corruptCredential ? { ...row, config: {} } : row)),
+    }),
   };
   const prisma: any = {
     xuiServer: { findUnique: async () => panel },
@@ -137,12 +149,19 @@ function fixture() {
         }
         return {};
       }
-      const list = value.object === "outbounds" ? remote : inbounds;
+      const list =
+        value.object === "outbounds"
+          ? remote
+          : value.object === "clients"
+            ? clients
+            : inbounds;
       if (value.action === "new")
         list.push({
           id: Math.max(0, ...list.map((x) => x.id)) + 1,
           ...structuredClone(value.data),
         });
+      if (value.object === "clients" && value.action === "new" && failClient)
+        throw Error("client write timed out after apply");
       if (value.action === "del") {
         const index = list.findIndex((x) => x.id === value.data.id);
         if (index >= 0) list.splice(index, 1);
@@ -164,6 +183,13 @@ function fixture() {
     panel,
     remote: () => remote,
     inbounds: () => inbounds,
+    clients,
+    failClient: () => {
+      failClient = true;
+    },
+    corruptCredential: () => {
+      corruptCredential = true;
+    },
     config: () => config,
     failRoute: () => {
       failConfig = true;
@@ -388,8 +414,123 @@ test("S-UI failed route association restores the old route and removes only the 
     "explicitly enabled outbound is retained",
   );
 });
+
+test("S-UI creates an independent client with generated credentials and authorizes only its new inbound", async () => {
+  const f = fixture();
+  const result = await f.service.createInbound(
+    "s1",
+    panelInboundCreateSchema.parse({
+      inbound: { type: "vless", tag: "new-client-node", listen_port: 50002 },
+      client: { name: "alice", remark: "Alice" },
+      outboundTag: "direct",
+      confirmed: true,
+    }),
+  );
+  assert.equal(result.clientId, 2);
+  const account = f.clients.find((row) => row.id === result.clientId);
+  assert.deepEqual(account.inbounds, [result.inboundId]);
+  assert.equal(account.config.vless.name, "alice");
+  assert.match(account.config.vless.uuid, /^[0-9a-f-]{36}$/);
+  assert.equal(account.expiry, 0);
+  assert.equal(account.delayStart, false);
+  assert.equal(account.enable, true);
+  assert.equal(
+    "config" in result,
+    false,
+    "do not return generated credentials in the create response",
+  );
+  assert.equal(f.clients[0].name, "existing");
+});
+
+test("S-UI validates username collisions and protocols before creating any resource", async () => {
+  for (const patch of [
+    { client: { name: "existing", remark: "" } },
+    { inbound: { type: "direct", tag: "new", listen_port: 50002 } },
+  ]) {
+    const f = fixture();
+    await assert.rejects(() =>
+      f.service.createInbound("s1", {
+        inbound: { type: "vless", tag: "new", listen_port: 50002 },
+        client: { name: "alice", remark: "" },
+        confirmed: true,
+        ...patch,
+      }),
+    );
+    assert.equal(f.writes.length, 0);
+  }
+  assert.equal(
+    panelInboundCreateSchema.safeParse({
+      inbound: {},
+      client: { name: "alice/test" },
+      confirmed: true,
+    }).success,
+    false,
+  );
+});
+
+test("S-UI client timeout, wrong credential readback and route failure clean up only newly created resources", async () => {
+  for (const failure of [
+    "failClient",
+    "corruptCredential",
+    "failRoute",
+  ] as const) {
+    const f = fixture(),
+      before = structuredClone(f.config());
+    f[failure]();
+    await assert.rejects(() =>
+      f.service.createInbound("s1", {
+        inbound: { type: "vless", tag: "new", listen_port: 50002 },
+        client: { name: "alice", remark: "" },
+        outboundTag: "direct",
+        confirmed: true,
+      }),
+    );
+    assert.deepEqual(f.clients, [{ id: 1, name: "existing", inbounds: [1] }]);
+    assert.deepEqual(
+      f.inbounds().map((row) => row.tag),
+      ["original"],
+    );
+    assert.deepEqual(f.config(), before);
+  }
+});
+
+test("S-UI generated credentials use native fields and correct Shadowsocks 2022 key sizes", async () => {
+  assert.equal(suiClientCredentials("naive", "alice", {}).username, "alice");
+  assert.ok(suiClientCredentials("hysteria", "alice", {}).auth_str);
+  assert.ok(suiClientCredentials("snell", "alice", {}).userkey);
+  const tuic = suiClientCredentials("tuic", "alice", {});
+  assert.ok(tuic.uuid && tuic.password);
+  assert.notEqual(
+    suiClientCredentials("vless", "a", {}).uuid,
+    suiClientCredentials("vless", "a", {}).uuid,
+  );
+  for (const [method, size] of [
+    ["2022-blake3-aes-128-gcm", 16],
+    ["2022-blake3-aes-256-gcm", 32],
+  ] as const) {
+    const credentials = suiClientCredentials("shadowsocks", "alice", {
+      method,
+    });
+    assert.equal(Buffer.from(credentials.password, "base64").length, size);
+    const f = fixture();
+    await f.service.createInbound("s1", {
+      inbound: { type: "shadowsocks", tag: "new", method, listen_port: 50002 },
+      client: { name: "alice", remark: "" },
+      confirmed: true,
+    });
+    assert.ok(
+      f.clients[1].config[size === 16 ? "shadowsocks16" : "shadowsocks"],
+    );
+  }
+});
 test("missing outbounds and existing inbound IDs cannot write remote resources", async () => {
-  assert.equal(outboundMatches({settings:{users:[{id:'wrong-credential'}]}},{settings:{users:[{id:'expected-credential'}]}}),false);
+  assert.equal(
+    outboundMatches(
+      { settings: { users: [{ id: "wrong-credential" }] } },
+      { settings: { users: [{ id: "expected-credential" }] } },
+    ),
+    false,
+  );
   const f = fixture();
   await assert.rejects(
     () =>

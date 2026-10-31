@@ -12,6 +12,8 @@ export const suiServerSchema = z.object({
   enabled: z.boolean().default(true),
   remark: z.string().trim().max(2000).default('')
 });
+export const suiClientProtocols = ['vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http', 'mixed', 'hysteria', 'hysteria2', 'tuic', 'anytls', 'naive', 'shadowtls', 'snell'];
+
 export const suiSaveSchema = z.object({
   object: z.enum(['clients', 'inbounds', 'outbounds', 'endpoints', 'services', 'tls', 'config', 'settings']),
   action: z.enum(['new', 'edit', 'del', 'set']),

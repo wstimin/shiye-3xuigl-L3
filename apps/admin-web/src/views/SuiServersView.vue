@@ -47,7 +47,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { suiSaveSchema, suiServerSchema } from "@shiye/shared";
+import { suiSaveSchema, suiServerSchema, suiClientProtocols } from "@shiye/shared";
 import { api } from "../api";
 
 type Row = Record<string, unknown>;
@@ -92,6 +92,8 @@ const editorOriginal = ref<unknown>({});
 const editorError = ref("");
 const confirmSave = ref(false);
 const editorAction = ref<"new" | "edit" | "set">("new");
+const inboundClient = ref({ enabled: true, name: '', remark: '' });
+const canCreateInboundClient = computed(() => suiClientProtocols.includes(String((editorRecord.value as Row)?.type || '')));
 const clientOriginal = ref<Row>({});
 const clientFields = ref({
   name: "",
@@ -476,6 +478,7 @@ watch(resource, () => {
 });
 async function editResource(row?: Row) {
   outboundTag.value = ''; outboundRevision.value++;
+  inboundClient.value = { enabled: true, name: 'user-' + randomUuid().slice(0, 8), remark: '' };
   if (row && ["clients", "inbounds"].includes(resource.value)) {
     busy.value = true;
     try {
@@ -619,6 +622,7 @@ async function saveResource() {
   let body;
   try {
     if (resource.value === 'inbounds') validateSuiInbound(editorRecord.value as Row);
+    if (resource.value === 'inbounds' && editorAction.value === 'new' && canCreateInboundClient.value && inboundClient.value.enabled && !/^[^\s/?#\\]{1,160}$/.test(inboundClient.value.name.trim())) throw Error('请填写客户端用户名，不要包含空格、斜杠、问号或井号。');
     let record = encodePanelValue(
       editorRecord.value,
       editorOriginal.value,
@@ -668,11 +672,13 @@ async function saveResource() {
   busy.value = true;
   editorError.value = "";
   try {
-    await api(resource.value === 'inbounds' && editorAction.value === 'new' && outboundTag.value ? `/api/admin/panel-servers/${selected.value!.id}/create-inbound` : `/api/admin/sui-servers/${selected.value!.id}/save`, {
+    const creatingInbound = resource.value === 'inbounds' && editorAction.value === 'new';
+    const client = creatingInbound && canCreateInboundClient.value && inboundClient.value.enabled ? { name: inboundClient.value.name.trim(), remark: inboundClient.value.remark.trim() } : undefined;
+    await api(creatingInbound ? `/api/admin/panel-servers/${selected.value!.id}/create-inbound` : `/api/admin/sui-servers/${selected.value!.id}/save`, {
       method: "POST",
-      body: resource.value === 'inbounds' && editorAction.value === 'new' && outboundTag.value ? { inbound: body.data, outboundTag: outboundTag.value, confirmed: true } : body,
+      body: creatingInbound ? { inbound: body.data, outboundTag: outboundTag.value || undefined, client, confirmed: true } : body,
     });
-    ElMessage.success("远端配置已保存");
+    ElMessage.success(client ? '入站与客户端已创建并关联，可接入业务后绑定用户' : "远端配置已保存");
     if (!props.createServerId) {
       editor.value = false;
       await refresh();
@@ -1403,6 +1409,18 @@ onMounted(async () => {
             }"
           />
           <InboundOutboundSelect v-if="selected && resource === 'inbounds' && editorAction === 'new'" :key="outboundRevision" ref="outboundPicker" v-model="outboundTag" :server-id="selected.id" :disabled="busy" @busy="outboundBusy = $event" />
+          <section v-if="resource === 'inbounds' && editorAction === 'new'" class="panel-credential-section" aria-label="入站客户端设置">
+            <h3>客户端账号</h3>
+            <template v-if="canCreateInboundClient">
+              <label class="hub-checkbox"><input v-model="inboundClient.enabled" type="checkbox" :disabled="busy" />同时创建客户端并关联此入站</label>
+              <div v-if="inboundClient.enabled" class="hub-form-grid">
+                <label>客户端用户名<input v-model="inboundClient.name" aria-label="客户端用户名" aria-describedby="inbound-client-name-help" required maxlength="160" :disabled="busy" autocomplete="off" placeholder="例如 alice" /></label>
+                <label>客户端显示名称<input v-model="inboundClient.remark" aria-label="客户端显示名称" maxlength="160" :disabled="busy" placeholder="可选，例如 香港专线" /></label>
+              </div>
+              <p id="inbound-client-name-help" class="muted-text">{{ inboundClient.enabled ? '这是面板客户端账号，连接凭据自动生成并核对授权。流量额度和到期时间在绑定网站用户时设置。' : '只创建入站。后续需要在客户端中创建账号并授权此入站，才能接入业务并绑定用户。' }}</p>
+            </template>
+            <p v-else class="muted-text">此协议不使用独立客户端账号，不能按普通订阅节点绑定用户。</p>
+          </section>
           <p v-if="editorError" class="form-error" role="alert">
             {{ editorError }}
           </p>

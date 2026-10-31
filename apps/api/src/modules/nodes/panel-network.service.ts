@@ -4,7 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { suiClientProtocols } from "@shiye/shared";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -24,8 +25,50 @@ type Row = Record<string, any>;
 export const panelInboundCreateSchema = z.object({
   inbound: z.record(z.unknown()),
   outboundTag: z.string().trim().min(1).max(160).optional(),
+  client: z
+    .object({
+      name: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .regex(/^[^\s/?#\\]+$/, "客户端用户名不能包含空格、斜杠、问号或井号"),
+      remark: z.string().trim().max(160).default(""),
+    })
+    .optional(),
   confirmed: z.literal(true),
 });
+export function suiClientCredentials(
+  protocol: string,
+  name: string,
+  inbound: Row,
+): Row {
+  if (!suiClientProtocols.includes(protocol))
+    throw new BadRequestException("此入站协议不使用客户端账号");
+  const identity = ["socks", "http", "mixed", "naive"].includes(protocol)
+    ? { username: name }
+    : { name };
+  if (["vless", "vmess", "tuic"].includes(protocol))
+    return {
+      ...identity,
+      uuid: randomUUID(),
+      ...(protocol === "tuic"
+        ? { password: randomBytes(24).toString("base64url") }
+        : {}),
+    };
+  if (protocol === "snell")
+    return { ...identity, userkey: randomBytes(16).toString("hex") };
+  if (protocol === "hysteria")
+    return { ...identity, auth_str: randomBytes(24).toString("base64url") };
+  const size = inbound.method === "2022-blake3-aes-128-gcm" ? 16 : 32;
+  return {
+    ...identity,
+    password:
+      protocol === "shadowsocks" && String(inbound.method).startsWith("2022-")
+        ? randomBytes(size).toString("base64")
+        : randomBytes(24).toString("base64url"),
+  };
+}
 export const panelOutboundPublishSchema = z.object({
   source: z.string().min(1).max(200),
   confirmed: z.literal(true),
@@ -57,8 +100,8 @@ export function outboundMatches(actual: unknown, expected: unknown): boolean {
     return Boolean(
       actual &&
         typeof actual === "object" &&
-        Object.entries(expected).every(
-          ([k, v]) => outboundMatches((actual as Row)[k], v),
+        Object.entries(expected).every(([k, v]) =>
+          outboundMatches((actual as Row)[k], v),
         ),
     );
   return isDeepStrictEqual(actual, expected);
@@ -430,6 +473,8 @@ export class PanelNetworkService {
     const panel = await this.panel(id);
     if (input.inbound.id !== undefined && input.inbound.id !== 0)
       throw new BadRequestException("新建入站不能带有已有 ID");
+    if (input.client && panel.provider !== "sui")
+      throw new BadRequestException("同时创建客户端仅适用于 S-UI");
     if (panel.provider === "xui")
       return this.xui.createInboundWithOutbound(
         id,
@@ -462,11 +507,48 @@ export class PanelNetworkService {
           Number(input.inbound.listen_port) > 65535)
       )
         throw new BadRequestException("请填写有效的监听端口");
+      const credentials = input.client
+        ? suiClientCredentials(
+            input.inbound.type,
+            input.client.name,
+            input.inbound,
+          )
+        : undefined;
+      const configKey =
+        input.inbound.type === "shadowsocks" &&
+        input.inbound.method === "2022-blake3-aes-128-gcm"
+          ? "shadowsocks16"
+          : input.inbound.type;
+      const oldClients = input.client
+        ? ((await client.read("clients")).clients as Row[])
+        : [];
+      if (
+        input.client &&
+        (!Array.isArray(oldClients) ||
+          oldClients.some((row) => row.name === input.client!.name))
+      )
+        throw new BadRequestException(
+          "客户端用户名已存在或列表读取失败，请刷新后更换用户名",
+        );
       const previous = input.outboundTag
         ? suiConfig(await client.read("config"))
         : undefined;
       let created: Row | undefined,
+        createdClient: Row | undefined,
+        clientAttempted = false,
         routeAttempted = false;
+      const findCreatedClient = async () => {
+        const rows = (await client.read("clients")).clients as Row[];
+        if (!Array.isArray(rows)) throw new Error("客户端列表读取失败");
+        return rows.find(
+          (row) =>
+            row.name === input.client!.name &&
+            !oldClients.some((old) => old.id === row.id) &&
+            Array.isArray(row.inbounds) &&
+            row.inbounds.length === 1 &&
+            Number(row.inbounds[0]) === Number(created?.id),
+        );
+      };
       try {
         await this.sui.save(id, {
           object: "inbounds",
@@ -477,6 +559,44 @@ export class PanelNetworkService {
           (r) => r.tag === tag && !before.some((old) => old.id === r.id),
         );
         if (!created) throw new BadGatewayException("新入站创建后回读失败");
+        if (input.client && credentials) {
+          clientAttempted = true;
+          await this.sui.save(id, {
+            object: "clients",
+            action: "new",
+            data: {
+              name: input.client.name,
+              remark: input.client.remark,
+              enable: true,
+              volume: 0,
+              expiry: 0,
+              up: 0,
+              down: 0,
+              delayStart: false,
+              inbounds: [created.id],
+              config: { [configKey]: credentials },
+              links: [],
+            },
+          });
+          createdClient = await findCreatedClient();
+          if (!createdClient)
+            throw new BadGatewayException("客户端创建后回读失败");
+          const full = (
+            (await client.request(`clients?id=${createdClient.id}`))
+              .clients as Row[]
+          )?.find((row) => row.id === createdClient!.id);
+          const config =
+            typeof full?.config === "string"
+              ? JSON.parse(full.config)
+              : full?.config;
+          if (
+            !full ||
+            full.enable !== true ||
+            !outboundMatches(full.inbounds, [created.id]) ||
+            !outboundMatches(config?.[configKey], credentials)
+          )
+            throw new BadGatewayException("客户端凭据或入站授权回读不一致");
+        }
         if (input.outboundTag && previous) {
           const route = { ...((previous.route as Row) || {}) },
             rules = Array.isArray(route.rules) ? [...route.rules] : [],
@@ -502,6 +622,7 @@ export class PanelNetworkService {
         }
         return {
           inboundId: created.id,
+          clientId: createdClient?.id,
           outboundTag: input.outboundTag,
           verified: true,
         };
@@ -514,6 +635,30 @@ export class PanelNetworkService {
               action: "edit",
               data: previous,
             });
+        } catch {
+          failed = true;
+        }
+        try {
+          if (clientAttempted) {
+            createdClient ||= await findCreatedClient();
+            if (createdClient) {
+              await this.sui.save(id, {
+                object: "clients",
+                action: "del",
+                data: { id: createdClient.id },
+              });
+              if (
+                ((await client.read("clients")).clients as Row[]).some(
+                  (row) => row.id === createdClient!.id,
+                )
+              )
+                throw new Error("client remains");
+            }
+          }
+        } catch {
+          failed = true;
+        }
+        try {
           created ||= ((await client.read("inbounds")).inbounds as Row[]).find(
             (r) => r.tag === tag && !before.some((old) => old.id === r.id),
           );
@@ -535,7 +680,7 @@ export class PanelNetworkService {
         }
         if (failed)
           throw new BadGatewayException(
-            "入站或路由创建未完成，自动清理失败，请刷新入站列表核对；已启用的出站会保留",
+            "入站、客户端或路由创建未完成，自动清理失败，请刷新面板核对；已启用的出站会保留",
           );
         throw error;
       }
