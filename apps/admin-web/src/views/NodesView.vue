@@ -727,8 +727,6 @@ watch(() => form.transport, () => {
 
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="node-page-alert" />
 
-    <PanelInboundPicker :panels="servers" :linked="nodes" @connected="loadNodes" @edit-service="id => { const node = nodes.find(item => item.id === id); if (node) editNode(node); }" />
-
     <div class="node-stat-grid">
       <article class="node-stat-card">
         <span class="node-stat-icon tone-indigo"><Router :size="18" /></span>
@@ -852,11 +850,13 @@ watch(() => form.transport, () => {
       <div v-if="!filteredNodes.length && !loading" class="node-empty-state">
         <CloudCog :size="28" />
         <strong>{{ nodes.length ? '没有符合筛选条件的节点' : '暂无服务入站' }}</strong>
-        <span>{{ nodes.length ? '调整筛选条件后再查看' : '使用右上角创建节点接入真实面板连接' }}</span>
+        <span>{{ nodes.length ? '调整筛选条件后再查看' : '在下方“面板全部入站”中新建入站或接入业务' }}</span>
       </div>
     </div>
 
     <footer class="node-list-footer">显示 {{ filteredNodes.length }} / {{ nodes.length }} 个真实节点</footer>
+
+    <PanelInboundPicker :panels="servers" :linked="nodes" @connected="loadNodes" @edit-service="id => { const node = nodes.find(item => item.id === id); if (node) editNode(node); }" />
   </section>
   <ServicePricingDialog v-if="suiEditing" :node="suiEditing" @close="suiEditing = null" @saved="loadNodes" />
 
@@ -871,7 +871,7 @@ watch(() => form.transport, () => {
       <Router :size="18" />
       <div>
         <strong>已接入业务的 3x-ui 入站</strong>
-        <span>这里同步业务额度、价格与托管配置；其他面板的入站请在上方“面板全部入站”中选择。</span>
+        <span>这里同步业务额度、价格与托管配置；其他面板的入站请在页面下方“面板全部入站”中选择。</span>
       </div>
     </div>
 
