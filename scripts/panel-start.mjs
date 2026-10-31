@@ -8,7 +8,7 @@ const root = process.cwd();
 const envPath = resolve(root, '.env');
 const installedMarkerPath = resolve(root, '.panel-installed');
 const criticalSecrets = ['SESSION_SECRET', 'JWT_SECRET', 'ENCRYPTION_KEY', 'CARD_HASH_SECRET'];
-const installerVersion = '1.12.5';
+const installerVersion = '1.12.6';
 const requiredFiles = [
   'apps/api/dist/main.js',
   'dist/user-web/index.html',
@@ -303,7 +303,7 @@ function commandEnv() {
 
 async function runApi() {
   await new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn('npm', ['run', 'start:api'], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: commandEnv() });
+    const child = spawn(process.execPath, [resolve(root, 'apps/api/dist/main.js')], { cwd: root, stdio: 'inherit', env: commandEnv() });
     child.on('error', rejectPromise);
     child.on('exit', (code) => {
       process.exitCode = code ?? 1;

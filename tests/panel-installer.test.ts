@@ -27,7 +27,8 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'shiye-wizard-'));
   const bin = join(root, 'bin'); await mkdir(bin);
   const runner = join(bin, 'npm-fixture.cjs');
-  await writeFile(runner, `const fs=require('node:fs'),path=require('node:path');const args=process.argv.slice(2);fs.appendFileSync('commands.jsonl',JSON.stringify({args,updatedDatabase:process.env.DATABASE_URL?.includes('new-db.invalid'),production:process.env.NODE_ENV==='production'})+'\\n');if(fs.existsSync('.fail')&&args.includes(fs.readFileSync('.fail','utf8').trim()))process.exit(1);if(args[0]==='run'&&args[1]==='install:prod'){for(const file of ${JSON.stringify(runtimeFiles)}){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'fixture');}}if(args.includes('start:api'))fs.writeFileSync('.api-started','yes');setTimeout(()=>process.exit(0),100);`);
+  const apiFixture = "require('node:fs').writeFileSync('.api-started','yes')";
+  await writeFile(runner, `const fs=require('node:fs'),path=require('node:path');const args=process.argv.slice(2);fs.appendFileSync('commands.jsonl',JSON.stringify({args,updatedDatabase:process.env.DATABASE_URL?.includes('new-db.invalid'),production:process.env.NODE_ENV==='production'})+'\\n');if(fs.existsSync('.fail')&&args.includes(fs.readFileSync('.fail','utf8').trim()))process.exit(1);if(args[0]==='run'&&args[1]==='install:prod'){for(const file of ${JSON.stringify(runtimeFiles)}){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,file==='apps/api/dist/main.js'?${JSON.stringify(apiFixture)}:'fixture');}}setTimeout(()=>process.exit(0),100);`);
   const launcher = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   await writeFile(join(bin, launcher), process.platform === 'win32'
     ? `@echo off\r\n"${process.execPath}" "${runner}" %*\r\n`
