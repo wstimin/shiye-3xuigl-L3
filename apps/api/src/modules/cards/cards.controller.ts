@@ -43,7 +43,7 @@ export class CardsController {
   @Patch('admin/card-templates/:id')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  updateTemplate(@Param('id') id: string, @Body(new ZodValidationPipe(cardTemplateUpsertSchema.partial())) body: Partial<z.infer<typeof cardTemplateUpsertSchema>>) { return this.cards.updateTemplate(id, body); }
+  updateTemplate(@Param('id') id: string, @Body(new ZodValidationPipe(cardTemplateUpsertSchema.partial(), true)) body: Partial<z.infer<typeof cardTemplateUpsertSchema>>) { return this.cards.updateTemplate(id, body); }
 
   @Delete('admin/card-templates/:id')
   @UseGuards(AuthGuard)

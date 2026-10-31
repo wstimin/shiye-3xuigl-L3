@@ -18,12 +18,16 @@ const fieldLabels: Record<string, string> = {
 
 @Injectable()
 export class ZodValidationPipe implements PipeTransform {
-  constructor(private readonly schema: ZodSchema) {}
+  constructor(private readonly schema: ZodSchema, private readonly partialUpdate = false) {}
 
   transform(value: unknown) {
     const result = this.schema.safeParse(value, { reportInput: true });
     if (!result.success) {
       throw new BadRequestException(result.error.issues.map(formatValidationIssue));
+    }
+    // PATCH must not apply create-time defaults to fields the caller omitted.
+    if (this.partialUpdate && value && typeof value === 'object' && !Array.isArray(value)) {
+      return Object.fromEntries(Object.entries(result.data as Record<string, unknown>).filter(([key]) => Object.hasOwn(value, key)));
     }
     return result.data;
   }

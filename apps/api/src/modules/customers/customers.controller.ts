@@ -29,7 +29,7 @@ export class CustomersController {
   @Patch('admin/customers/:id')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  update(@Param('id') id: string, @Body(new ZodValidationPipe(customerUpsertSchema.partial())) body: z.infer<typeof customerUpsertSchema>) {
+  update(@Param('id') id: string, @Body(new ZodValidationPipe(customerUpsertSchema.partial(), true)) body: Partial<z.infer<typeof customerUpsertSchema>>) {
     return this.customers.update(id, body);
   }
 

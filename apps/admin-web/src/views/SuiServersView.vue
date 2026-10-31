@@ -47,7 +47,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { suiSaveSchema, suiServerSchema, suiClientProtocols } from "@shiye/shared";
+import { suiSaveSchema, suiServerSchema, suiClientProtocols, suiClientCredentials, suiClientConfigKey } from "@shiye/shared";
 import { api } from "../api";
 
 type Row = Record<string, unknown>;
@@ -191,33 +191,13 @@ watch(
   (ids) => {
     if (editorAction.value !== "new" || resource.value !== "clients") return;
     const config = { ...(clientConfig.value as Row) };
-    const protocols = [
-      ...new Set(
-        ids.map((id) =>
-          String(
-            inboundChoices.value.find((row) => Number(row.id) === id)?.type ||
-              "vless",
-          ),
-        ),
-      ),
-    ];
-    for (const protocol of protocols)
-      if (!config[protocol]) {
-        config[protocol] = protocol === 'snell'
-          ? { name: '', userkey: randomUuid().replace(/-/g, '') }
-          : ["vless", "vmess", "tuic"].includes(protocol)
-          ? {
-              name: "",
-              uuid: randomUuid(),
-              ...(protocol === "tuic" ? { password: randomUuid() } : {}),
-            }
-          : {
-              ...(["socks", "http", "mixed"].includes(protocol)
-                ? { username: "" }
-                : { name: "" }),
-              password: randomUuid(),
-            };
-      }
+    for (const id of ids) {
+      const inbound = inboundChoices.value.find(row => Number(row.id) === id);
+      const protocol = String(inbound?.type || '');
+      if (!inbound || !suiClientProtocols.includes(protocol)) continue;
+      const key = suiClientConfigKey(protocol, inbound);
+      if (!config[key]) config[key] = suiClientCredentials(protocol, '', inbound);
+    }
     clientConfig.value = config;
   },
   { deep: true },
@@ -512,7 +492,7 @@ async function editResource(row?: Row) {
       volume: 0,
       expiry: 0,
       links: [],
-      config: { vless: { name: "", uuid: randomUuid() } },
+      config: {},
     },
     inbounds: suiInboundTemplate('vless'),
     outbounds: { type: "direct", tag: "" },
@@ -1353,7 +1333,7 @@ onMounted(async () => {
             <fieldset class="panel-choice-list">
               <legend>授权入站</legend>
               <label
-                v-for="inbound in inboundChoices"
+                v-for="inbound in inboundChoices.filter(row => editorAction !== 'new' || suiClientProtocols.includes(String(row.type)))"
                 :key="Number(inbound.id)"
                 class="hub-checkbox"
                 ><input
@@ -1375,7 +1355,7 @@ onMounted(async () => {
             <section class="panel-credential-section">
               <h3>连接凭据</h3>
               <p class="muted-text">
-                新客户端已生成凭据；编辑时会保留原有凭据。
+                选择授权入站后自动生成连接凭据；编辑时保留原有凭据。
               </p>
               <PanelFields v-model="clientConfig" :disabled="busy" />
             </section>

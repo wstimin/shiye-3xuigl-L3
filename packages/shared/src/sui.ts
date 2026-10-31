@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomUuid } from './random-uuid.js';
 
 export const suiServerSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -13,6 +14,22 @@ export const suiServerSchema = z.object({
   remark: z.string().trim().max(2000).default('')
 });
 export const suiClientProtocols = ['vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http', 'mixed', 'hysteria', 'hysteria2', 'tuic', 'anytls', 'naive', 'shadowtls', 'snell'];
+
+export function suiClientConfigKey(protocol: string, inbound: { method?: unknown } = {}) {
+  return protocol === 'shadowsocks' && inbound.method === '2022-blake3-aes-128-gcm' ? 'shadowsocks16' : protocol;
+}
+
+export function suiClientCredentials(protocol: string, name: string, inbound: { method?: unknown } = {}): Record<string, string> {
+  if (!suiClientProtocols.includes(protocol)) throw new Error('此入站协议不使用客户端账号');
+  const random = (size: number) => globalThis.crypto.getRandomValues(new Uint8Array(size));
+  const base64 = (size: number) => btoa(String.fromCharCode(...random(size)));
+  const password = () => base64(24).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const identity: Record<string, string> = ['socks', 'http', 'mixed', 'naive'].includes(protocol) ? { username: name } : { name };
+  if (['vless', 'vmess', 'tuic'].includes(protocol)) return { ...identity, uuid: randomUuid(), ...(protocol === 'tuic' ? { password: password() } : {}) };
+  if (protocol === 'snell') return { ...identity, userkey: Array.from(random(16), byte => byte.toString(16).padStart(2, '0')).join('') };
+  if (protocol === 'hysteria') return { ...identity, auth_str: password() };
+  return { ...identity, password: protocol === 'shadowsocks' ? base64(inbound.method === '2022-blake3-aes-128-gcm' ? 16 : 32) : password() };
+}
 
 export const suiSaveSchema = z.object({
   object: z.enum(['clients', 'inbounds', 'outbounds', 'endpoints', 'services', 'tls', 'config', 'settings']),

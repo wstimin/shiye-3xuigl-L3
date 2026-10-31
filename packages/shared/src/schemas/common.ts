@@ -8,4 +8,4 @@ export const paginationQuerySchema = z.object({
   keyword: z.string().trim().max(100).optional()
 });
 
-export const moneySchema = z.coerce.number().finite().min(0).multipleOf(0.01);
+export const moneySchema = z.union([z.number(), z.string().trim().min(1)]).pipe(z.coerce.number<string | number>().finite().min(0).multipleOf(0.01));

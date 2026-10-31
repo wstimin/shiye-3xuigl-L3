@@ -42,7 +42,7 @@ export class PaymentsController {
   @Patch('admin/payment-channels/:id')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  updateChannel(@Param('id') id: string, @Body(new ZodValidationPipe(paymentChannelUpsertSchema.partial())) body: Partial<z.infer<typeof paymentChannelUpsertSchema>>) {
+  updateChannel(@Param('id') id: string, @Body(new ZodValidationPipe(paymentChannelUpsertSchema.partial(), true)) body: Partial<z.infer<typeof paymentChannelUpsertSchema>>) {
     return this.payments.updateChannel(id, body);
   }
 

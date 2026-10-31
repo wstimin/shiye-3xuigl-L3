@@ -35,7 +35,7 @@ export class NodesController {
   @Patch('admin/xui-servers/:id')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  updateServer(@Param('id') id: string, @Body(new ZodValidationPipe(xuiServerUpsertSchema.partial())) body: Partial<z.infer<typeof xuiServerUpsertSchema>>) { return this.nodes.updateServer(id, body); }
+  updateServer(@Param('id') id: string, @Body(new ZodValidationPipe(xuiServerUpsertSchema.partial(), true)) body: Partial<z.infer<typeof xuiServerUpsertSchema>>) { return this.nodes.updateServer(id, body); }
 
   @Delete('admin/xui-servers/:id')
   @UseGuards(AuthGuard)
@@ -55,7 +55,7 @@ export class NodesController {
   @Patch('admin/service-nodes/:id')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  updateServiceNode(@Param('id') id: string, @Body(new ZodValidationPipe(serviceNodeUpsertSchema.partial())) body: Partial<z.infer<typeof serviceNodeUpsertSchema>>) { return this.nodes.updateServiceNode(id, body); }
+  updateServiceNode(@Param('id') id: string, @Body(new ZodValidationPipe(serviceNodeUpsertSchema.partial(), true)) body: Partial<z.infer<typeof serviceNodeUpsertSchema>>) { return this.nodes.updateServiceNode(id, body); }
 
   @Delete('admin/service-nodes/:id')
   @UseGuards(AuthGuard)
@@ -90,7 +90,7 @@ export class NodesController {
   @Patch('admin/socks-nodes/:id')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  updateSocksNode(@Param('id') id: string, @Body(new ZodValidationPipe(socksNodeUpsertSchema.partial())) body: Partial<z.infer<typeof socksNodeUpsertSchema>>) { return this.nodes.updateSocksNode(id, body); }
+  updateSocksNode(@Param('id') id: string, @Body(new ZodValidationPipe(socksNodeUpsertSchema.partial(), true)) body: Partial<z.infer<typeof socksNodeUpsertSchema>>) { return this.nodes.updateSocksNode(id, body); }
 
   @Post('admin/sync-tasks/:id/retry')
   @UseGuards(AuthGuard)
@@ -119,7 +119,7 @@ export class NodesController {
   @Patch('admin/customers/:id/nodes/:nodeId')
   @UseGuards(AuthGuard)
   @Roles('admin')
-  updateCustomerNode(@Param('id') id: string, @Param('nodeId') nodeId: string, @Body(new ZodValidationPipe(customerNodeCreateSchema.partial())) body: Partial<z.infer<typeof customerNodeCreateSchema>>) {
+  updateCustomerNode(@Param('id') id: string, @Param('nodeId') nodeId: string, @Body(new ZodValidationPipe(customerNodeCreateSchema.partial(), true)) body: Partial<z.infer<typeof customerNodeCreateSchema>>) {
     return this.nodes.updateCustomerNode(id, nodeId, body);
   }
 

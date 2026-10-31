@@ -1,3 +1,4 @@
+import { suiClientCredentials, suiClientProtocols, suiClientConfigKey } from '@shiye/shared';
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -5,7 +6,6 @@ import {
   suiOutboundImportSchema,
   outboundMatches,
   panelInboundCreateSchema,
-  suiClientCredentials,
 } from "../apps/api/src/modules/nodes/panel-network.service.js";
 import {
   toSuiOutbound,
@@ -495,6 +495,15 @@ test("S-UI client timeout, wrong credential readback and route failure clean up 
 });
 
 test("S-UI generated credentials use native fields and correct Shadowsocks 2022 key sizes", async () => {
+  for (const protocol of suiClientProtocols) {
+    const credentials = suiClientCredentials(protocol, 'alice');
+    assert.equal(credentials[['socks', 'http', 'mixed', 'naive'].includes(protocol) ? 'username' : 'name'], 'alice');
+    assert(Object.values(credentials).every(value => typeof value === 'string' && value.length > 0));
+    if (['vless', 'vmess', 'tuic'].includes(protocol)) assert.match(credentials.uuid!, /^[0-9a-f-]{36}$/);
+  }
+  assert.equal(suiClientConfigKey('shadowsocks', { method: '2022-blake3-aes-128-gcm' }), 'shadowsocks16');
+  assert.equal(Buffer.from(suiClientCredentials('shadowsocks', 'alice', { method: 'aes-128-gcm' }).password!, 'base64').length, 32, 'shared legacy/2022 config key must support later authorization on a 2022 inbound');
+  assert.throws(() => suiClientCredentials('direct', 'alice'), /不使用/);
   assert.equal(suiClientCredentials("naive", "alice", {}).username, "alice");
   assert.ok(suiClientCredentials("hysteria", "alice", {}).auth_str);
   assert.ok(suiClientCredentials("snell", "alice", {}).userkey);

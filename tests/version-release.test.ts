@@ -39,6 +39,14 @@ test('release workflow creates versioned releases without deleting older release
   assert.match(workflow, /Release tag .* already points/);
 });
 
+test('lock file retains native build dependencies for other operating systems', () => {
+  for (const entry of Object.values(packageLock.packages) as Array<{ optionalDependencies?: Record<string, string> }>) {
+    for (const name of Object.keys(entry.optionalDependencies || {}).filter(name => name.startsWith('@rollup/rollup-') || name.startsWith('@esbuild/'))) {
+      assert(Object.keys(packageLock.packages).some(path => path.endsWith('node_modules/' + name)), 'Missing cross-platform optional dependency: ' + name);
+    }
+  }
+});
+
 test('release deployment checks allow future versions and new migrations support automatic updates', async () => {
   assert.doesNotMatch(deployCheck, /packageMetadata\.version\s*!==\s*['"]\d+\.\d+\.\d+['"]/);
   const { findUnsafePendingMigrations } = await import('../scripts/check-update-migrations.mjs');

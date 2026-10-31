@@ -4,8 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { suiClientProtocols } from "@shiye/shared";
+import { createHash } from "node:crypto";
+import { suiClientProtocols, suiClientCredentials, suiClientConfigKey } from "@shiye/shared";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -38,37 +38,6 @@ export const panelInboundCreateSchema = z.object({
     .optional(),
   confirmed: z.literal(true),
 });
-export function suiClientCredentials(
-  protocol: string,
-  name: string,
-  inbound: Row,
-): Row {
-  if (!suiClientProtocols.includes(protocol))
-    throw new BadRequestException("此入站协议不使用客户端账号");
-  const identity = ["socks", "http", "mixed", "naive"].includes(protocol)
-    ? { username: name }
-    : { name };
-  if (["vless", "vmess", "tuic"].includes(protocol))
-    return {
-      ...identity,
-      uuid: randomUUID(),
-      ...(protocol === "tuic"
-        ? { password: randomBytes(24).toString("base64url") }
-        : {}),
-    };
-  if (protocol === "snell")
-    return { ...identity, userkey: randomBytes(16).toString("hex") };
-  if (protocol === "hysteria")
-    return { ...identity, auth_str: randomBytes(24).toString("base64url") };
-  const size = inbound.method === "2022-blake3-aes-128-gcm" ? 16 : 32;
-  return {
-    ...identity,
-    password:
-      protocol === "shadowsocks" && String(inbound.method).startsWith("2022-")
-        ? randomBytes(size).toString("base64")
-        : randomBytes(24).toString("base64url"),
-  };
-}
 export const panelOutboundPublishSchema = z.object({
   source: z.string().min(1).max(200),
   confirmed: z.literal(true),
@@ -507,6 +476,7 @@ export class PanelNetworkService {
           Number(input.inbound.listen_port) > 65535)
       )
         throw new BadRequestException("请填写有效的监听端口");
+      if (input.client && !suiClientProtocols.includes(input.inbound.type)) throw new BadRequestException("此入站协议不使用客户端账号");
       const credentials = input.client
         ? suiClientCredentials(
             input.inbound.type,
@@ -514,11 +484,7 @@ export class PanelNetworkService {
             input.inbound,
           )
         : undefined;
-      const configKey =
-        input.inbound.type === "shadowsocks" &&
-        input.inbound.method === "2022-blake3-aes-128-gcm"
-          ? "shadowsocks16"
-          : input.inbound.type;
+      const configKey = suiClientConfigKey(input.inbound.type, input.inbound);
       const oldClients = input.client
         ? ((await client.read("clients")).clients as Row[])
         : [];
