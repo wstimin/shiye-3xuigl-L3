@@ -1,6 +1,6 @@
 {
   "name": "shiye-management-system",
-  "version": "1.12.9",
+  "version": "1.12.10",
   "private": true,
   "description": "Shiye management system for 3x-ui and S-UI panels, user services, billing and network routing.",
   "type": "module",

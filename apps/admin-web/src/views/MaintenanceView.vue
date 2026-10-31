@@ -14,7 +14,8 @@ const checking = ref(false), starting = ref(false), uploading = ref(false), uplo
 const offlineSince = ref(0), reconnecting = ref(false), refreshing = ref(false);
 const taskDialog = ref(false), dismissedTask = ref(''), dismissedFailure = ref(''), polledAt = ref(Date.now());
 let timer: ReturnType<typeof setTimeout> | undefined, stopped = false, request: XMLHttpRequest | undefined;
-const busy = computed(() => starting.value || uploading.value || job.value?.state === 'queued' || job.value?.state === 'running' || job.value?.recovery?.state === 'running');
+const running = computed(() => job.value?.state === 'queued' || job.value?.state === 'running');
+const busy = computed(() => starting.value || uploading.value || running.value || job.value?.recovery?.state === 'running');
 const unavailable = computed(() => !status.value?.available);
 const connectionUnknown = computed(() => offlineSince.value > 0 && polledAt.value - offlineSince.value > 120_000);
 const taskTitle = computed(() => ({ update: '网站更新', backup: '生成迁移备份', inspect: '校验迁移备份', restore: '恢复网站' })[job.value?.kind || 'update']);
@@ -121,15 +122,15 @@ onUnmounted(() => { stopped = true; if (timer) clearTimeout(timer); request?.abo
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <el-alert v-if="status && unavailable" title="此部署尚未启用维护服务，需要使用新版安装程序升级一次。" type="warning" :closable="false" show-icon />
 
-    <el-button v-if="busy && job && !taskDialog" @click="dismissedTask = ''; taskDialog = true">查看{{ taskTitle }}进度</el-button>
+    <el-button v-if="running && !taskDialog" @click="dismissedTask = ''; taskDialog = true">查看{{ taskTitle }}进度</el-button>
     <el-dialog v-model="taskDialog" :title="taskTitle" width="min(520px, calc(100vw - 32px))" align-center append-to-body :close-on-click-modal="false" @close="dismissedTask = job?.id || ''" class="maintenance-dialog">
       <div v-if="job" aria-live="polite">
-      <template v-if="!connectionUnknown">
+      <template v-if="running && !connectionUnknown">
         <div class="maintenance-progress-copy"><strong>{{ refreshing ? '操作完成，正在自动刷新页面…' : job.message }}</strong><span>{{ percent }}%</span></div>
         <div class="maintenance-progress" role="progressbar" :aria-label="taskTitle" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: percent + '%' }"></span></div>
         <p v-if="reconnecting" class="maintenance-note">服务正在重启，连接恢复后会自动继续显示结果。</p>
       </template>
-      <div v-else class="maintenance-failure" role="alert"><AlertCircle :size="19" /><div><strong>连接尚未恢复，已停止显示进度</strong><p>页面会继续尝试连接，也可稍后刷新查看。</p></div></div>
+      <div v-else-if="connectionUnknown" class="maintenance-failure" role="alert"><AlertCircle :size="19" /><div><strong>连接尚未恢复，已停止显示进度</strong><p>页面会继续尝试连接，也可稍后刷新查看。</p></div></div>
       <p class="maintenance-note">任务在服务器继续执行，切换页面不会中断。完成后弹窗自动关闭；更新或恢复成功后自动刷新网页。</p>
       </div>
     </el-dialog>
