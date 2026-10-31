@@ -8,7 +8,7 @@ import { unwrapPanelResult } from '../xui-panel';
 import { type PanelRecord } from '../panel-fields';
 import { panelInbounds, suiClientReason, inboundManager, type PanelConnection, type LinkedInbound, type PanelInbound } from '../panel-inbounds';
 const props = defineProps<{ panels: PanelConnection[]; linked: LinkedInbound[] }>();
-const emit = defineEmits<{ connected: [] }>();
+const emit = defineEmits<{ connected: []; editService: [id: string] }>();
 const XuiCreateForm = defineAsyncComponent(() => import('../views/XuiNativeView.vue'));
 const SuiCreateForm = defineAsyncComponent(() => import('../views/SuiServersView.vue'));
 const createOpen = ref(false), createServerId = ref(''), createBusy = ref(false), createAttempt = ref(0);
@@ -22,46 +22,57 @@ function closeCreate(done?: () => void) {
   done?.();
 }
 async function created() {
-  const id = createServerId.value;
   createOpen.value = false;
   createBusy.value = false;
-  if (serverId.value === id) await load();
-  else serverId.value = id;
+  await load();
 }
 const serverId = ref(''), loading = ref(false), saving = ref(false), error = ref('');
-const inbounds = ref<PanelInbound[]>([]), clients = ref<PanelRecord[]>([]), search = ref('');
-const selected = ref<PanelInbound | null>(null), clientId = ref(''), name = ref(''), price = ref(0), takeover = ref(false);
+type InboundRow = PanelInbound & { panel: PanelConnection };
+const inbounds = ref<InboundRow[]>([]), clients = ref<PanelRecord[]>([]), search = ref('');
+const loadingClients = ref(false), clientError = ref('');
+const selected = ref<InboundRow | null>(null), clientId = ref(''), name = ref(''), price = ref(0), takeover = ref(false);
 let revision = 0;
-const panel = computed(() => props.panels.find(panel => panel.id === serverId.value));
-const visible = computed(() => inbounds.value.filter(row => `${row.name} ${row.id} ${row.protocol} ${row.port}`.toLowerCase().includes(search.value.toLowerCase())));
+const panel = computed(() => selected.value?.panel);
+const visible = computed(() => inbounds.value.filter(row => `${row.name} ${row.id} ${row.protocol} ${row.port} ${row.panel.name} ${row.panel.provider === 'sui' ? 's-ui' : '3x-ui'}`.toLowerCase().includes(search.value.toLowerCase())));
 const relatedClients = computed(() => clients.value.filter(client => Array.isArray(client.inbounds) && client.inbounds.some(id => Number(id) === selected.value?.id)));
 const client = computed(() => clients.value.find(client => String(client.id) === clientId.value));
 const reason = computed(() => panel.value?.provider === 'sui' && selected.value && client.value ? suiClientReason(client.value, selected.value.id, props.linked, panel.value.id) : '');
-watch(() => props.panels, () => { if (!serverId.value && props.panels.length) serverId.value = props.panels[0]!.id; }, { immediate: true });
-watch(serverId, load, { immediate: true });
+watch([() => props.panels, serverId], load, { immediate: true });
 async function load() {
-  const current = panel.value, request = ++revision;
+  const panels = props.panels.filter(item => !serverId.value || item.id === serverId.value), request = ++revision;
   selected.value = null; inbounds.value = []; clients.value = []; error.value = ''; search.value = '';
-  if (!current) return;
+  if (!panels.length) { loading.value = false; return; }
   loading.value = true;
-  try {
-    const [value, people] = current.provider === 'sui'
-      ? await Promise.all([api(`/api/admin/sui-servers/${current.id}/resources/inbounds`), api<PanelRecord>(`/api/admin/sui-servers/${current.id}/resources/clients`)])
-      : [unwrapPanelResult(await api(`/api/admin/xui-servers/${current.id}/native/execute`, { method: 'POST', body: { operation: 'GET /panel/api/inbounds/list' } })), null];
+  const results = await Promise.allSettled(panels.map(async current => {
+    const value = current.provider === 'sui'
+      ? await api(`/api/admin/sui-servers/${current.id}/resources/inbounds`)
+      : unwrapPanelResult(await api(`/api/admin/xui-servers/${current.id}/native/execute`, { method: 'POST', body: { operation: 'GET /panel/api/inbounds/list' } }));
     if (request !== revision) return;
-    inbounds.value = panelInbounds(value, current, props.linked);
-    clients.value = Array.isArray(people?.clients) ? people.clients as PanelRecord[] : [];
-  } catch (cause) { if (request === revision) error.value = cause instanceof Error ? cause.message : '读取入站失败'; }
-  finally { if (request === revision) loading.value = false; }
+    inbounds.value.push(...panelInbounds(value, current, props.linked).map(row => ({ ...row, panel: current })));
+  }));
+  if (request !== revision) return;
+  const failures: string[] = [];
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') failures.push(`${panels[index]!.name}：${result.reason instanceof Error ? result.reason.message : '读取入站失败'}`);
+  });
+  error.value = failures.join('；'); loading.value = false;
 }
-function choose(row: PanelInbound) {
-  selected.value = row; name.value = row.name; price.value = 0; takeover.value = false; error.value = '';
-  const candidates = clients.value.filter(client => !suiClientReason(client, row.id, props.linked, serverId.value));
-  clientId.value = candidates.length === 1 ? String(candidates[0]!.id) : '';
+async function choose(row: InboundRow) {
+  selected.value = row; name.value = row.name; price.value = 0; takeover.value = false; clientError.value = ''; clients.value = []; clientId.value = '';
+  loadingClients.value = row.panel.provider === 'sui';
+  if (!loadingClients.value) return;
+  try {
+    const result = await api<PanelRecord>(`/api/admin/sui-servers/${row.panel.id}/resources/clients`);
+    if (selected.value !== row) return;
+    clients.value = Array.isArray(result.clients) ? result.clients as PanelRecord[] : [];
+    const candidates = relatedClients.value.filter(client => !suiClientReason(client, row.id, props.linked, row.panel.id));
+    clientId.value = candidates.length === 1 ? String(candidates[0]!.id) : '';
+  } catch (cause) { if (selected.value === row) clientError.value = cause instanceof Error ? cause.message : '读取客户端失败，请重新选择入站重试'; }
+  finally { if (selected.value === row) loadingClients.value = false; }
 }
 async function connect() {
   const current = panel.value, inbound = selected.value;
-  if (!current || !inbound || saving.value || reason.value || inbound.reason) return;
+  if (!current || !inbound || saving.value || loadingClients.value || clientError.value || reason.value || inbound.reason) return;
   saving.value = true; error.value = '';
   try {
     if (current.provider === 'sui') {
@@ -75,24 +86,24 @@ async function connect() {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '接入失败'; }
   finally { saving.value = false; }
 }
-watch(() => props.linked, () => { if (panel.value) inbounds.value = inbounds.value.map(row => ({ ...row, linked: props.linked.find(node => node.serverId === serverId.value && node.inboundId === row.id) })); });
+watch(() => props.linked, () => { inbounds.value = inbounds.value.map(row => ({ ...row, linked: props.linked.find(node => node.serverId === row.panel.id && node.inboundId === row.id) })); });
 </script>
 
 <template>
   <section class="hub-card inbound-workspace" aria-labelledby="panel-inbounds-title">
-    <header class="hub-toolbar"><div><h2 id="panel-inbounds-title">面板全部入站</h2><p>直接选择 3x-ui 或 S-UI，查看完整入站并接入业务。</p></div><div class="hub-actions"><select v-model="serverId" class="panel-select" aria-label="入站来源面板" :disabled="saving"><option value="" disabled>选择面板</option><option v-for="item in panels" :key="item.id" :value="item.id">{{ item.provider === 'sui' ? 'S-UI' : '3x-ui' }} · {{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option></select><button type="button" class="hub-button" :disabled="loading || saving || !panel" @click="load"><RefreshCw :size="15" />读取入站</button><button type="button" class="hub-button primary" :disabled="saving || !panels.length" @click="openCreate"><Plus :size="15" />新建入站</button></div></header>
+    <header class="hub-toolbar"><div><h2 id="panel-inbounds-title">面板全部入站</h2><p>汇总 3x-ui 与 S-UI 的全部入站，可按面板筛选并接入业务。</p></div><div class="hub-actions"><select v-model="serverId" class="panel-select" aria-label="入站来源面板" :disabled="saving"><option value="">全部面板 · 3x-ui 与 S-UI</option><option v-for="item in panels" :key="item.id" :value="item.id">{{ item.provider === 'sui' ? 'S-UI' : '3x-ui' }} · {{ item.name }}{{ item.enabled ? '' : '（已停用）' }}</option></select><button type="button" class="hub-button" :disabled="loading || saving || !panels.length" @click="load"><RefreshCw :size="15" />读取入站</button><button type="button" class="hub-button primary" :disabled="saving || !panels.length" @click="openCreate"><Plus :size="15" />新建入站</button></div></header>
     <div v-if="error" class="hub-alert error" role="alert">{{ error }}</div>
     <div v-if="loading" class="hub-empty" role="status">正在读取全部远端入站…</div>
-    <template v-else-if="panel">
-      <div class="inbound-list-tools"><label class="hub-search"><input v-model="search" aria-label="搜索面板入站" placeholder="搜索名称、端口或协议" /></label><span>{{ inbounds.length }} 个入站 · {{ inbounds.filter(row => row.linked).length }} 个已接入业务</span></div>
-      <div class="hub-table-wrap"><table class="hub-table"><thead><tr><th>入站名称</th><th>协议 / 端口</th><th>业务接入</th><th>操作</th></tr></thead><tbody><tr v-for="row in visible" :key="row.id"><td><strong>{{ row.name }}</strong><small class="resource-detail">入站 {{ row.id }} · {{ row.enabled ? '已启用' : '已停用' }}</small></td><td data-label="协议 / 端口">{{ row.protocol.toLowerCase() }} · {{ row.port || '—' }}</td><td data-label="业务接入"><span v-if="row.linked" class="status-pill">已接入</span><span v-else>{{ row.reason ? '配置管理' : '待接入' }}</span><small v-if="row.reason" class="resource-detail">{{ row.reason }}</small></td><td><div class="hub-actions"><router-link class="hub-link" :to="inboundManager(panel, row.id)">管理入站</router-link><button v-if="!row.linked && !row.reason" type="button" class="hub-link" :disabled="saving" @click="choose(row)">接入业务</button><a v-if="row.linked" class="hub-link" :href="'#service-' + row.linked.id">查看服务</a></div></td></tr><tr v-if="!visible.length"><td colspan="4" class="table-empty">{{ search ? '没有匹配的入站' : '该面板暂无入站，可点击新建入站。' }}</td></tr></tbody></table></div>
+    <template v-if="panels.length && (inbounds.length || !loading)">
+      <div class="inbound-list-tools"><label class="hub-search"><input v-model="search" aria-label="搜索面板入站" placeholder="搜索名称、端口或协议" /></label><span>{{ loading ? '已读取' : '共' }} {{ inbounds.length }} 个入站 · {{ inbounds.filter(row => row.panel.provider === 'sui').length }} 个 S-UI · {{ inbounds.filter(row => row.linked).length }} 个已接入业务</span></div>
+      <div class="hub-table-wrap"><table class="hub-table"><thead><tr><th>入站名称</th><th>来源面板</th><th>协议 / 端口</th><th>业务接入</th><th>操作</th></tr></thead><tbody><tr v-for="row in visible" :key="row.panel.id + ':' + row.id"><td><strong>{{ row.name }}</strong><small class="resource-detail">入站 {{ row.id }} · {{ row.enabled ? '已启用' : '已停用' }}</small></td><td data-label="来源面板"><strong>{{ row.panel.provider === 'sui' ? 'S-UI' : '3x-ui' }}</strong><small class="resource-detail">{{ row.panel.name }}</small></td><td data-label="协议 / 端口">{{ row.protocol.toLowerCase() }} · {{ row.port || '—' }}</td><td data-label="业务接入"><span v-if="row.linked" class="status-pill">已接入</span><span v-else>{{ row.reason ? '配置管理' : '待接入' }}</span><small v-if="row.reason" class="resource-detail">{{ row.reason }}</small></td><td><div class="hub-actions"><button v-if="row.linked && row.panel.provider !== 'sui'" type="button" class="hub-link" @click="emit('editService', row.linked.id)">业务入站设置</button><router-link v-else class="hub-link" :to="inboundManager(row.panel, row.id)">管理入站</router-link><button v-if="!row.linked && !row.reason" type="button" class="hub-link" :disabled="saving" @click="choose(row)">接入业务</button><a v-if="row.linked" class="hub-link" :href="'#service-' + row.linked.id">查看服务</a></div></td></tr><tr v-if="!visible.length"><td colspan="5" class="table-empty">{{ search ? '没有匹配的入站' : '所选面板暂无入站，可点击新建入站。' }}</td></tr></tbody></table></div>
     </template>
     <form v-if="selected && panel" class="hub-form inbound-connect-form" @submit.prevent="connect">
       <header><h3>接入「{{ selected.name }}」</h3><button type="button" class="hub-link" :disabled="saving" @click="selected = null">取消接入</button></header>
-      <label v-if="panel.provider === 'sui'">业务客户端<select v-model="clientId" aria-label="S-UI 业务客户端" required :disabled="saving"><option value="" disabled>选择该入站的客户端</option><option v-for="item in relatedClients" :key="String(item.id)" :value="String(item.id)" :disabled="Boolean(suiClientReason(item, selected.id, linked, panel.id))">{{ item.remark || item.name }}{{ suiClientReason(item, selected.id, linked, panel.id) ? ' · ' + suiClientReason(item, selected.id, linked, panel.id) : '' }}</option></select><small v-if="!relatedClients.length">该入站暂无客户端，请先在管理入站中创建客户端并仅授权此入站。</small><small v-else>保留所选客户端原有额度、凭据和协议设置。</small></label>
+      <label v-if="panel.provider === 'sui'">业务客户端<select v-model="clientId" aria-label="S-UI 业务客户端" required :disabled="saving || loadingClients"><option value="" disabled>选择该入站的客户端</option><option v-for="item in relatedClients" :key="String(item.id)" :value="String(item.id)" :disabled="Boolean(suiClientReason(item, selected.id, linked, panel.id))">{{ item.remark || item.name }}{{ suiClientReason(item, selected.id, linked, panel.id) ? ' · ' + suiClientReason(item, selected.id, linked, panel.id) : '' }}</option></select><small v-if="loadingClients">正在读取此面板的客户端…</small><small v-else-if="!relatedClients.length && !clientError">该入站暂无客户端，请先在管理入站中创建客户端并仅授权此入站。</small><small v-else>保留所选客户端原有额度、凭据和协议设置。</small></label>
       <div class="hub-form-grid"><label>服务名称<input v-model="name" aria-label="接入服务名称" required maxlength="100" :disabled="saving" /></label><label>月费（元）<input v-model.number="price" aria-label="接入服务月费" type="number" required min="0" max="99999999" step="0.01" :disabled="saving" /></label></div>
       <label v-if="panel.provider !== 'sui'" class="hub-checkbox"><input v-model="takeover" type="checkbox" :disabled="saving" />允许业务托管：后续续费、停用和删除操作可同步远端入站</label>
-      <p v-if="reason" class="form-error">{{ reason }}</p><footer><span>接入已有资源，不新建远端入站或客户端。</span><button class="hub-button primary" :disabled="saving || !name.trim() || Boolean(reason) || (panel.provider === 'sui' && !client)">{{ saving ? '接入中…' : '确认接入业务' }}</button></footer>
+      <p v-if="clientError || reason" class="form-error" role="alert">{{ clientError || reason }}</p><footer><span>接入已有资源，不新建远端入站或客户端。</span><button class="hub-button primary" :disabled="saving || loadingClients || Boolean(clientError) || !name.trim() || Boolean(reason) || (panel.provider === 'sui' && !client)">{{ saving ? '接入中…' : '确认接入业务' }}</button></footer>
     </form>
     <ElDialog :model-value="createOpen" title="新建入站" width="880px" top="5vh" class="inbound-create-dialog" append-to-body destroy-on-close :close-on-click-modal="false" :show-close="!createBusy" :before-close="closeCreate" @closed="createBusy = false">
       <ol class="create-steps" aria-label="新建入站步骤"><li :class="{ active: !creating }">1 · 选择面板</li><li :class="{ active: creating && !protocolSelected }">2 · 选择协议</li><li :class="{ active: protocolSelected }">3 · 填写配置</li></ol>

@@ -2,6 +2,8 @@
 import { randomUuid } from '@shiye/shared';
 import SuiBusinessLink from "../components/SuiBusinessLink.vue";
 import PanelFields from "../components/PanelFields.vue";
+import SuiInboundForm from '../components/SuiInboundForm.vue';
+import { suiInboundProtocols, suiInboundTemplate, validateSuiInbound } from '../sui-inbound-fields';
 import PanelDetails from '../components/PanelDetails.vue';
 import PanelConfig from '../components/PanelConfig.vue';
 import { suiRouteRule, suiRouteSchema, suiTagChoices } from "../sui-panel";
@@ -16,7 +18,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from 'vue-router';
 const props = defineProps<{ createServerId?: string; networkOnly?: boolean; networkResource?: 'outbounds' | 'config' }>();
 const createProtocol = ref('');
-watch(createProtocol, value => { if (value) editorRecord.value = { ...(editorRecord.value as Row), type: value }; });
+watch(createProtocol, value => { if (value) editorRecord.value = suiInboundTemplate(value, editorRecord.value as Row); });
 const emit = defineEmits<{ saved: []; close: []; busy: [value: boolean]; protocolSelected: [value: boolean] }>();
 watch(createProtocol, value => emit('protocolSelected', Boolean(value)), { immediate: true });
 const route = useRoute();
@@ -122,24 +124,13 @@ const editorSchema = computed((): FieldSchema => {
       type: "object",
       properties: {
         type: {
-          enum: [
-            "vless",
-            "vmess",
-            "trojan",
-            "shadowsocks",
-            "socks",
-            "http",
-            "mixed",
-            "hysteria2",
-            "tuic",
-            "anytls",
-          ],
+          enum: suiInboundProtocols,
         },
         tag: { type: "string" },
         listen: { type: "string" },
         listen_port: { type: "integer" },
         tls_id: { type: "integer" },
-        addrs: { type: "array", items: { type: "string" } },
+        addrs: { type: "array", items: { type: 'object', properties: { server: { type: 'string' }, server_port: { type: 'integer' }, remark: { type: 'string' } } } },
       },
       required: ["type", "tag", "listen_port"],
     };
@@ -204,7 +195,9 @@ watch(
     ];
     for (const protocol of protocols)
       if (!config[protocol]) {
-        config[protocol] = ["vless", "vmess", "tuic"].includes(protocol)
+        config[protocol] = protocol === 'snell'
+          ? { name: '', userkey: randomUuid().replace(/-/g, '') }
+          : ["vless", "vmess", "tuic"].includes(protocol)
           ? {
               name: "",
               uuid: randomUuid(),
@@ -511,15 +504,7 @@ async function editResource(row?: Row) {
       links: [],
       config: { vless: { name: "", uuid: randomUuid() } },
     },
-    inbounds: {
-      type: "vless",
-      tag: "",
-      listen: "::",
-      listen_port: 443,
-      tls_id: 0,
-      addrs: [],
-      out_json: {},
-    },
+    inbounds: suiInboundTemplate('vless'),
     outbounds: { type: "direct", tag: "" },
     endpoints: {
       type: "wireguard",
@@ -582,7 +567,7 @@ async function editResource(row?: Row) {
       busy.value = false;
     }
   }
-  if (resource.value === "inbounds" || resource.value === "services") {
+  if (resource.value === "services") {
     try {
       const result = await api<Row>(
         `/api/admin/sui-servers/${selected.value!.id}/resources/tls`,
@@ -624,6 +609,7 @@ async function editResource(row?: Row) {
 async function saveResource() {
   let body;
   try {
+    if (resource.value === 'inbounds') validateSuiInbound(editorRecord.value as Row);
     let record = encodePanelValue(
       editorRecord.value,
       editorOriginal.value,
@@ -660,8 +646,10 @@ async function saveResource() {
       action: editorAction.value,
       data: record,
     });
-  } catch {
-    editorError.value = "请检查必填项、流量额度与到期时间。";
+  } catch (cause) {
+    editorError.value = resource.value === 'inbounds'
+      ? cause instanceof Error && !('issues' in cause) ? cause.message : '请检查入站名称、监听端口、TLS 配置和分享地址。'
+      : "请检查必填项、流量额度与到期时间。";
     return;
   }
   if (!confirmSave.value) {
@@ -1386,6 +1374,7 @@ onMounted(async () => {
               <PanelConfig v-model="otherConfig" mode="core" :disabled="busy" />
             </details>
           </template>
+          <SuiInboundForm v-else-if="resource === 'inbounds'" v-model="editorRecord" :server-id="selected!.id" :base-url="selected!.baseUrl" :hide-protocol="Boolean(createServerId)" :disabled="busy" />
           <PanelFields
             v-else
             v-model="editorRecord"
@@ -1405,7 +1394,6 @@ onMounted(async () => {
           <p v-if="editorError" class="form-error" role="alert">
             {{ editorError }}
           </p>
-          <p v-if="resource === 'inbounds' && (editorRecord as Row).type === 'anytls'" class="muted-text">anytls 需要 TLS，请选择已配置的证书；客户端使用密码认证。</p>
           <div v-if="confirmSave" class="hub-alert" role="alert">
             <CircleAlert :size="18" /><span
               >即将修改远端配置，可能触发核心重启并中断连接。确认后再次点击保存。</span

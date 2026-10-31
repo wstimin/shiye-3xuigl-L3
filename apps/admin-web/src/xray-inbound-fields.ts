@@ -1,17 +1,28 @@
 import type { PanelRecord } from './panel-fields';
 
-export function inboundFieldGroups(keys: string[], record: PanelRecord, field: string) {
+export function inboundFieldGroups(keys: string[], record: PanelRecord, field: string): { advanced: boolean; keys: string[]; title?: string }[] {
   const common: Record<string, string[]> = {
     '': ['remark', 'protocol', 'port', 'listen', 'enable', 'settings', 'streamSettings'],
     settings: ['clients', 'accounts', 'method', 'password', 'auth', 'secretKey', 'peers', 'server', 'rewriteAddress', 'portMap', 'address', 'fakeTlsDomain'],
     streamSettings: ['network', 'security', `${String(record.network || 'tcp')}Settings`, `${String(record.security)}Settings`],
     realitySettings: ['target', 'dest', 'serverNames', 'privateKey', 'shortIds'],
     tlsSettings: ['serverName', 'certificates', 'alpn'],
+    transport: ['host', 'path', 'service_name'],
   };
+  if (!field) {
+    const basic = ['remark', 'protocol', 'listen', 'port', 'enable'];
+    const primary = [...basic, 'settings', 'streamSettings'];
+    return [
+      { advanced: false, title: '基本设置', keys: basic.filter(key => keys.includes(key)) },
+      { advanced: false, title: '协议与客户端', keys: keys.includes('settings') ? ['settings'] : [] },
+      { advanced: false, title: '传输与安全', keys: keys.includes('streamSettings') ? ['streamSettings'] : [] },
+      { advanced: true, keys: keys.filter(key => !primary.includes(key)) },
+    ].filter(group => group.keys.length);
+  }
   const visible = field === 'streamSettings' ? keys.filter(key => !/Settings$/.test(key) || common.streamSettings!.includes(key)) : keys;
   const primary = common[field];
   if (!primary) return [{ advanced: false, keys: visible }];
-  return [{ advanced: false, keys: visible.filter(key => primary.includes(key)) }, { advanced: true, keys: visible.filter(key => !primary.includes(key)) }].filter(group => group.keys.length);
+  return [{ advanced: false, keys: primary.filter(key => visible.includes(key)) }, { advanced: true, keys: visible.filter(key => !primary.includes(key)) }].filter(group => group.keys.length);
 }
 
 export function applyRealityTarget(settings: PanelRecord, target: string, serverName: string): PanelRecord {

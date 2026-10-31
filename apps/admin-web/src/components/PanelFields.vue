@@ -2,6 +2,7 @@
 import { randomUuid } from '@shiye/shared';
 import RemarkTemplate from './RemarkTemplate.vue';
 import RealityProbe from './RealityProbe.vue';
+import XuiTlsCertificates from './XuiTlsCertificates.vue';
 import { nativeInboundSettings, nativeInboundStream, xrayTransportDefaults, mapEntry, inboundFieldGroups } from '../xray-inbound-fields';
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
@@ -83,7 +84,7 @@ const keys = computed(() =>
     ]),
   ].filter((key) => !["__proto__", "prototype", "constructor", ...(props.omit || [])].includes(key)),
 );
-const fieldGroups = computed(() => props.compact ? inboundFieldGroups(keys.value, record.value, props.field) : [{ advanced: false, keys: keys.value }]);
+const fieldGroups = computed(() => props.compact ? inboundFieldGroups(keys.value, record.value, props.field) : [{ advanced: false, keys: keys.value, title: '' }]);
 const items = computed(() =>
   Array.isArray(props.modelValue) ? props.modelValue : [],
 );
@@ -276,6 +277,7 @@ async function readConfig(event: Event) {
 
 <template>
   <PanelFields v-if="serialized" :model-value="serialized" :schema="{ ...schema, type: Array.isArray(serialized) ? 'array' : 'object' }" :field="field" :readonly="readonly" :disabled="disabled" :choices="choices" :immutable="immutable" :presets="presets" :required="required" :file-fields="fileFields" :compact="compact" :panel-server-id="panelServerId" :omit="omit" @update:model-value="emit('update:modelValue', encodePanelValue($event, modelValue, field))" />
+  <XuiTlsCertificates v-else-if="compact && field === 'certificates' && panelServerId && !readonly" :model-value="items" :server-id="panelServerId" :disabled="disabled" @update:model-value="emit('update:modelValue', $event)" />
   <div v-else-if="isObject && !readonly && ['headers', 'portMap', 'hosts'].includes(field)" class="panel-map-editor">
     <div v-for="key in keys" :key="key" class="panel-map-row"><input :value="key" :aria-label="field === 'portMap' ? '来源端口' : '项目名称'" :disabled="disabled" @change="renameMapEntry(key, $event)" /><PanelFields :model-value="record[key]" :field="key" :disabled="disabled" @update:model-value="changeKey(key, $event)" /><button type="button" class="hub-link danger" :disabled="disabled" @click="emit('update:modelValue', Object.fromEntries(Object.entries(record).filter(([name]) => name !== key)))">删除</button></div>
     <div class="panel-map-row"><input v-model="mapKey" :aria-label="field === 'portMap' ? '新增来源端口' : '新增项目名称'" :placeholder="field === 'portMap' ? '来源端口，例如 8080' : '输入项目名称'" :disabled="disabled" /><button type="button" class="hub-button" :disabled="disabled || !mapKey.trim()" @click="addMapEntry">添加{{ field === 'portMap' ? '端口映射' : '项目' }}</button></div>
@@ -286,9 +288,10 @@ async function readConfig(event: Event) {
     :class="{ 'is-readonly': readonly }"
   >
     <RealityProbe v-if="compact && !readonly && field === 'realitySettings' && panelServerId" :server-id="panelServerId" :model-value="record" :disabled="disabled" @update:model-value="emit('update:modelValue', $event)" />
-    <component v-for="group in fieldGroups" :key="String(group.advanced)" :is="group.advanced ? 'details' : 'div'" :class="group.advanced ? 'panel-advanced' : 'panel-fields panel-field-group'">
+    <component v-for="(group, index) in fieldGroups" :key="group.title || String(group.advanced) + index" :is="group.advanced ? 'details' : group.title ? 'fieldset' : 'div'" :class="group.advanced ? 'panel-advanced' : group.title ? 'panel-inbound-section' : 'panel-fields panel-field-group'">
+    <legend v-if="group.title">{{ group.title }}</legend>
     <summary v-if="group.advanced">高级设置 <small>{{ group.keys.length }} 项 · 按需调整</small></summary>
-    <div :class="group.advanced ? 'panel-fields' : 'panel-field-group'">
+    <div :class="group.advanced || group.title ? 'panel-fields' : 'panel-field-group'">
     <div
       v-for="key in group.keys"
       :key="key"
@@ -300,7 +303,7 @@ async function readConfig(event: Event) {
           schema.properties?.[key]?.type === 'array',
       }"
     >
-      <div class="panel-field-label">
+      <div v-if="!(compact && !field && ['settings', 'streamSettings'].includes(key))" class="panel-field-label">
         {{ fieldLabel(key)
         }}<span v-if="schema.required?.includes(key)" class="required-mark">
           *</span
@@ -482,6 +485,8 @@ async function readConfig(event: Event) {
 .panel-map-row > input { flex: 1; min-width: 120px; }
 .panel-map-row > :nth-child(2) { flex: 1; min-width: 120px; }
 .panel-field-group { display: contents; }
+.panel-inbound-section { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 16px 0 0; border: 0; border-top: 1px solid var(--border); }
+.panel-inbound-section > legend { padding: 0 12px 0 0; color: var(--text); font-size: 14px; font-weight: 600; }
 .panel-advanced, .panel-fields > .reality-probe { grid-column: 1 / -1; min-width: 0; }
 .panel-advanced { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
 .panel-advanced > summary { cursor: pointer; color: var(--text); font-weight: 600; }

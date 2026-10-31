@@ -42,6 +42,8 @@ import { entityInitial } from '../entity-avatar';
 import { notifyError } from '../notify';
 
 const suiEditing = ref<ServiceNode | null>(null);
+const readingCertificates = ref(false), certificateError = ref('');
+const panelCertificates = ref<{ certFile: string; keyFile: string } | null>(null);
 type XuiServer = { provider?: string; id: string; name: string; baseUrl: string; enabled: boolean };
 type SyncTask = { id: string; action: string; status: string; message?: string | null; attemptCount: number; updatedAt: string };
 type OperationResult = { state?: 'success' | 'partial' | 'failed'; message?: string; pendingActions?: string[] };
@@ -394,6 +396,7 @@ function handleServerChange() {
 
 function editNode(node: ServiceNode) {
   if (node.server?.provider === 'sui') { suiEditing.value = node; return; }
+  panelCertificates.value = null; certificateError.value = '';
   const config = node.config || {};
   editingId.value = node.id;
   Object.assign(form, {
@@ -425,6 +428,19 @@ function editNode(node: ServiceNode) {
   });
   realityDetectionError.value = '';
   dialogVisible.value = true;
+}
+
+async function readPanelCertificates() {
+  const serverId = form.serverId;
+  if (!serverId || readingCertificates.value) return;
+  readingCertificates.value = true; certificateError.value = '';
+  try {
+    const result = await api<{ found: boolean; certFile: string; keyFile: string }>(`/api/admin/xui-servers/${serverId}/certs`);
+    if (serverId !== form.serverId) return;
+    if (!result.found || !result.certFile || !result.keyFile) throw Error('该面板尚未配置完整的 Web 证书和私钥。');
+    panelCertificates.value = result;
+  } catch (cause) { if (serverId === form.serverId) certificateError.value = readableError(cause, '读取证书失败'); }
+  finally { readingCertificates.value = false; }
 }
 
 async function removeNode(node: ServiceNode) {
@@ -711,7 +727,7 @@ watch(() => form.transport, () => {
 
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="node-page-alert" />
 
-    <PanelInboundPicker :panels="servers" :linked="nodes" @connected="loadNodes" />
+    <PanelInboundPicker :panels="servers" :linked="nodes" @connected="loadNodes" @edit-service="id => { const node = nodes.find(item => item.id === id); if (node) editNode(node); }" />
 
     <div class="node-stat-grid">
       <article class="node-stat-card">
@@ -798,8 +814,8 @@ watch(() => form.transport, () => {
           <el-tooltip v-if="node.syncTasks?.length" content="重试待同步任务" placement="top">
             <el-button class="runtime-icon-button runtime-retry-button" :loading="retryingIds.has(node.id)" aria-label="重试待同步任务" @click="retryNodeTasks(node)"><RefreshCw :size="15" /></el-button>
           </el-tooltip>
-          <el-tooltip content="编辑节点" placement="top">
-            <el-button class="runtime-icon-button" aria-label="编辑节点" @click="editNode(node)"><Edit3 :size="15" /></el-button>
+          <el-tooltip content="业务设置：名称、价格、额度与托管配置" placement="top">
+            <el-button class="runtime-icon-button" aria-label="业务设置" @click="editNode(node)"><Edit3 :size="15" /></el-button>
           </el-tooltip>
           <el-tooltip :content="node.server?.provider === 'sui' ? '同步业务状态' : '同步出站'" placement="top">
           <el-button
@@ -846,7 +862,7 @@ watch(() => form.transport, () => {
 
   <el-dialog
     v-model="dialogVisible"
-    :title="editingId ? '编辑服务入站' : '创建服务入站'"
+    title="3x-ui 业务入站设置"
     width="min(920px, 94vw)"
     class="node-dialog"
     destroy-on-close
@@ -854,8 +870,8 @@ watch(() => form.transport, () => {
     <div class="node-dialog-intro">
       <Router :size="18" />
       <div>
-        <strong>{{ editingId ? '更新节点与远端入站配置' : '创建节点并接入远端 3x-ui 入站' }}</strong>
-        <span>保存时会按所选模式创建或校验真实入站，并同步必要的远端配置。</span>
+        <strong>已接入业务的 3x-ui 入站</strong>
+        <span>这里同步业务额度、价格与托管配置；其他面板的入站请在上方“面板全部入站”中选择。</span>
       </div>
     </div>
 
@@ -864,7 +880,7 @@ watch(() => form.transport, () => {
         <header><strong>基础信息</strong><span>节点名称、所属面板连接和启用状态</span></header>
         <div class="node-dialog-grid">
           <el-form-item label="节点名称"><el-input v-model="form.name" maxlength="100" placeholder="输入节点名称" /></el-form-item>
-          <el-form-item label="面板连接">
+          <el-form-item label="3x-ui 面板连接">
             <el-select v-model="form.serverId" placeholder="选择面板连接" style="width: 100%" @change="handleServerChange">
               <el-option v-for="server in servers.filter(item => item.provider !== 'sui')" :key="server.id" :label="server.name" :value="server.id" />
             </el-select>
@@ -891,15 +907,18 @@ watch(() => form.transport, () => {
       <section class="node-dialog-section">
         <header><strong>协议与安全</strong><span>选择可生成用户分享链接的服务协议与传输安全类型</span></header>
         <div class="node-dialog-grid">
-          <el-form-item label="节点协议">
+          <el-form-item label="协议">
             <el-select v-model="form.protocol" style="width: 100%">
               <el-option v-for="item in protocolOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="传输安全">
+          <el-form-item label="安全设置（TLS / Reality）">
             <el-select v-model="form.encryption" style="width: 100%">
               <el-option v-for="item in selectableEncryptionOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
+          </el-form-item>
+          <el-form-item v-if="form.encryption === 'tls'" label="面板 Web 证书" class="node-dialog-full">
+            <div class="node-certificate-reader"><el-button :loading="readingCertificates" :disabled="!form.serverId || saving" @click="readPanelCertificates">读取面板证书</el-button><small class="muted-text">读取原面板 Web 证书路径；TLS 配置会随业务设置同步至远端。</small><dl v-if="panelCertificates" class="node-certificate-paths"><div><dt>公钥证书路径</dt><dd>{{ panelCertificates.certFile }}</dd></div><div><dt>私钥文件路径</dt><dd>{{ panelCertificates.keyFile }}</dd></div></dl><p v-if="certificateError" class="form-error" role="alert">{{ certificateError }}</p></div>
           </el-form-item>
           <template v-if="form.remoteMode === 'create' && form.encryption === 'reality'">
             <el-form-item label="Reality 目标">
@@ -928,26 +947,26 @@ watch(() => form.transport, () => {
                 <el-option v-for="item in selectableTransportOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
-            <el-form-item v-if="form.transport === 'tcp'" label="TCP Header">
+            <el-form-item v-if="form.transport === 'tcp'" label="TCP 伪装（Header）">
               <el-select v-model="form.tcpHeaderType" style="width: 100%">
                 <el-option label="None" value="none" />
                 <el-option label="HTTP" value="http" />
               </el-select>
             </el-form-item>
-            <el-form-item v-if="transportNeedsHostPath || (form.transport === 'tcp' && form.tcpHeaderType === 'http')" label="Host">
+            <el-form-item v-if="transportNeedsHostPath || (form.transport === 'tcp' && form.tcpHeaderType === 'http')" label="主机名（Host）">
               <el-input v-model="form.transportHost" maxlength="255" placeholder="可留空；使用域名伪装时填写" />
             </el-form-item>
-            <el-form-item v-if="transportNeedsHostPath || (form.transport === 'tcp' && form.tcpHeaderType === 'http')" label="Path">
+            <el-form-item v-if="transportNeedsHostPath || (form.transport === 'tcp' && form.tcpHeaderType === 'http')" label="访问路径（Path）">
               <el-input v-model="form.transportPath" maxlength="500" placeholder="例如 /service" />
             </el-form-item>
-            <el-form-item v-if="form.transport === 'grpc'" label="Service Name">
+            <el-form-item v-if="form.transport === 'grpc'" label="服务名称（Service Name）">
               <el-input v-model="form.grpcServiceName" maxlength="255" placeholder="可留空，建议使用唯一服务名" />
             </el-form-item>
-            <el-form-item v-if="form.transport === 'grpc'" label="Authority">
+            <el-form-item v-if="form.transport === 'grpc'" label="服务主机（Authority）">
               <el-input v-model="form.grpcAuthority" maxlength="255" placeholder="可留空；反向代理需要时填写" />
             </el-form-item>
             <el-form-item v-if="form.transport === 'grpc'" label="多路模式" class="node-switch-item"><el-switch v-model="form.grpcMultiMode" /></el-form-item>
-            <el-form-item v-if="form.transport === 'xhttp'" label="XHTTP Mode">
+            <el-form-item v-if="form.transport === 'xhttp'" label="XHTTP 模式（Mode）">
               <el-select v-model="form.xhttpMode" style="width: 100%">
                 <el-option v-for="item in xhttpModeOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>

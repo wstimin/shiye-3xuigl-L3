@@ -5,6 +5,8 @@ import { api } from '../api';
 const props = defineProps<{
   node: {
     id: string;
+    serverId: string;
+    inboundId?: number | null;
     name: string;
     priceMonthly: string;
     trafficLimitGb: string;
@@ -52,7 +54,7 @@ onMounted(async () => {
   >
     <section class="hub-dialog" aria-labelledby="pricing-title">
       <header>
-        <h2 id="pricing-title">编辑 S-UI 服务入站</h2>
+        <h2 id="pricing-title">S-UI 业务入站设置</h2>
         <button
           class="icon-button"
           :disabled="busy"
@@ -91,7 +93,7 @@ onMounted(async () => {
         ><label>备注<input v-model="form.remark" maxlength="2000" /></label>
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
         <footer>
-          <router-link class="hub-link" to="/sui-servers"
+          <router-link class="hub-link" :to="{ path: '/sui-servers', query: { serverId: node.serverId, resource: 'inbounds', ...(node.inboundId ? { inboundId: String(node.inboundId) } : {}) } }"
             >管理协议与远端资源</router-link
           ><button class="hub-button primary" :disabled="busy">
             {{ busy ? '保存中…' : '保存' }}

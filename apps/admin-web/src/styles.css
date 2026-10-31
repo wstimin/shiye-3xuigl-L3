@@ -197,6 +197,12 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .panel-list-search { padding: 16px 20px; }
 .panel-list-search .hub-search { max-width: 360px; }
 .panel-resource-table { min-width: 580px; }
+.node-certificate-reader { display: grid; gap: 10px; width: 100%; }
+.node-certificate-reader > button { justify-self: start; }
+.node-certificate-paths { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-soft); font-size: 13px; }
+.node-certificate-paths > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 10px; }
+.node-certificate-paths dt { color: var(--muted); }
+.node-certificate-paths dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
 .panel-credential-section { padding-top: 16px; border-top: 1px solid var(--border); }
 .panel-credential-section > p { font-size: 14px; margin: 6px 0 16px; }
 .panel-choice-list { display: grid; gap: 10px; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 6px; }
