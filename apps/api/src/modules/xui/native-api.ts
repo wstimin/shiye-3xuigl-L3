@@ -6,7 +6,7 @@ type Row = Record<string, any>;
 export const nativeExecuteSchema = z.object({
   operation: z.string().max(300),
   parameters: z
-    .record(z.union([z.string().max(4000), z.number().finite(), z.boolean()]))
+    .record(z.string(), z.union([z.string().max(4000), z.number().finite(), z.boolean()]))
     .default({}),
   body: z.unknown().optional(),
   confirmed: z.boolean().default(false),

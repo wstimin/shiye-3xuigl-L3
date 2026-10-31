@@ -408,7 +408,7 @@ onMounted(loadFinance);
         <el-table :data="logs" v-loading="loading" style="width: 100%">
           <el-table-column label="用户" min-width="160"><template #default="{ row }">{{ row.customer?.name || '-' }}</template></el-table-column>
           <el-table-column label="类型" width="140"><template #default="{ row }"><el-tag type="info">{{ logTypeLabel(row.type) }}</el-tag></template></el-table-column>
-          <el-table-column prop="amount" label="变动" width="120" />
+          <el-table-column label="变动" width="120"><template #default="{ row }">{{ (Number(row.afterBalance) - Number(row.beforeBalance)).toFixed(2) }}</template></el-table-column>
           <el-table-column prop="beforeBalance" label="变动前" width="120" />
           <el-table-column prop="afterBalance" label="变动后" width="120" />
           <el-table-column prop="operator" label="操作人" width="130" />

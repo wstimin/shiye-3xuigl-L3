@@ -17,7 +17,7 @@ export const suiClientProtocols = ['vless', 'vmess', 'trojan', 'shadowsocks', 's
 export const suiSaveSchema = z.object({
   object: z.enum(['clients', 'inbounds', 'outbounds', 'endpoints', 'services', 'tls', 'config', 'settings']),
   action: z.enum(['new', 'edit', 'del', 'set']),
-  data: z.record(z.unknown())
+  data: z.record(z.string(), z.unknown())
 }).superRefine((value, ctx) => {
   if (['config', 'settings'].includes(value.object)) {
     if (!['edit', 'set'].includes(value.action)) ctx.addIssue({ code: 'custom', message: '配置只能整体保存' });
@@ -27,7 +27,7 @@ export const suiSaveSchema = z.object({
       ctx.addIssue({ code: 'custom', message: '修改或删除资源需要有效的 ID' });
     }
     if (value.object === 'clients' && value.action !== 'del') {
-      const client = z.object({ name: z.string().trim().min(1).max(160), enable: z.boolean(), volume: z.number().int().nonnegative().safe(), expiry: z.number().int().safe(), inbounds: z.array(z.number().int().positive()).min(1), config: z.record(z.unknown()) }).safeParse(value.data);
+      const client = z.object({ name: z.string().trim().min(1).max(160), enable: z.boolean(), volume: z.number().int().nonnegative().safe(), expiry: z.number().int().safe(), inbounds: z.array(z.number().int().positive()).min(1), config: z.record(z.string(), z.unknown()) }).safeParse(value.data);
       if (!client.success) ctx.addIssue({ code: 'custom', message: '客户端需要标识、有效配额、协议凭据及至少一个授权入站' });
     }
   }

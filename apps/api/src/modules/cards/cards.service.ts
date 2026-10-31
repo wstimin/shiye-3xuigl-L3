@@ -311,20 +311,23 @@ export class CardsService {
     const card = await this.prisma.card.findUnique({ where: { id } });
     if (!card) throw new NotFoundException('卡密不存在');
     if (card.status === 'used') throw new BadRequestException('已使用的卡密不能删除');
-    await this.prisma.card.delete({ where: { id } });
+    const removed = await this.prisma.card.deleteMany({ where: { id, status: { not: 'used' } } });
+    if (removed.count !== 1) throw new BadRequestException('卡密已被使用或删除，请刷新后重试');
     return { deleted: true, id };
   }
 
   async deleteBatch(id: string) {
-    const batch = await this.prisma.cardBatch.findUnique({ where: { id }, include: { cards: { select: { status: true } } } });
-    if (!batch) throw new NotFoundException('卡密批次不存在');
-    if (batch.cards.some((card) => card.status === 'used')) throw new BadRequestException('包含已使用卡密的批次不能删除');
-    await this.prisma.$transaction([
-      this.prisma.card.deleteMany({ where: { batchId: id } }),
-      this.prisma.cardBatch.delete({ where: { id } })
-    ]);
-    return { deleted: true, id };
+    return this.prisma.$transaction(async (tx) => {
+      const batches = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM card_batches WHERE id = ${id} FOR UPDATE`;
+      if (!batches.length) throw new NotFoundException('卡密批次不存在');
+      const cards = await tx.$queryRaw<Array<{ id: string; status: string }>>`SELECT id, status FROM cards WHERE batchId = ${id} FOR UPDATE`;
+      if (cards.some((card) => card.status === 'used')) throw new BadRequestException('包含已使用卡密的批次不能删除');
+      await tx.card.deleteMany({ where: { batchId: id } });
+      await tx.cardBatch.delete({ where: { id } });
+      return { deleted: true, id };
+    });
   }
+
 
   async deleteUnusedTemplateCards(templateId: string) {
     await this.ensureTemplate(templateId);

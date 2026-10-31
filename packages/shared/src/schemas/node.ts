@@ -151,7 +151,7 @@ export const networkRouteUpsertSchema = z.object({
   serviceNodeId: z.string().min(1).optional().nullable(),
   outboundId: z.string().min(1).optional().nullable(),
   ownership: resourceOwnershipSchema.default('managed'),
-  rule: z.record(z.unknown()).refine((rule) => rule.type === undefined || rule.type === 'field', '目前仅支持 field 路由规则'),
+  rule: z.record(z.string(), z.unknown()).refine((rule) => rule.type === undefined || rule.type === 'field', '目前仅支持 field 路由规则'),
   pushRemote: z.boolean().default(true),
   conflict: z.enum(['reject', 'replace_managed', 'takeover']).default('reject')
 });

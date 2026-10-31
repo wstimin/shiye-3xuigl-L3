@@ -23,7 +23,7 @@ import {
 import { XuiService } from "../xui/xui.service.js";
 type Row = Record<string, any>;
 export const panelInboundCreateSchema = z.object({
-  inbound: z.record(z.unknown()),
+  inbound: z.record(z.string(), z.unknown()),
   outboundTag: z.string().trim().min(1).max(160).optional(),
   client: z
     .object({

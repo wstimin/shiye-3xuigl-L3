@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 const errors = [];
+const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+if (nodeMajor < 20 || (nodeMajor === 20 && nodeMinor < 19)) errors.push('Node.js 20.19+ is required.');
 
 readRequiredFile('apps/api/dist/main.js');
 readRequiredFile('packages/shared/dist/index.js');

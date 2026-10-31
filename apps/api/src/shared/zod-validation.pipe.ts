@@ -21,7 +21,7 @@ export class ZodValidationPipe implements PipeTransform {
   constructor(private readonly schema: ZodSchema) {}
 
   transform(value: unknown) {
-    const result = this.schema.safeParse(value);
+    const result = this.schema.safeParse(value, { reportInput: true });
     if (!result.success) {
       throw new BadRequestException(result.error.issues.map(formatValidationIssue));
     }
@@ -34,21 +34,20 @@ export function formatValidationIssue(issue: ZodIssue) {
   const prefix = field ? `${field}：` : '';
 
   switch (issue.code) {
-    case 'invalid_date':
-      return `${prefix}日期格式无效，请重新选择`;
-    case 'invalid_enum_value':
+    case 'invalid_value':
       return `${prefix}选项无效`;
     case 'invalid_type':
-      if (issue.received === 'undefined' || issue.received === 'null') return `${prefix}不能为空`;
+      if (issue.expected === 'date') return `${prefix}日期格式无效，请重新选择`;
+      if (issue.input === undefined || issue.input === null) return `${prefix}不能为空`;
       if (issue.expected === 'number') return `${prefix}必须填写有效数字`;
       if (issue.expected === 'boolean') return `${prefix}必须选择有效状态`;
       if (issue.expected === 'string') return `${prefix}必须填写有效文本`;
       return `${prefix}数据类型无效`;
     case 'too_small':
-      if (issue.type === 'number') return `${prefix}不能小于 ${issue.minimum}`;
+      if (issue.origin === 'number') return `${prefix}不能小于 ${issue.minimum}`;
       return `${prefix}${Number(issue.minimum) > 0 ? '不能为空或长度不足' : '长度不足'}`;
     case 'too_big':
-      if (issue.type === 'number') return `${prefix}不能大于 ${issue.maximum}`;
+      if (issue.origin === 'number') return `${prefix}不能大于 ${issue.maximum}`;
       return `${prefix}内容过长，最多 ${issue.maximum} 个字符`;
     case 'unrecognized_keys':
       return `${prefix}包含不支持的字段：${issue.keys.join('、')}`;
@@ -59,9 +58,9 @@ export function formatValidationIssue(issue: ZodIssue) {
   }
 }
 
-function validationField(path: Array<string | number>) {
+function validationField(path: PropertyKey[]) {
   if (!path.length) return '';
-  return path.map((part) => typeof part === 'number' ? `第 ${part + 1} 项` : fieldLabels[part] || part).join(' / ');
+  return path.map((part) => typeof part === 'number' ? `第 ${part + 1} 项` : fieldLabels[String(part)] || String(part)).join(' / ');
 }
 
 function containsChinese(value: string) {

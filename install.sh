@@ -231,8 +231,7 @@ assert_migrations_are_rollback_compatible() {
 
 install_node() {
   if command -v node >/dev/null 2>&1; then
-    major="$(node -v | sed 's/^v//' | cut -d. -f1)"
-    if [ "${major}" -ge 20 ]; then return; fi
+    if node -e 'const [major,minor]=process.versions.node.split(".").map(Number); process.exit(major>20 || (major===20 && minor>=19) ? 0 : 1)'; then return; fi
   fi
 
   case "${PKG_MANAGER}" in
@@ -251,8 +250,7 @@ install_node() {
   esac
 
   command -v node >/dev/null 2>&1 || die "Node.js installation failed"
-  major="$(node -v | sed 's/^v//' | cut -d. -f1)"
-  [ "${major}" -ge 20 ] || die "Node.js 20+ is required, current version is $(node -v)"
+  node -e 'const [major,minor]=process.versions.node.split(".").map(Number); process.exit(major>20 || (major===20 && minor>=19) ? 0 : 1)' || die "Node.js 20.19+ is required, current version is $(node -v)"
 }
 
 random_hex() { openssl rand -hex 32; }

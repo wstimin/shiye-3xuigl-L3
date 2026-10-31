@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NestFactory } from '@nestjs/core';
+import { ExpressAdapter } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './modules/app.module.js';
 import { HttpExceptionFilter } from './shared/http-exception.filter.js';
@@ -14,7 +15,7 @@ import { serveStaticAssets } from './web-assets.js';
 import { maintenanceActive, beginMaintenanceOperation } from './shared/maintenance-state.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: true, bodyParser: false });
+  const app = await NestFactory.create(AppModule, new ExpressAdapter(), { cors: true, bodyParser: false });
 
   app.setGlobalPrefix('api');
   app.use(cookieParser());

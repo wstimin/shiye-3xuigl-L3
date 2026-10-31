@@ -91,34 +91,40 @@ export class CustomersService {
   }
 
   async remove(id: string) {
-    const customer = await this.prisma.customer.findUnique({
-      where: { id },
-      select: { id: true, nodes: { select: { id: true } } }
-    });
-    if (!customer) throw new NotFoundException('用户不存在');
-    const pendingRenewal = await this.prisma.renewalLog.findFirst({
-      where: { customerId: id, status: 'pending' },
-      select: { id: true }
-    });
-    if (pendingRenewal) throw new BadRequestException('该用户存在待处理续费，完成自动恢复或人工对账后才能删除');
-    const [rechargeOrders, balanceLogs, renewalLogs, usedCards] = await this.prisma.$transaction([
-      this.prisma.rechargeOrder.count({ where: { customerId: id } }),
-      this.prisma.balanceLog.count({ where: { customerId: id } }),
-      this.prisma.renewalLog.count({ where: { customerId: id } }),
-      this.prisma.card.count({ where: { usedById: id } })
-    ]);
-    if (rechargeOrders || balanceLogs || renewalLogs || usedCards) {
-      throw new BadRequestException('该用户已有充值、余额、续费或卡密财务历史，不能硬删除；请改为停用账号');
-    }
+    return this.prisma.$transaction(async (tx) => {
+      // Serialize deletion with credits, debits and new financial references.
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM customers WHERE id = ${id} FOR UPDATE`;
+      if (!locked.length) throw new NotFoundException('用户不存在');
+      const customer = await tx.customer.findUnique({
+        where: { id },
+        select: { id: true, nodes: { select: { id: true } } }
+      });
+      if (!customer) throw new NotFoundException('用户不存在');
+      const pendingRenewal = await tx.renewalLog.findFirst({
+        where: { customerId: id, status: 'pending' },
+        select: { id: true }
+      });
+      if (pendingRenewal) throw new BadRequestException('该用户存在待处理续费，完成自动恢复或人工对账后才能删除');
+      const [rechargeOrders, balanceLogs, renewalLogs, usedCards] = await Promise.all([
+        tx.rechargeOrder.count({ where: { customerId: id } }),
+        tx.balanceLog.count({ where: { customerId: id } }),
+        tx.renewalLog.count({ where: { customerId: id } }),
+        tx.card.count({ where: { usedById: id } })
+      ]);
+      if (rechargeOrders || balanceLogs || renewalLogs || usedCards) {
+        throw new BadRequestException('该用户已有充值、余额、续费或卡密财务历史，不能硬删除；请改为停用账号');
+      }
 
-    await this.prisma.customer.delete({ where: { id } });
-    return {
-      deleted: true,
-      id,
-      unboundNodes: customer.nodes.length,
-      remoteCleanup: { skipped: true, reason: '面板用户删除仅影响本地账号，远端 3x-ui 客户端仍归服务节点管理' }
-    };
+      await tx.customer.delete({ where: { id } });
+      return {
+        deleted: true,
+        id,
+        unboundNodes: customer.nodes.length,
+        remoteCleanup: { skipped: true, reason: '面板用户删除仅影响本地账号，远端 3x-ui 客户端仍归服务节点管理' }
+      };
+    });
   }
+
 
   async adjustBalance(id: string, input: z.infer<typeof balanceAdjustSchema>, operator = 'admin') {
     return this.prisma.$transaction(async (tx) => {
@@ -143,7 +149,7 @@ export class CustomersService {
         data: {
           customerId: id,
           type: input.mode === 'set' ? 'admin_set' : input.mode === 'subtract' ? 'admin_subtract' : 'admin_add',
-          amount: input.mode === 'subtract' ? amount.negated() : amount,
+          amount: afterBalance.minus(beforeBalance),
           beforeBalance,
           afterBalance,
           operator,
