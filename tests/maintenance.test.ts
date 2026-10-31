@@ -6,11 +6,24 @@ import { join } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { compareVersions, validateRelease, snapshotUpload, packBackup, unpackBackup, migrationEnv, parseEnv, serializeEnv, updateProgress, writeJson } from '../scripts/maintenance-core.mjs';
 import { MaintenanceService } from '../apps/api/src/modules/maintenance/maintenance.service.js';
-import { maintenanceBackground, maintenanceOperations } from '../apps/api/src/shared/maintenance-state.js';
+import { maintenanceActive, maintenanceBackground, maintenanceDirectory, maintenanceOperations } from '../apps/api/src/shared/maintenance-state.js';
 
 const secrets = { ENCRYPTION_KEY: 'source-encryption', CARD_HASH_SECRET: 'source-card-hash', JWT_SECRET: 'source-jwt', SESSION_SECRET: 'source-session', DEFAULT_ADMIN_USERNAME: 'original-admin', DEFAULT_ADMIN_PASSWORD: 'original-password' };
 async function fixture(fn: (root: string) => Promise<void>) { const root = await mkdtemp(join(tmpdir(), 'shiye-maintenance-')); try { await fn(root); } finally { await rm(root, { recursive: true, force: true }); } }
 const release = () => ({ tag_name: 'v1.10.0', assets: [{ name: 'shiye-3xuigl.zip', size: 100, digest: 'sha256:' + 'a'.repeat(64), browser_download_url: 'https://github.com/wstimin/shiye-3xuigl-L3/releases/download/v1.10.0/shiye-3xuigl.zip' }] });
+
+test('unconfigured panel installations never use another sites system maintenance directory', async () => fixture(async root => {
+  const before = process.env.SHIYE_MAINTENANCE_DIR;
+  try {
+    process.env.SHIYE_MAINTENANCE_DIR = root;
+    await writeFile(join(root, 'ready.json'), '{}'); await writeFile(join(root, 'gate.json'), '{}');
+    assert.equal(maintenanceDirectory(), root); assert.equal(maintenanceActive(), true);
+    delete process.env.SHIYE_MAINTENANCE_DIR;
+    assert.equal(maintenanceDirectory(), join(process.cwd(), '.shiye-maintenance'));
+    assert.equal(maintenanceActive(), false);
+    const status = new MaintenanceService().status(); assert.equal(status.available, false); assert.equal(status.job, null); assert.equal(status.queued, false);
+  } finally { if (before === undefined) delete process.env.SHIYE_MAINTENANCE_DIR; else process.env.SHIYE_MAINTENANCE_DIR = before; }
+}));
 
 test('uploaded files are privately snapshotted without overwriting existing files', async () => fixture(async root => {
   await writeFile(join(root, 'upload'), 'backup bytes');
