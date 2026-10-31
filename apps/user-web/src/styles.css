@@ -26,6 +26,7 @@ button svg, a svg { flex-shrink: 0; }
 .button.primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
 .button.primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
 .button.secondary:hover:not(:disabled) { border-color: var(--border-strong); background: var(--panel-soft); }
+.button:disabled, .modal-primary-button:disabled { color: var(--muted); background: var(--surface-soft); border-color: var(--border-strong); }
 .button.small { min-height: 32px; padding: 6px 10px; font-size: 14px; gap: 6px; }
 .button.wide { width: 100%; }
 .icon-button, .copy-button { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-bg); color: var(--muted); }

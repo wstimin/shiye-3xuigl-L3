@@ -5,13 +5,14 @@ import { ChevronRight, CircleAlert, CircleUserRound, Home, LogOut, Network, Rece
 import LoginScreen from '../../web-shared/LoginScreen.vue';
 import BrandMark from '../../web-shared/BrandMark.vue';
 import ThemeToggle from '../../web-shared/ThemeToggle.vue';
+import { setThemeAccount } from '../../web-shared/theme';
 import { applyBranding } from '../../web-shared/branding';
 import { api, onSessionExpired } from './api';
 import { userAvatarStyle, userInitial } from './avatar';
 import { onNotify, type NotifyPayload } from './notify';
 import { preloadRoute, routeLoadError, routeLoading } from './router';
 
-type SessionUser = { role: string; username: string };
+type SessionUser = { role: string; username: string; customerId: string };
 type Branding = { brandName: string; logoDataUrl: string };
 type UserIdentity = { customer: { name: string; loginUsername: string } };
 
@@ -49,6 +50,8 @@ watch(user, session => {
     if (user.value) for (const item of nav) preloadRoute(item.to);
   }, 800);
 });
+
+watch(user, session => setThemeAccount(session?.customerId || null), { flush: 'sync' });
 
 async function loadBranding() {
   try {

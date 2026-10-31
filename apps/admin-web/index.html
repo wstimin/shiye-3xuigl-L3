@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme-entry="admin">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,7 +10,7 @@
       html[data-theme="dark"], html[data-theme="dark"] body, html[data-theme="dark"] #app { background: #14171b; color-scheme: dark; }
     </style>
     <script>
-      try { const value = localStorage.getItem("shiye:theme"); document.documentElement.dataset.theme = value === "dark" || value !== "light" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; } catch {}
+      try { const value = localStorage.getItem("shiye:theme:admin") ?? localStorage.getItem("shiye:theme"); document.documentElement.dataset.theme = value === "dark" || value !== "light" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; } catch {}
     </script>
     <script>
       (() => {

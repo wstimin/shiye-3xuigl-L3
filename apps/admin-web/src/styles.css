@@ -106,7 +106,10 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 /* Panel directory: compact rows instead of dashboard tiles */
 
 /* Element Plus integration */
-:root .el-button { gap: 6px; font-weight: 500; --button-tone: var(--primary-strong); --el-button-disabled-text-color: var(--muted); --el-button-disabled-bg-color: var(--surface-soft); --el-button-disabled-border-color: var(--border-strong); }
+:root .el-button { gap: 6px; font-weight: 600; --button-tone: var(--primary-strong); --el-button-disabled-text-color: var(--muted); --el-button-disabled-bg-color: var(--surface-soft); --el-button-disabled-border-color: var(--border-strong); }
+:root .el-button > span { gap: 6px; color: inherit; }
+:root .el-button.is-loading::before { background: transparent; }
+:root .el-button:focus-visible { outline: 2px solid var(--primary-strong); outline-offset: 3px; }
 .el-button + .el-button { margin-left: 0; }
 :root .el-button--primary { --button-tone: var(--primary-strong); --button-fill: var(--primary); --button-ink: var(--on-primary); }
 :root .el-button--success { --button-tone: var(--success); --button-fill: var(--success); --button-ink: var(--on-status); }
@@ -116,7 +119,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 :root .el-button:is(.el-button--primary, .el-button--success, .el-button--warning, .el-button--danger, .el-button--info):not(.is-plain, .is-text, .is-link) { --el-button-text-color: var(--button-ink); --el-button-bg-color: var(--button-fill); --el-button-border-color: var(--button-fill); --el-button-hover-text-color: var(--button-ink); --el-button-hover-bg-color: var(--button-fill); --el-button-hover-border-color: var(--button-fill); --el-button-active-text-color: var(--button-ink); --el-button-active-bg-color: var(--button-fill); --el-button-active-border-color: var(--button-fill); }
 :root .el-button:is(.is-plain, .is-text, .is-link) { --el-button-text-color: var(--button-tone); --el-button-hover-link-text-color: var(--button-tone); --el-button-active-color: var(--button-tone); --el-button-hover-text-color: var(--button-tone); --el-button-hover-bg-color: var(--surface-soft); --el-button-hover-border-color: var(--button-tone); --el-button-active-text-color: var(--button-tone); --el-button-active-bg-color: var(--surface-soft); }
 :root .el-button.is-plain { --el-button-bg-color: var(--surface); --el-button-border-color: var(--button-tone); }
-:root .el-button.is-disabled { opacity: 1; color: var(--muted); background: var(--surface-soft); border-color: var(--border-strong); }
+:root .el-button.is-disabled:disabled, :root .el-button.is-disabled:disabled:is(:hover, :focus, :active) { opacity: 1; color: var(--muted); background: var(--surface-soft); border-color: var(--border-strong); }
 .el-switch { --el-switch-on-color: var(--primary-strong); }
 .el-input, .el-textarea, .el-select { --el-input-border-color: var(--field-border); --el-input-hover-border-color: var(--field-hover); --el-input-focus-border-color: var(--primary-strong); --el-input-bg-color: var(--field-bg); --el-select-border-color-hover: var(--field-hover); --el-select-input-focus-border-color: var(--primary-strong); --el-select-wrapper-bg-color: var(--field-bg); }
 .el-input__wrapper, .el-select__wrapper { box-shadow: 0 0 0 1px var(--field-border) inset; background: var(--field-bg); border-radius: 5px; }
@@ -208,9 +211,10 @@ input:focus, select:focus, textarea:focus { outline-color: var(--primary-strong)
 .panel-choice-list { display: grid; gap: 10px; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 6px; }
 .panel-choice-list legend { padding: 0 6px; font-size: 14px; color: var(--muted); }
 .hub-button, .dashboard-refresh, .icon-button, .settings-file-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 14px; font-weight: 500; white-space: nowrap; }
-.hub-button:hover, .dashboard-refresh:hover, .icon-button:hover { background: var(--surface-soft); border-color: var(--border-strong); }
+.hub-button:hover:not(:disabled), .dashboard-refresh:hover:not(:disabled), .icon-button:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--border-strong); }
 .hub-button.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
-.hub-button.primary:hover { background: var(--primary-hover); }
+.hub-button.primary:hover:not(:disabled) { background: var(--primary-hover); }
+.hub-button:disabled, .dashboard-refresh:disabled, .icon-button:disabled { color: var(--muted); background: var(--surface-soft); border-color: var(--border-strong); }
 .icon-button { width: 32px; padding: 6px; }
 .hub-link { border: 0; background: transparent; color: var(--primary-strong); padding: 3px 0; font-size: 13px; display: inline-flex; gap: 4px; align-items: center; }
 .hub-link:hover { text-decoration: underline; }
@@ -336,7 +340,8 @@ input::placeholder, textarea::placeholder { color: var(--field-placeholder); opa
 .settings-workspace-title p, .settings-workspace-meta, .settings-workspace-head p { font-size: 14px; color: var(--muted); margin-top: 4px; }
 .settings-workspace-body { padding: 24px; }
 .settings-workspace-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--border); background: var(--surface); border-radius: 0 0 8px 8px; }
-.settings-workspace-footer span { color: var(--muted); font-size: 14px; }
+.settings-workspace-footer > span { color: var(--muted); font-size: 14px; }
+.settings-workspace-footer > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .settings-password-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .settings-workspace-title > div, .settings-section-heading > div { display: grid; gap: 4px; }
 .settings-section-heading span, .settings-workspace-title small { font-size: 14px; color: var(--muted); font-weight: 400; }

@@ -1,9 +1,13 @@
 import { computed, ref } from 'vue';
 
 type Theme = 'light' | 'dark' | 'system';
-const key = 'shiye:theme';
+const entry = document.documentElement.dataset.themeEntry === 'admin' ? 'admin' : 'user';
+let key = `shiye:theme:${entry}`;
 function savedTheme(): Theme {
-  try { const value = localStorage.getItem(key); if (value === 'light' || value === 'dark') return value; } catch {}
+  try {
+    const value = localStorage.getItem(key) ?? (entry === 'admin' ? localStorage.getItem('shiye:theme') : null);
+    if (value === 'light' || value === 'dark') return value;
+  } catch {}
   return 'system';
 }
 const preference = ref<Theme>(savedTheme());
@@ -15,13 +19,19 @@ function apply() {
   const value = dark.value ? 'dark' : 'light';
   document.documentElement.dataset.theme = value;
   document.documentElement.classList.toggle('dark', dark.value);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark.value ? '#1a1916' : '#f7f5f2');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark.value ? '#14171b' : '#f7f8fa');
+}
+export function setThemeAccount(customerId: string | null) {
+  if (entry !== 'user') return;
+  key = customerId ? `shiye:theme:user:${encodeURIComponent(customerId)}` : 'shiye:theme:user';
+  preference.value = savedTheme();
+  apply();
 }
 export function setTheme(value: Theme) {
   preference.value = value;
-  try { if (value === 'system') localStorage.removeItem(key); else localStorage.setItem(key, value); } catch {}
+  try { localStorage.setItem(key, value); } catch {}
   apply();
 }
 media.addEventListener('change', event => { systemDark.value = event.matches; apply(); });
-window.addEventListener('storage', event => { if (event.key === key) { preference.value = savedTheme(); apply(); } });
+window.addEventListener('storage', event => { if (event.key === key || event.key === null) { preference.value = savedTheme(); apply(); } });
 apply();

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme-entry="user">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,7 +8,7 @@
     <style>html, body, #app { min-height: 100%; margin: 0; background: #f7f8fa; }
       html[data-theme="dark"], html[data-theme="dark"] body, html[data-theme="dark"] #app { background: #14171b; color-scheme: dark; }</style>
     <script>
-      try { const value = localStorage.getItem("shiye:theme"); document.documentElement.dataset.theme = value === "dark" || value !== "light" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; } catch {}
+      try { const value = localStorage.getItem("shiye:theme:user"); document.documentElement.dataset.theme = value === "dark" || value !== "light" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; } catch {}
     </script>
     <script>
       (() => {
