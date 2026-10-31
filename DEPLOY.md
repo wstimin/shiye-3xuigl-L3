@@ -5,7 +5,7 @@
 ## 1. 环境要求
 
 - Linux 服务器，推荐 Debian 12、Ubuntu 22.04+、CentOS/Rocky 9+
-- Node.js 20+
+- Node.js 20.19 或更新版本（推荐使用维护中的 LTS 版本）
 - npm 10+
 - MySQL 8.0+ 或兼容版本
 - 可选：Nginx、systemd
@@ -31,7 +31,7 @@
 - `prisma/schema.prisma`
 - `prisma/migrations`
 
-README、部署文档、安装脚本、前端源码、后端源码、seed 文件、示例配置和 `.git` 默认不会保留在服务器运行目录。预构建发布包本身会包含首次安装必需的 `.env.example` 和 `prisma/seed.ts`；它们会在安装完成后的运行目录清理阶段移除。
+README、部署文档、安装脚本、前端源码、后端源码、示例配置和 `.git` 默认不会保留在服务器运行目录。预构建发布包包含首次安装必需的 `.env.example`、数据库迁移和 `scripts/sync-admin.mjs`；安装程序使用幂等的管理员初始化，不会重置已存在的后台密码。
 
 默认构建包地址：`https://github.com/wstimin/shiye-3xuigl-L3/releases/latest/download/shiye-3xuigl.zip`
 
@@ -102,7 +102,24 @@ DATABASE_URL='mysql://shiye:strong-password@127.0.0.1:3306/shiye_management' bas
 
 脚本默认安装目录是 `/opt/shiye`，服务名是 `shiye-api`。可以通过 `APP_DIR`、`APP_NAME` 修改。
 
-## 3. 手动部署
+## 3. 宝塔 / 1Panel 网页向导与手动部署
+
+### 宝塔 / 1Panel
+
+1. 创建 MySQL 数据库与专用账号，保存数据库地址、端口、名称、用户名及密码。
+2. 下载最新发布包并解压到项目目录；`package.json` 应直接位于该目录下，不要多套一层文件夹。
+3. 在面板创建 Node.js 项目，选择 **Node.js 20.19+**，工作目录设为上述目录，启动命令设为 **`npm start`**，端口默认 **3388**。面板如要求先安装依赖，执行 `npm ci --include=dev`。不需要自己选择前端目录或单独构建两个网站。
+4. 将整个网站反向代理到 Node.js 项目端口，然后打开网站。首次启动会显示同一个「宝塔 / 1Panel」安装向导：填写数据库、管理员账号密码、管理路径，可选填写公开网站地址。
+5. 宝塔同机数据库通常填写 `127.0.0.1`；1Panel 的 Node.js 如果在容器中，请填写容器可达的数据库内网地址或容器名，不能直接照搬宿主机 `127.0.0.1`。网站端口须与运行环境一致。
+6. 点击「开始安装」，等待日志显示完成，再在面板中重启 Node.js 项目。`npm start` 会进入正式网站；用户端为 `/`，管理端使用安装时填写的路径，默认 `/admin/`。
+
+向导支持亮暗主题，与管理端和用户账号的偏好分别保存。密码不写入浏览器草稿，已保存后留空可沿用。发布包会自动跳过源码构建；上传完整源码时则会安装构建依赖并执行构建。
+
+面板部署更新时，先备份数据库与 `.env`，暂停项目，上传新版发布包并保留 `.env`，在项目目录依次执行 `npm ci --include=dev`、`npm run install:prod`、`npm prune --omit=dev`，再从面板重启项目。安装命令会执行迁移并保留已有管理员密码，不能仅覆盖前端文件或直接使用 `git pull` 更新精简发布包。
+
+**维护能力的部署区别：** 一键 Linux/systemd 部署会配置独立维护服务，支持后台网页更新与网站迁移。普通宝塔 Node.js 项目或 1Panel 容器不会自动获得该服务，后台会显示尚未配置；请使用面板管理程序更新，并同时备份数据库和 `.env` 迁移，不要在容器内执行会接管宿主机服务的一键脚本。
+
+### 手动部署
 
 创建数据库：
 
@@ -116,7 +133,7 @@ FLUSH PRIVILEGES;
 安装依赖并创建环境变量：
 
 ```bash
-npm ci
+npm ci --include=dev
 cp .env.example .env
 ```
 
@@ -212,7 +229,7 @@ https://panel.example.com/api/payments/wechat/notify
 https://panel.example.com/payment/result?trade_no=订单号
 ```
 
-实际启用哪个通道，以后台“系统设置 - 支付方式”配置为准。
+实际启用哪个通道，以后台“财务管理 - 支付设置”配置为准。
 支付宝官方通道需要配置 AppID、应用私钥、支付宝公钥，并在后台选择接口类型 `precreate`、`page` 或 `wap`；微信官方通道需要配置 AppID、商户号、V2 API 密钥。支付宝/微信官方通道必须使用公网可访问的完整回调地址，建议部署 HTTPS 域名并设置 `PUBLIC_WEB_URL`。
 
 ## 7. 更新版本

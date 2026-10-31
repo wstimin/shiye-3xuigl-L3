@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 
@@ -8,7 +8,7 @@ const root = process.cwd();
 const envPath = resolve(root, '.env');
 const installedMarkerPath = resolve(root, '.panel-installed');
 const criticalSecrets = ['SESSION_SECRET', 'JWT_SECRET', 'ENCRYPTION_KEY', 'CARD_HASH_SECRET'];
-const installerVersion = '1.12.4';
+const installerVersion = '1.12.5';
 const requiredFiles = [
   'apps/api/dist/main.js',
   'dist/user-web/index.html',
@@ -27,7 +27,7 @@ const state = {
 const env = loadEnv();
 
 if (isReady(env)) {
-  console.log('1Panel startup: installed build detected, starting API.');
+  console.log('已完成安装，正在启动正式网站。');
   await runApi();
 } else {
   startInstaller(env);
@@ -39,6 +39,8 @@ function isReady(values) {
 
 function envIsUsable(values) {
   const errors = [];
+  const [major, minor] = process.versions.node.split('.').map(Number);
+  if (major < 20 || major === 20 && minor < 19) errors.push('需要 Node.js 20.19 或更新版本，请在宝塔 / 1Panel 中切换运行环境。');
   if (!existsSync(envPath)) errors.push('.env 文件不存在。');
   if (!values.DATABASE_URL || isPlaceholder(values.DATABASE_URL)) errors.push('DATABASE_URL 缺失或仍是占位值。');
   for (const name of criticalSecrets) {
@@ -75,9 +77,9 @@ function startInstaller(initialEnv) {
     }
   });
 
-  server.listen(port, '0.0.0.0', () => {
-    console.log(`1Panel install wizard is running on port ${port}.`);
-    console.log(`Open http://SERVER_IP:${port} to finish installation.`);
+  server.listen(port, process.env.HOST || initialEnv.HOST || '0.0.0.0', () => {
+    console.log(`宝塔 / 1Panel 安装向导已启动，端口 ${port}。`);
+    console.log(`请访问 http://服务器地址:${port} 完成安装。`);
   });
 }
 
@@ -85,8 +87,10 @@ function getStatus() {
   const currentEnv = loadEnv();
   const envStatus = envIsUsable(currentEnv);
   const missingFiles = requiredFiles.filter((file) => !existsSync(resolve(root, file)));
-  return {
+  const status = {
     version: installerVersion,
+    nodeVersion: process.versions.node,
+    envExists: existsSync(envPath),
     ready: isReady(currentEnv),
     installedMarker: existsSync(installedMarkerPath),
     envOk: envStatus.ok,
@@ -99,18 +103,24 @@ function getStatus() {
     endedAt: state.endedAt,
     logs: state.logs.slice(-240),
     defaults: {
-      port: currentEnv.PORT || '3388',
-      database: parseDatabaseConfig(currentEnv.DATABASE_URL || ''),
+      port: process.env.PORT || currentEnv.PORT || '3388',
+      publicWebUrl: isPlaceholder(currentEnv.PUBLIC_WEB_URL) ? '' : currentEnv.PUBLIC_WEB_URL || '',
+      database: { ...parseDatabaseConfig(currentEnv.DATABASE_URL || ''), password: '' },
       adminPath: currentEnv.ADMIN_PATH || '/admin',
       adminUsername: currentEnv.DEFAULT_ADMIN_USERNAME || 'admin'
     }
   };
+  return { ...status, checks: statusChecks(status) };
 }
 
 async function saveConfigApi(request, response) {
-  const body = await readPayload(request);
-  saveConfigFromPayload(body);
-  sendJson(response, { ok: true, status: getStatus() });
+  try {
+    const body = await readPayload(request);
+    saveConfigFromPayload(body);
+    sendJson(response, { ok: true, status: getStatus() });
+  } catch (error) {
+    sendJson(response, { ok: false, message: errorMessage(error) }, error.statusCode || 400);
+  }
 }
 
 async function saveConfigPage(request, response) {
@@ -128,7 +138,7 @@ async function runInstallPage(request, response) {
     const body = await readPayload(request);
     saveConfigFromPayload(body);
     startInstall();
-    sendRedirect(response, '/?type=ok&message=' + encodeURIComponent('安装任务已开始，请等待日志完成后回到 1Panel 重启 Node.js 运行环境。'));
+    sendRedirect(response, '/?type=ok&message=' + encodeURIComponent('安装任务已开始，请等待日志完成后回到宝塔 / 1Panel 重启 Node.js 项目。'));
   } catch (error) {
     sendHtml(response, { type: 'error', message: errorMessage(error) }, error.statusCode || 400);
   }
@@ -144,34 +154,46 @@ function runInstallApi(response) {
 }
 
 function saveConfigFromPayload(payload) {
-  const existing = loadEnvFileOnly();
+  if (state.installing || state.installed) throw Object.assign(new Error('安装进行中或已完成，请勿重复修改配置；完成后请重启 Node.js 项目。'), { statusCode: 409 });
+  const existing = loadEnv();
   delete existing.REDIS_URL;
   const data = normalizeConfig(payload, existing);
-  const merged = mergeEnv(existing, data);
-  writeFileSync(envPath, renderEnv(merged), 'utf8');
+  const merged = mergeEnv(loadEnvFileOnly(), data);
+  writeFileSync(envPath, renderEnv(merged), { encoding: 'utf8', mode: 0o600 });
+  chmodSync(envPath, 0o600);
   appendLog('配置已保存到 .env。');
 }
 
 function normalizeConfig(body, existing) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('请提交有效的安装配置。');
   const port = String(body.port || '3388').trim();
   const dbHost = String(body.dbHost || '').trim();
   const dbPort = String(body.dbPort || '3306').trim();
   const dbName = String(body.dbName || '').trim();
   const dbUser = String(body.dbUser || '').trim();
-  const dbPassword = String(body.dbPassword || '').trim();
+  const previousDatabase = parseDatabaseConfig(isPlaceholder(existing.DATABASE_URL) ? '' : existing.DATABASE_URL || '');
+  const dbPassword = String(body.dbPassword || previousDatabase.password || '');
   const adminUsername = String(body.adminUsername || 'admin').trim();
-  const adminPassword = String(body.adminPassword || existing.DEFAULT_ADMIN_PASSWORD || '').trim();
+  const adminPassword = String(body.adminPassword || existing.DEFAULT_ADMIN_PASSWORD || '');
   const adminPath = normalizeAdminPath(body.adminPath || '/admin');
+  const publicWebUrl = String(body.publicWebUrl ?? (isPlaceholder(existing.PUBLIC_WEB_URL) ? '' : existing.PUBLIC_WEB_URL) ?? '').trim().replace(/\/+$/, '');
   const errors = [];
 
-  if (!/^\d+$/.test(port)) errors.push('端口必须是数字。');
+  if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) errors.push('网站端口必须在 1 到 65535 之间。');
+  if (process.env.PORT && Number(port) !== Number(process.env.PORT)) errors.push(`网站端口须与运行环境端口 ${process.env.PORT} 一致，请先在宝塔 / 1Panel 修改运行环境。`);
   if (!dbHost) errors.push('数据库地址不能为空。');
-  if (!/^\d+$/.test(dbPort)) errors.push('数据库端口必须是数字。');
+  if (!/^\d+$/.test(dbPort) || Number(dbPort) < 1 || Number(dbPort) > 65535) errors.push('数据库端口必须在 1 到 65535 之间。');
   if (!dbName) errors.push('数据库名不能为空。');
   if (!dbUser) errors.push('数据库用户名不能为空。');
   if (!dbPassword) errors.push('数据库密码不能为空。');
   if (!adminUsername) errors.push('管理员账号不能为空。');
   if (!adminPassword) errors.push('管理员密码不能为空。');
+  if (body.adminPassword && adminPassword.length < 8) errors.push('管理员密码至少需要 8 个字符。');
+  if ([dbHost, dbName, dbUser, dbPassword, adminUsername, adminPassword].some(value => /[\r\n]/.test(value))) errors.push('配置信息不能包含换行。');
+  if (publicWebUrl) {
+    try { const url = new URL(publicWebUrl); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') errors.push('网站地址应为完整的 http(s) 域名或 IP 与端口，不包含路径或账号信息。'); }
+    catch { errors.push('请输入完整的网站地址，例如 https://你的域名。'); }
+  }
   if (errors.length) throw new Error(errors.join('\n'));
 
   const databaseUrl = buildDatabaseUrl({ dbHost, dbPort, dbName, dbUser, dbPassword });
@@ -179,7 +201,7 @@ function normalizeConfig(body, existing) {
   return {
     NODE_ENV: 'production',
     PORT: port,
-    PUBLIC_WEB_URL: existing.PUBLIC_WEB_URL || '',
+    PUBLIC_WEB_URL: publicWebUrl,
     ADMIN_PATH: adminPath,
     DATABASE_URL: databaseUrl,
     JWT_SECRET: usableSecret(existing.JWT_SECRET) ? existing.JWT_SECRET : randomSecret(),
@@ -194,13 +216,14 @@ function normalizeConfig(body, existing) {
 function normalizeAdminPath(value) {
   const trimmed = String(value || '/admin').trim().replace(/\/+$/, '') || '/admin';
   const path = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-  if (path === '/' || /^\/api(?:\/|$)/i.test(path)) return '/admin';
+  if (path === '/' || /^\/api(?:\/|$)/i.test(path)) throw new Error('管理路径不能为 / 或 /api。');
+  if (path.length > 80 || !/^\/[A-Za-z0-9._~/-]+$/.test(path) || path.includes('//')) throw new Error('管理路径最长 80 个字符，只能包含字母、数字、横线、下划线、点和斜杠，不能包含连续斜杠。');
   return path;
 }
 
 function startInstall() {
-  if (state.installing) {
-    const error = new Error('安装正在进行中。');
+  if (state.installing || state.installed) {
+    const error = new Error(state.installed ? '安装已完成，请重启 Node.js 项目进入网站。' : '安装正在进行中。');
     error.statusCode = 409;
     throw error;
   }
@@ -223,7 +246,7 @@ function startInstall() {
   if (usePrebuilt) appendLog('检测到预构建运行包，安装时跳过前后端构建。');
 
   const steps = [
-    ['npm', ['ci']],
+    ['npm', ['ci', '--include=dev']],
     ['npm', ['run', 'install:prod']],
     ['npm', ['prune', '--omit=dev']]
   ];
@@ -239,7 +262,7 @@ function startInstall() {
     if (state.exitCode === 0 && requiredFiles.every((file) => existsSync(resolve(root, file))) && envIsUsable(loadEnv()).ok) {
       writeFileSync(installedMarkerPath, `${new Date().toISOString()}\n`, 'utf8');
       state.installed = true;
-      appendLog('安装完成。请在 1Panel 重启 Node.js 运行环境，重启后会进入正式 API。');
+      appendLog('安装完成。请在宝塔 / 1Panel 重启 Node.js 项目，随后访问网站首页和配置的管理路径。');
     }
   });
 }
@@ -273,14 +296,14 @@ function shouldUsePrebuiltInstall() {
 
 function commandEnv() {
   return {
-    ...process.env,
+    ...loadEnv(),
     SHIYE_PREBUILT: shouldUsePrebuiltInstall() ? '1' : process.env.SHIYE_PREBUILT || ''
   };
 }
 
 async function runApi() {
   await new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn('npm', ['run', 'start:api'], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+    const child = spawn('npm', ['run', 'start:api'], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: commandEnv() });
     child.on('error', rejectPromise);
     child.on('exit', (code) => {
       process.exitCode = code ?? 1;
@@ -343,11 +366,15 @@ function renderEnv(values) {
 
 function escapeEnv(value) {
   if (/^[A-Za-z0-9_./:@%+\-=]*$/.test(value)) return value;
-  return JSON.stringify(value);
+  if (/[\r\n]/.test(value)) throw new Error('配置值不能包含换行。');
+  for (const quote of ["'", '`', '"']) {
+    if (!value.includes(quote) && (quote !== '"' || !/\\[nr]/.test(value))) return quote + value + quote;
+  }
+  throw new Error('配置值包含无法保存的引号组合，请勿同时使用单引号、双引号和反引号。');
 }
 
 function unquote(value) {
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) return value.slice(1, -1);
+  if (['"', "'", '`'].some(quote => value.startsWith(quote) && value.endsWith(quote))) return value.slice(1, -1);
   return value;
 }
 
@@ -464,8 +491,26 @@ function installerClientScript() {
     const saveButton = document.querySelector('#save');
     const storageKey = 'shiye-panel-install-form';
     if (!form || !toast || !logs || !ready || !checks || !installButton || !saveButton) return;
+    try { localStorage.removeItem(storageKey); } catch {}
+    const themeButton = document.querySelector('#theme-toggle');
+    const systemButton = document.querySelector('#theme-system');
+    const media = matchMedia('(prefers-color-scheme: dark)');
+    let theme = 'system';
+    try { theme = localStorage.getItem('shiye:theme:installer') || 'system'; } catch {}
+    function applyTheme() {
+      const dark = theme === 'dark' || theme === 'system' && media.matches;
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      themeButton.textContent = dark ? '亮色模式' : '暗色模式';
+      systemButton.setAttribute('aria-pressed', String(theme === 'system'));
+    }
+    function saveTheme(value) { theme = value; try { localStorage.setItem('shiye:theme:installer', value); } catch {} applyTheme(); }
+    themeButton.addEventListener('click', () => saveTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+    systemButton.addEventListener('click', () => saveTheme('system'));
+    media.addEventListener('change', applyTheme);
+    applyTheme();
 
     let userEditing = false;
+    let operationBusy = false;
     ready.textContent = '正在连接';
     appendClientLog('页面脚本已加载，正在检查安装状态。');
 
@@ -489,6 +534,7 @@ function installerClientScript() {
 
     installButton.addEventListener('click', async (event) => {
       event.preventDefault();
+      if (!form.reportValidity()) return;
       setBusy(installButton, '正在安装...');
       setToast('正在保存配置并准备安装...', '');
       appendClientLog('正在保存配置并准备安装...');
@@ -549,14 +595,14 @@ function installerClientScript() {
 
     function renderStatus(data) {
       ready.textContent = data.ready ? '已安装，重启后进入正式服务' : data.installing ? '正在安装' : '等待安装';
-      ready.className = data.ready || data.installing ? 'pill' : 'pill bad';
-      installButton.disabled = data.installing;
-      installButton.textContent = data.installing ? '正在安装...' : '开始安装';
-      const items = [];
-      if (!data.envOk) items.push(...(data.envErrors || []));
-      if (!data.installedMarker) items.push('尚未完成网页向导安装。');
-      if ((data.missingFiles || []).length) items.push('缺少构建产物：' + data.missingFiles.join('、'));
-      if (!items.length) items.push(data.ready ? '配置和构建产物已就绪。' : '配置已就绪，可以开始安装。');
+      ready.className = data.exitCode !== null && data.exitCode !== 0 ? 'pill bad' : 'pill';
+      const locked = data.installing || data.installed || operationBusy;
+      for (const field of form.elements) field.disabled = locked;
+      installButton.disabled = locked;
+      saveButton.disabled = locked;
+      installButton.textContent = data.installed ? '安装完成，请重启项目' : data.installing ? '正在安装...' : '开始安装';
+      if (data.installed) { try { sessionStorage.removeItem(storageKey); } catch {} form.elements.namedItem('dbPassword').value = ''; form.elements.namedItem('adminPassword').value = ''; }
+      const items = data.checks || [];
       checks.innerHTML = items.map((item) => '<li>' + escapeHtml(item) + '</li>').join('');
       if ((data.logs || []).length) logs.textContent = data.logs.join('\\n');
       else if (!logs.textContent.trim()) logs.textContent = '等待操作...';
@@ -568,13 +614,12 @@ function installerClientScript() {
       const draft = loadDraft();
       setFieldValue('port', draft.port || defaults.port || '3388');
       setFieldValue('adminPath', draft.adminPath || defaults.adminPath || '/admin');
+      setFieldValue('publicWebUrl', draft.publicWebUrl ?? defaults.publicWebUrl ?? '');
       setFieldValue('dbHost', draft.dbHost || database.host || '');
       setFieldValue('dbPort', draft.dbPort || database.port || '3306');
       setFieldValue('dbName', draft.dbName || database.name || '');
       setFieldValue('dbUser', draft.dbUser || database.user || '');
-      setFieldValue('dbPassword', draft.dbPassword || database.password || '');
       setFieldValue('adminUsername', draft.adminUsername || defaults.adminUsername || 'admin');
-      setFieldValue('adminPassword', draft.adminPassword || '');
     }
 
     function setFieldValue(name, value) {
@@ -583,12 +628,16 @@ function installerClientScript() {
     }
 
     function saveDraft() {
-      try { localStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(new FormData(form).entries()))); }
+      try {
+        const draft = Object.fromEntries(new FormData(form).entries());
+        delete draft.dbPassword; delete draft.adminPassword;
+        sessionStorage.setItem(storageKey, JSON.stringify(draft));
+      }
       catch {}
     }
 
     function loadDraft() {
-      try { return JSON.parse(localStorage.getItem(storageKey) || '{}'); }
+      try { return JSON.parse(sessionStorage.getItem(storageKey) || '{}'); }
       catch { return {}; }
     }
 
@@ -605,12 +654,14 @@ function installerClientScript() {
     }
 
     function setBusy(button, text) {
+      operationBusy = true;
       button.disabled = true;
       button.dataset.idleText = button.textContent;
       button.textContent = text;
     }
 
     function setIdle(button, text) {
+      operationBusy = false;
       button.disabled = false;
       button.textContent = text || button.dataset.idleText || button.textContent;
     }
@@ -645,7 +696,7 @@ function installerHtml(flash = {}) {
   const values = formValuesFromStatus(status);
   const checks = statusChecks(status);
   const readyText = status.ready ? '已安装，重启后进入正式服务' : status.installing ? '正在安装' : '等待安装';
-  const readyClass = status.ready || status.installing ? 'pill' : 'pill bad';
+  const readyClass = status.exitCode !== null && status.exitCode !== 0 ? 'pill bad' : 'pill';
   const logsText = status.logs.length ? status.logs.join('\n') : '等待操作...';
   const flashClass = flash.type === 'ok' ? 'toast ok' : flash.message ? 'toast error' : 'toast';
   const refreshMeta = status.installing ? '  <meta http-equiv="refresh" content="3" />\n' : '';
@@ -655,40 +706,45 @@ function installerHtml(flash = {}) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-${refreshMeta}  <title>十业管理系统安装向导</title>
+${refreshMeta}  <title>十夜 · 安装向导</title>
+  <meta name="color-scheme" content="light dark" />
+  <script>try { const theme = localStorage.getItem('shiye:theme:installer'); document.documentElement.dataset.theme = theme === 'dark' || theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch {}</script>
   <style>
-    :root { color-scheme: light; --bg: #fbf7ff; --panel: #ffffff; --text: #152033; --muted: #60708a; --line: #eadcff; --primary: #a855f7; --primary-dark: #7e22ce; --soft: #f3e8ff; --danger: #ff4d4f; --success: #16a34a; --log: #241733; }
+    :root { color-scheme: light; --bg: #f7f8fa; --panel: #ffffff; --text: #242930; --muted: #606975; --line: #e0e4e9; --field: #8a94a2; --primary: #c9a227; --primary-dark: #806313; --on-primary: #211b0c; --soft: #f6efd9; --danger: #ac3934; --success: #356d55; --disabled: #f1f3f5; }
+    :root[data-theme="dark"] { color-scheme: dark; --bg: #14171b; --panel: #1d2127; --text: #edf0f4; --muted: #afb8c5; --line: #343b45; --field: #778595; --primary: #e0b83a; --primary-dark: #e0b83a; --soft: #373122; --danger: #ed958a; --success: #8bc5a8; --disabled: #272d35; }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: radial-gradient(circle at 50% 28%, rgba(168, 85, 247, .10) 0, transparent 30rem), linear-gradient(180deg, #fffbff 0%, var(--bg) 58%, #f7f1ff 100%); }
+    body { margin: 0; min-height: 100vh; font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
     .shell { max-width: 1080px; margin: 0 auto; padding: 30px 18px 46px; }
     .hero { display: grid; gap: 10px; margin-bottom: 22px; }
+    .hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .theme-controls { display: flex; gap: 8px; }
     .eyebrow { color: var(--primary-dark); font-weight: 700; font-size: 13px; }
-    h1 { margin: 0; font-size: clamp(26px, 4vw, 40px); letter-spacing: 0; }
+    h1 { margin: 0; font-size: clamp(24px, 4vw, 30px); letter-spacing: -.02em; font-weight: 650; }
     .lead { max-width: 780px; color: var(--muted); line-height: 1.7; margin: 0; }
     .grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
-    .card { position: relative; background: rgba(255,255,255,.96); border: 1px solid transparent; border-radius: 8px; box-shadow: 0 22px 70px rgba(126, 34, 206, .14); overflow: hidden; }
-    .card::before { content: ""; position: absolute; inset: 0; z-index: 0; border-radius: inherit; padding: 1px; pointer-events: none; background: linear-gradient(120deg, #c084fc, #a855f7, #ec4899, #22d3ee, #a855f7, #c084fc); background-size: 320% 320%; animation: borderFlow 6s linear infinite; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
-    @keyframes borderFlow { 0% { background-position: 0% 50%; } 100% { background-position: 320% 50%; } }
-    .card > * { position: relative; z-index: 1; }
+    .card { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
     .section { padding: 20px; }
     .section + .section { border-top: 1px solid var(--line); }
-    label { display: grid; gap: 7px; margin-bottom: 14px; font-size: 14px; font-weight: 650; }
-    input { width: 100%; border: 1px solid #d8c7ea; border-radius: 6px; padding: 11px 12px; font-size: 14px; color: var(--text); background: #fff; outline: none; }
-    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(168, 85, 247, .16); }
-    .hint { color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.55; }
+    label { display: grid; align-content: start; gap: 7px; margin-bottom: 14px; font-size: 14px; font-weight: 600; }
+    input { width: 100%; min-width: 0; min-height: 38px; border: 1px solid var(--field); border-radius: 6px; padding: 8px 10px; font: inherit; font-weight: 400; color: var(--text); background: var(--bg); }
+    input::placeholder { color: var(--muted); opacity: 1; }
+    input:focus-visible, button:focus-visible { outline: 2px solid var(--primary-dark); outline-offset: 2px; }
+    .hint { color: var(--muted); font-size: 13px; font-weight: 400; line-height: 1.65; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .row.three { grid-template-columns: 1.4fr .7fr 1fr; }
     .row.admin { align-items: start; }
-    .group-title { margin: 0 0 14px; font-size: 15px; font-weight: 800; color: var(--primary-dark); }
+    .group-title { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--text); }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    button { border: 0; border-radius: 6px; padding: 11px 16px; font-weight: 750; cursor: pointer; background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%); color: #fff; box-shadow: 0 10px 22px rgba(168, 85, 247, .26); }
-    button.secondary { background: var(--soft); color: var(--primary-dark); }
-    button:disabled { opacity: .55; cursor: not-allowed; }
+    button { min-height: 36px; border: 1px solid var(--primary); border-radius: 6px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; background: var(--primary); color: var(--on-primary); }
+    button.secondary { border-color: var(--field); background: var(--panel); color: var(--text); }
+    button:hover:not(:disabled) { filter: brightness(.97); }
+    button:disabled { color: var(--muted); background: var(--disabled); border-color: var(--field); cursor: not-allowed; }
+    input:disabled { color: var(--muted); }
     .status { display: grid; gap: 10px; }
-    .pill { display: inline-flex; width: fit-content; align-items: center; gap: 8px; border-radius: 999px; padding: 7px 10px; font-size: 13px; font-weight: 750; background: var(--soft); color: var(--primary-dark); }
-    .pill.bad { color: var(--danger); background: #fff0ee; }
+    .pill { display: inline-flex; width: fit-content; align-items: center; gap: 8px; border-radius: 5px; padding: 4px 8px; font-size: 13px; font-weight: 600; background: var(--soft); color: var(--primary-dark); }
+    .pill.bad { color: var(--danger); background: var(--disabled); }
     ul { margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.65; }
-    pre { margin: 0; min-height: 280px; max-height: 440px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--log); color: #edf2f7; border-radius: 8px; padding: 14px; font-size: 12px; line-height: 1.55; }
+    pre { margin: 0; min-height: 180px; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 14px; font-size: 13px; line-height: 1.65; }
     .toast { margin-top: 12px; min-height: 22px; color: var(--muted); font-weight: 650; white-space: pre-wrap; }
     .toast.ok { color: var(--success); }
     .toast.error { color: var(--danger); }
@@ -698,9 +754,9 @@ ${refreshMeta}  <title>十业管理系统安装向导</title>
 <body>
   <main class="shell">
     <section class="hero">
-      <div class="eyebrow">1Panel 部署</div>
-      <h1>十业管理系统安装向导</h1>
-      <p class="lead">填写数据库和管理员信息后，向导会生成生产密钥、初始化数据库、执行迁移并校验运行文件。脚本被浏览器或面板拦截时，本页也可以通过普通表单保存配置并开始安装。</p>
+      <div class="hero-top"><div class="eyebrow">宝塔 / 1Panel · 首次安装</div><div class="theme-controls"><button type="button" class="secondary" id="theme-toggle">暗色模式</button><button type="button" class="secondary" id="theme-system" aria-pressed="true">跟随系统</button></div></div>
+      <h1>十夜 · 网站安装向导</h1>
+      <p class="lead">填写数据库和管理员信息后即可开始安装。安全密钥会自动生成，无需手动填写；安装完成后重启项目即可使用网站。</p>
     </section>
 
     <section class="grid">
@@ -710,13 +766,14 @@ ${refreshMeta}  <title>十业管理系统安装向导</title>
           <div class="row">
             <label>端口
               <input name="port" value="${escapeHtml(values.port)}" inputmode="numeric" />
-              <span class="hint">保持和 1Panel Node.js 运行环境端口一致。</span>
+              <span class="hint">保持和宝塔 / 1Panel Node.js 项目端口一致。</span>
             </label>
             <label>管理路径
               <input name="adminPath" value="${escapeHtml(values.adminPath)}" autocomplete="off" />
               <span class="hint">默认即可，管理端使用这个路径访问。</span>
             </label>
           </div>
+          <label>网站访问地址（可选）<input name="publicWebUrl" value="${escapeHtml(values.publicWebUrl)}" type="url" placeholder="https://你的域名 或 http://服务器IP:端口" autocomplete="url" /><span class="hint">用于支付回调等公开链接；尚未绑定域名时可以留空，之后再配置。</span></label>
         </div>
         <div class="section">
           <p class="group-title">数据库设置</p>
@@ -736,10 +793,11 @@ ${refreshMeta}  <title>十业管理系统安装向导</title>
               <input name="dbUser" value="${escapeHtml(values.dbUser)}" placeholder="shiye" autocomplete="off" required />
             </label>
             <label>数据库密码
-              <input name="dbPassword" type="password" value="${escapeHtml(values.dbPassword)}" autocomplete="off" required />
+              <input name="dbPassword" type="password" autocomplete="off" />
+              <span class="hint">首次安装请填写；配置已保存时留空沿用，不会回显密码。</span>
             </label>
           </div>
-          <span class="hint">1Panel 容器环境里通常不要写 127.0.0.1，优先使用数据库页面显示的内网地址或容器名。</span>
+          <span class="hint">1Panel 容器部署请使用数据库内网地址或容器名；宝塔同机部署可使用 127.0.0.1。</span>
         </div>
         <div class="section">
           <p class="group-title">管理员设置</p>
@@ -750,12 +808,12 @@ ${refreshMeta}  <title>十业管理系统安装向导</title>
             </label>
             <label>管理员密码
               <input name="adminPassword" type="password" autocomplete="new-password" />
-              <span class="hint">首次安装必须填写；已保存后留空会沿用现有密码。</span>
+              <span class="hint">首次安装至少 8 个字符；已保存后留空沿用。重新安装不会重置已修改的后台密码。</span>
             </label>
           </div>
           <div class="actions">
-            <button type="submit" id="save">保存配置</button>
-            <button type="submit" class="secondary" id="install" formaction="/panel-install/run"${status.installing ? ' disabled' : ''}>${status.installing ? '正在安装...' : '开始安装'}</button>
+            <button type="submit" class="secondary" id="save"${status.installing || status.installed ? ' disabled' : ''}>保存配置</button>
+            <button type="submit" id="install" formaction="/panel-install/run"${status.installing || status.installed ? ' disabled' : ''}>${status.installed ? '安装完成，请重启项目' : status.installing ? '正在安装...' : '开始安装'}</button>
           </div>
           <div class="${flashClass}" id="toast">${escapeHtml(flash.message || '')}</div>
         </div>
@@ -768,6 +826,8 @@ ${refreshMeta}  <title>十业管理系统安装向导</title>
         <div class="section status">
           <span class="${readyClass}" id="ready">${escapeHtml(readyText)}</span>
           <span class="hint">向导版本：${installerVersion}</span>
+          <span class="hint">当前 Node.js ${escapeHtml(status.nodeVersion)} · 要求 20.19 或更新版本</span>
+          <span class="hint">${shouldUsePrebuiltInstall() ? '发布包安装：直接使用已构建程序' : '源码安装：安装过程会构建前后端'}</span>
           <div>
             <strong>当前状态</strong>
             <ul id="checks">${checks.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
@@ -776,10 +836,11 @@ ${refreshMeta}  <title>十业管理系统安装向导</title>
         <div class="section">
           <strong>安装完成后</strong>
           <ul>
-            <li>回到 1Panel 重启 Node.js 运行环境。</li>
-            <li>再次启动时，npm start 会自动进入正式 API。</li>
+            <li>回到宝塔 / 1Panel 重启 Node.js 项目。</li>
+            <li>再次启动时，npm start 会自动进入正式网站，访问首页及你设置的管理路径。</li>
             <li>使用域名时，把整站反向代理到当前 Node.js 运行环境端口即可，例如 http://127.0.0.1:3388。</li>
           </ul>
+          <p class="hint">网页更新与迁移需要独立维护服务。普通宝塔项目或 1Panel 容器不会自动安装该服务；这类部署可在面板中更新程序，迁移时同时备份数据库和 .env。</p>
         </div>
       </aside>
     </section>
@@ -794,6 +855,7 @@ function formValuesFromStatus(status) {
   return {
     port: status.defaults.port || '3388',
     adminPath: status.defaults.adminPath || '/admin',
+    publicWebUrl: status.defaults.publicWebUrl || '',
     dbHost: database.host || '',
     dbPort: database.port || '3306',
     dbName: database.name || '',
@@ -805,10 +867,13 @@ function formValuesFromStatus(status) {
 
 function statusChecks(status) {
   const items = [];
-  if (!status.envOk) items.push(...status.envErrors);
-  if (!status.installedMarker) items.push('尚未完成网页向导安装。');
-  if (status.missingFiles.length) items.push('缺少构建产物：' + status.missingFiles.join('、'));
-  if (!items.length) items.push(status.ready ? '配置和构建产物已就绪。' : '配置已就绪，可以开始安装。');
+  const runtimeError = status.envErrors.find(message => message.includes('Node.js'));
+  if (runtimeError) items.push(runtimeError);
+  if (!status.envOk) items.push(status.envExists ? '运行配置尚未就绪，请检查并保存数据库和管理员信息，安全密钥会自动补齐。' : '请先填写数据库和管理员信息，安全密钥将在保存时自动生成。');
+  else items.push('数据库连接与网站配置已保存，安装时将检查数据库连通性。');
+  if (status.missingFiles.length) items.push('当前为源码安装，安装过程会自动构建网站程序。');
+  if (status.ready) items.push('安装已完成，请在宝塔 / 1Panel 重启 Node.js 项目进入网站。');
+  else if (!status.installing) items.push('确认填写无误后，点击“开始安装”。');
   return items;
 }
 

@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process';
+import { existsSync, writeFileSync } from 'node:fs';
 
-const usingPrebuilt = process.env.SHIYE_PREBUILT === '1';
+const usingPrebuilt = process.env.SHIYE_PREBUILT === '1' || (
+  !existsSync('apps/admin-web/src') && ['apps/api/dist/main.js', 'dist/admin-web/index.html', 'dist/user-web/index.html'].every(existsSync)
+);
 
 const steps = [
   ['install:check', ['run', 'install:check']],
@@ -21,7 +24,8 @@ for (const [name, args] of steps) {
   await run('npm', args);
 }
 
-console.log('\nInstall pipeline completed. Start the API with: npm start');
+writeFileSync('.panel-installed', `${new Date().toISOString()}\n`, { mode: 0o600 });
+console.log('\n安装完成。宝塔 / 1Panel 请重启 Node.js 项目；手动部署可执行 npm start。');
 
 function run(command, args) {
   return new Promise((resolve, reject) => {

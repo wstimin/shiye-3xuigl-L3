@@ -78,10 +78,14 @@ curl -fsSL https://raw.githubusercontent.com/wstimin/shiye-3xuigl-L3/main/uninst
 
 详细说明见 [DEPLOY.md](./DEPLOY.md)。
 
+## 宝塔 / 1Panel
+
+上传最新发布包并解压，在面板创建 Node.js 20.19+ 项目，工作目录指向 `package.json` 所在目录，以 `npm start` 启动，端口默认 3388。打开整站反向代理后的地址即可进入安装向导，填写数据库和管理员信息；完成后在面板重启项目即可进入正式网站。[完整安装步骤与维护能力区别](./DEPLOY.md#3-宝塔--1panel-网页向导与手动部署)。
+
 ## 手动部署
 
 ```bash
-npm ci
+npm ci --include=dev
 cp .env.example .env
 npm run install:prod
 npm prune --omit=dev

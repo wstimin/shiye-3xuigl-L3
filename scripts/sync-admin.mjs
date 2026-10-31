@@ -48,6 +48,6 @@ function loadEnv() {
 }
 
 function unquote(value) {
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) return value.slice(1, -1);
+  if (['"', "'", '`'].some(quote => value.startsWith(quote) && value.endsWith(quote))) return value.slice(1, -1);
   return value;
 }

@@ -467,9 +467,9 @@ install_dependencies_and_build_in() {
   target_dir="$1"
   cd "${target_dir}"
   if [ -f package-lock.json ]; then
-    npm ci
+    npm ci --include=dev
   else
-    npm install
+    npm install --include=dev
   fi
   npm run install:check
   npm run prisma:generate
@@ -1159,7 +1159,7 @@ run_migration() {
   [ -f "\${APP_DIR}/prisma/schema.prisma" ] || die "未找到 Prisma schema，请使用安装/更新项目恢复运行文件。"
   cd "\${APP_DIR}"
   log "安装迁移所需依赖"
-  if [ -f package-lock.json ]; then npm install; else npm install; fi
+  if [ -f package-lock.json ]; then npm ci --include=dev; else npm install --include=dev; fi
   log "执行数据库迁移"
   npm run prisma:generate
   npm run prisma:migrate
@@ -1257,6 +1257,9 @@ show_current_config() {
   public_url="\${public_url:-http://\$(detect_server_ip):\${configured_port}}"
   admin_path="\${admin_path:-/admin}"
 
+  if [ -f "\${APP_DIR}/build-info.json" ] && command -v node >/dev/null 2>&1; then
+    node -e 'const fs = require("node:fs"); console.log("网站版本：" + JSON.parse(fs.readFileSync(process.argv[1], "utf8")).version);' "\${APP_DIR}/build-info.json"
+  fi
   echo "运行环境：\${node_env:-未设置}"
   echo "监听端口：\${configured_port}"
   echo "用户端地址：\${public_url}/"
@@ -1265,7 +1268,7 @@ show_current_config() {
   echo "Nginx 域名：\${nginx_domain:-未检测到}"
   echo
   echo "管理员账号：\${admin_user:-未设置}"
-  echo "管理员密码：\${admin_password:-未设置}"
+  echo "管理员初始密码：\${admin_password:-未设置}（后台改密后请使用新密码）"
   echo
   show_database_config
   echo
@@ -1374,7 +1377,7 @@ main() {
   log "Loading existing .env if present"
   load_existing_env_defaults || true
 
-  log "Checking Node.js 20+"
+  log "Checking Node.js 20.19+"
   install_node
 
   log "Checking MySQL"
@@ -1420,6 +1423,9 @@ main() {
 
   write_management_command
 
+  date -u +%FT%TZ > "${APP_DIR}/.panel-installed"
+  chmod 600 "${APP_DIR}/.panel-installed"
+
   systemctl --no-pager --full status "${APP_NAME}" || true
 
   base_url="http://$(detect_server_ip):${PORT}"
@@ -1435,12 +1441,14 @@ main() {
   admin_password="$(grep -E '^DEFAULT_ADMIN_PASSWORD=' "${APP_DIR}/.env" | tail -n 1 | cut -d= -f2-)"
   echo
   echo "Installation complete."
+  echo "Version: $(cd "${APP_DIR}" && node -p 'require("./build-info.json").version')"
   echo "User URL:  ${base_url}/"
   admin_path="$(cd "${APP_DIR}" && resolve_admin_path)"
   echo "Admin URL: ${base_url}${admin_path}/"
   echo "API health: ${base_url}/api/health"
   echo "Default admin username: $(grep -E '^DEFAULT_ADMIN_USERNAME=' "${APP_DIR}/.env" | tail -n 1 | cut -d= -f2-)"
   echo "Default admin password: ${admin_password}"
+  echo "Existing admin passwords are preserved. If changed in the website, use the new password instead."
   echo
   echo "Useful commands:"
   echo "systemctl status ${APP_NAME}"
