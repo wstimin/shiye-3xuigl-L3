@@ -264,6 +264,56 @@ export class XuiService {
     });
   }
 
+  async inboundOutbounds(serverId: string) {
+    const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId } });
+    if (!server || server.provider !== 'xui' || !server.enabled) throw new BadRequestException('3x-ui 面板不存在或已停用');
+    const state = await this.loadXrayState(server);
+    return (Array.isArray(state.setting.outbounds) ? state.setting.outbounds : []).map(xuiObject);
+  }
+
+  async confirmInboundOutbound(localId: string, outbound: Record<string, unknown>) {
+    return this.prisma.networkOutbound.update({ where: { id: localId }, data: { normalizedConfig: this.toJsonValue(outbound), remoteFingerprint: this.configFingerprint(outbound), lastSyncedAt: new Date(), ownership: 'managed' } });
+  }
+
+  async createInboundWithOutbound(serverId: string, body: Record<string, unknown>, outboundTag?: string) {
+    return this.withPanelXrayLock(serverId, async () => {
+      const server = await this.prisma.xuiServer.findUnique({ where: { id: serverId } });
+      if (!server || server.provider !== 'xui' || !server.enabled) throw new BadRequestException('3x-ui 面板不存在或已停用');
+      const state = await this.loadXrayState(server);
+      if (outboundTag && !(Array.isArray(state.setting.outbounds) ? state.setting.outbounds : []).some(item => xuiObject(item).tag === outboundTag)) throw new BadRequestException('目标出站尚未在当前面板启用，请先启用出站');
+      const initial = await state.client.listInbounds(); this.assertXuiSuccess(initial);
+      const before = this.xuiArray(initial), port = Number(body.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535 || typeof body.protocol !== 'string' || !body.protocol) throw new BadRequestException('请选择入站协议并填写有效端口');
+      if (before.some(row => Number(xuiObject(row).port) === port)) throw new BadRequestException('所选端口已有入站，请更换空闲端口');
+      const value = { ...body, tag: body.tag || `shiye-${randomUUID()}` };
+      let created: Record<string, unknown> | undefined, routeAttempted = false;
+      const locate = async () => {
+        const response = await state.client.listInbounds(); this.assertXuiSuccess(response);
+        const candidates = this.xuiArray(response).map(xuiObject).filter(row => !before.some(old => this.inboundIdOf(old) === this.inboundIdOf(row)) && Number(row.port) === port && (row.tag === value.tag || row.remark === body.remark));
+        if (candidates.length > 1) throw new BadGatewayException('新入站无法唯一定位，请刷新列表核对');
+        return candidates[0];
+      };
+      try {
+        await this.nativeExecute(serverId, { operation: 'POST /panel/api/inbounds/add', parameters: {}, body: value, confirmed: true });
+        created = await locate(); if (!created || !this.inboundIdOf(created) || !created.tag) throw new BadGatewayException('新入站创建后回读失败');
+        if (outboundTag) {
+          routeAttempted = true;
+          await this.upsertNetworkRoute({ serverId, name: `${String(body.remark || created.tag)} → ${outboundTag}`.slice(0,120), ownership: 'managed', pushRemote: true, conflict: 'reject', rule: { type: 'field', inboundTag: [String(created.tag)], outboundTag } });
+        }
+        return { inboundId: this.inboundIdOf(created), outboundTag, verified: true };
+      } catch (error) {
+        let failed = false;
+        try {
+          if (routeAttempted) await this.restoreXrayState(state);
+          created ||= await locate();
+          if (created) { const result = await state.client.deleteInbound(this.inboundIdOf(created)); this.assertXuiSuccess(result); if (await locate()) throw new Error('temporary inbound remains'); }
+        } catch { failed = true; }
+        if (failed) throw new BadGatewayException('入站或路由创建未完成，自动清理失败，请刷新入站列表核对；已启用的出站会保留');
+        throw error;
+      }
+    });
+  }
+
   private async reconcileNativeClient(client: XuiClient, node: ServiceNode & { server: XuiServer }, renamedEmail?: string) {
     const config = xuiObject(node.config);
     const email = renamedEmail || String(config.remoteClientEmail);
@@ -1929,7 +1979,7 @@ export class XuiService {
 
   async listNetworkOutbounds(serverId?: string) {
     return this.prisma.networkOutbound.findMany({
-      where: { serverId: serverId || undefined },
+      where: { serverId: serverId || undefined, server: { provider: 'xui' } },
       orderBy: { createdAt: 'desc' },
       include: { server: { select: { id: true, name: true, enabled: true } }, _count: { select: { routes: true } } }
     });

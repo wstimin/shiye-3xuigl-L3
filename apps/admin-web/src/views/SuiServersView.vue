@@ -3,6 +3,9 @@ import { randomUuid } from '@shiye/shared';
 import SuiBusinessLink from "../components/SuiBusinessLink.vue";
 import PanelFields from "../components/PanelFields.vue";
 import SuiInboundForm from '../components/SuiInboundForm.vue';
+import InboundOutboundSelect from '../components/InboundOutboundSelect.vue';
+import SuiOutboundImportDialog from '../components/SuiOutboundImportDialog.vue';
+import SavedOutboundList from '../components/SavedOutboundList.vue';
 import { suiInboundProtocols, suiInboundTemplate, validateSuiInbound } from '../sui-inbound-fields';
 import PanelDetails from '../components/PanelDetails.vue';
 import PanelConfig from '../components/PanelConfig.vue';
@@ -63,6 +66,9 @@ const servers = ref<ServerConnection[]>([]);
 const selected = ref<ServerConnection | null>(null);
 const loading = ref(false);
 const busy = ref(false);
+const outboundPicker = ref<InstanceType<typeof InboundOutboundSelect>>(), outboundTag = ref(''), outboundBusy = ref(false), outboundRevision = ref(0);
+const outboundImportOpen = ref(false), outboundVersion = ref(0);
+async function importedOutbounds() { outboundVersion.value++; await refresh(); }
 const error = ref("");
 const search = ref("");
 const resource = ref("clients");
@@ -224,7 +230,7 @@ watch(
     if (!open && props.createServerId) emit('close');
   },
 );
-watch(busy, value => emit('busy', value));
+watch([busy,outboundBusy], ([value,publishing]) => emit('busy', value || publishing));
 const resources = [
   { id: "clients", label: "客户端", icon: Users },
   { id: "inbounds", label: "入站", icon: Network },
@@ -469,6 +475,7 @@ watch(resource, () => {
   if (selected.value) void refresh();
 });
 async function editResource(row?: Row) {
+  outboundTag.value = ''; outboundRevision.value++;
   if (row && ["clients", "inbounds"].includes(resource.value)) {
     busy.value = true;
     try {
@@ -607,6 +614,8 @@ async function editResource(row?: Row) {
   editor.value = true;
 }
 async function saveResource() {
+  if (outboundBusy.value) return;
+  if (resource.value === 'inbounds' && editorAction.value === 'new') { const issue = outboundPicker.value?.validate(); if (issue) { editorError.value = issue; return; } }
   let body;
   try {
     if (resource.value === 'inbounds') validateSuiInbound(editorRecord.value as Row);
@@ -659,9 +668,9 @@ async function saveResource() {
   busy.value = true;
   editorError.value = "";
   try {
-    await api(`/api/admin/sui-servers/${selected.value!.id}/save`, {
+    await api(resource.value === 'inbounds' && editorAction.value === 'new' && outboundTag.value ? `/api/admin/panel-servers/${selected.value!.id}/create-inbound` : `/api/admin/sui-servers/${selected.value!.id}/save`, {
       method: "POST",
-      body,
+      body: resource.value === 'inbounds' && editorAction.value === 'new' && outboundTag.value ? { inbound: body.data, outboundTag: outboundTag.value, confirmed: true } : body,
     });
     ElMessage.success("远端配置已保存");
     if (!props.createServerId) {
@@ -997,6 +1006,7 @@ onMounted(async () => {
             }}</span>
           </h2>
           <div class="hub-actions">
+            <button v-if="resource === 'outbounds'" type="button" class="hub-button" :disabled="busy || loading || !selected.enabled" @click="outboundImportOpen = true">导入出站</button>
             <router-link v-if="resource === 'outbounds'" class="hub-button" to="/network-config?provider=sui&tab=library">SOCKS 模板</router-link>
             <label v-if="rows.length" class="hub-search"
               ><Search :size="16" /><input
@@ -1015,6 +1025,7 @@ onMounted(async () => {
             </button>
           </div>
         </div>
+        <SavedOutboundList v-if="resource === 'outbounds'" :server-id="selected.id" :revision="outboundVersion" @changed="refresh" />
         <div v-if="loading" class="hub-empty" role="status">
           <RefreshCw class="spinning" :size="24" />
           <p>正在读取远端资源…</p>
@@ -1297,7 +1308,7 @@ onMounted(async () => {
               @click="connectionDialog = false"
             >
               取消</button
-            ><button class="hub-button primary" :disabled="busy">
+            ><button class="hub-button primary" :disabled="busy || outboundBusy">
               {{ busy ? "保存中…" : "保存连接" }}
             </button>
           </footer>
@@ -1391,6 +1402,7 @@ onMounted(async () => {
               },
             }"
           />
+          <InboundOutboundSelect v-if="selected && resource === 'inbounds' && editorAction === 'new'" :key="outboundRevision" ref="outboundPicker" v-model="outboundTag" :server-id="selected.id" :disabled="busy" @busy="outboundBusy = $event" />
           <p v-if="editorError" class="form-error" role="alert">
             {{ editorError }}
           </p>
@@ -1416,5 +1428,6 @@ onMounted(async () => {
         </form>
       </section>
     </component>
+    <SuiOutboundImportDialog v-if="selected" v-model="outboundImportOpen" :server-id="selected.id" :server-name="selected.name" @imported="importedOutbounds" />
   </div>
 </template>

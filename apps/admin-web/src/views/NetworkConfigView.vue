@@ -200,6 +200,17 @@ async function renameOutbound(outbound: NetworkOutbound) {
   } catch (cause) { notifyError(cause, '修改出站名称失败'); }
 }
 
+async function enableOutbound(outbound: NetworkOutbound) {
+  if (saving.value) return;
+  saving.value = true;
+  try {
+    await api(`/api/admin/panel-servers/${outbound.serverId}/publish-outbound`, { method: 'POST', body: { source: 'saved:' + outbound.id, confirmed: true } });
+    ElMessage.success('出站已写入目标面板并回读确认');
+    await loadResources();
+  } catch (cause) { notifyError(cause, '启用出站失败'); }
+  finally { saving.value = false; }
+}
+
 function openImportDialog() {
   Object.assign(importForm, {
     serverId: selectedServerId.value || enabledServers.value[0]?.id || '',
@@ -550,7 +561,7 @@ watch(provider, value => { if (value === 'xui') void loadResources(); });
               <td>{{ outbound.protocol }}<small class="resource-note">{{ sourceFormatLabel(outbound.sourceFormat) }}</small></td>
               <td>{{ outbound._count.routes }} 条</td><td>{{ outbound.server.name }}<small class="resource-note">{{ ownershipLabel(outbound.ownership) }}</small></td>
               <td><span class="status-pill" :class="{ off: !outbound.lastSyncedAt }">{{ outbound.lastSyncedAt ? '已同步' : '仅本地' }}</span><small class="resource-note">{{ formatDate(outbound.lastSyncedAt) }}</small></td>
-              <td><div class="hub-actions"><button class="hub-link" @click="renameOutbound(outbound)">改名</button><button class="hub-link" @click="showOutboundConfig(outbound)">详情</button><button class="hub-link danger" :disabled="deletingIds.has(outbound.id)" @click="deleteOutbound(outbound, false)">删除本地</button><button class="hub-link danger" :disabled="!outbound.remoteFingerprint || deletingIds.has(outbound.id)" :title="outbound.ownership === 'managed' ? '删除远端出站与本地记录' : '接管并删除远端出站与本地记录'" @click="deleteOutbound(outbound, true)">删除远端</button></div></td>
+              <td><div class="hub-actions"><button v-if="!outbound.remoteFingerprint" class="hub-link" :disabled="saving" @click="enableOutbound(outbound)">启用到面板</button><button class="hub-link" @click="renameOutbound(outbound)">改名</button><button class="hub-link" @click="showOutboundConfig(outbound)">详情</button><button class="hub-link danger" :disabled="deletingIds.has(outbound.id)" @click="deleteOutbound(outbound, false)">删除本地</button><button class="hub-link danger" :disabled="!outbound.remoteFingerprint || deletingIds.has(outbound.id)" :title="outbound.ownership === 'managed' ? '删除远端出站与本地记录' : '接管并删除远端出站与本地记录'" @click="deleteOutbound(outbound, true)">删除远端</button></div></td>
             </tr>
             <tr v-if="!loading && !filteredOutbounds.length"><td colspan="6" class="table-empty">暂无符合条件的出站，可导入分享链接或配置文件。</td></tr>
           </tbody>

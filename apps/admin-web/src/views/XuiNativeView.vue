@@ -13,6 +13,7 @@ import PanelFields from "../components/PanelFields.vue";
 import PanelDetails from '../components/PanelDetails.vue';
 import PanelConfig from '../components/PanelConfig.vue';
 import PanelOverview from '../components/PanelOverview.vue';
+import InboundOutboundSelect from '../components/InboundOutboundSelect.vue';
 import { xrayInboundProtocols, wireguardKeys, nativeInboundSettings, nativeInboundStream } from '../xray-inbound-fields';
 import { api } from "../api";
 import {
@@ -56,7 +57,8 @@ const search = ref("");
 const loading = ref(false);
 const running = ref(false);
 const confirming = ref(false);
-watch([running, confirming], ([running, confirming]) => emit('busy', running || confirming));
+const outboundPicker = ref<InstanceType<typeof InboundOutboundSelect>>(), outboundTag = ref(''), outboundBusy = ref(false), outboundRevision = ref(0);
+watch([running, confirming, outboundBusy], ([running, confirming, outboundBusy]) => emit('busy', running || confirming || outboundBusy));
 const error = ref("");
 const draft = ref<unknown>({});
 const original = ref<unknown>({});
@@ -326,6 +328,7 @@ async function openSection(id: string) {
 }
 async function choose(item: PanelOperation, row?: PanelRecord) {
   if (loading.value || running.value) return;
+  outboundTag.value = ''; outboundRevision.value++;
   selected.value = item.id;
   error.value = "";
   detail.value = null;
@@ -443,7 +446,8 @@ async function choose(item: PanelOperation, row?: PanelRecord) {
 }
 async function execute() {
   const item = operation.value;
-  if (!item || running.value || loading.value || !prepared.value) return;
+  if (!item || running.value || outboundBusy.value || loading.value || !prepared.value) return;
+  if (/\/inbounds\/add$/.test(item.path)) { const message = outboundPicker.value?.validate(); if (message) { error.value = message; return; } }
   for (const field of item.parameters)
     if (
       field.required &&
@@ -482,7 +486,9 @@ async function execute() {
   running.value = true;
   error.value = "";
   try {
-    const result = await request(
+    const result = /\/inbounds\/add$/.test(item.path) && outboundTag.value
+      ? await api(`/api/admin/panel-servers/${serverId.value}/create-inbound`, { method: 'POST', body: { inbound: encodePanelValue(draft.value, original.value), outboundTag: outboundTag.value, confirmed: true } })
+      : await request(
       item,
       parameters.value,
       item.encoding ? encodePanelValue(draft.value, original.value) : undefined,
@@ -727,11 +733,12 @@ onMounted(async () => {
               :disabled="running"
               @change="upload"
           /></label>
+          <InboundOutboundSelect v-if="prepared && /\/inbounds\/add$/.test(operation.path)" :key="outboundRevision" ref="outboundPicker" v-model="outboundTag" :server-id="serverId" :disabled="running" @busy="outboundBusy = $event" />
           <footer>
             <span v-if="operation.mutates">保存后同步到远端面板</span
             ><button
               class="hub-button primary"
-              :disabled="running || !prepared"
+              :disabled="running || outboundBusy || !prepared"
             >
               {{
                 running
